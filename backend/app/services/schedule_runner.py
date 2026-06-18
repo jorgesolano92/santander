@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
 
-from app.data.schedule_defaults import WEEKDAY_KEYS
+from app.db.schedule_store import WEEKDAY_KEYS
 from app.db import schedule_store
 
 log = logging.getLogger("schedule.runner")
