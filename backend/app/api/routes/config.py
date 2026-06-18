@@ -3,6 +3,8 @@ from fastapi import APIRouter, Query, Body
 from app.hardware.modbus_client import get_boards_config_placeholder, test_board_ports
 from app.db.template_store import get_template_config, set_template_config
 from app.db.tablet_config_store import get_tablet_config_record, set_tablet_config
+from app.db.schedule_store import get_schedule_config, set_schedule_config
+from app.services.schedule_runner import notify_schedule_config_changed
 
 router = APIRouter(prefix="/config")
 
@@ -29,16 +31,16 @@ def put_tablet(config: dict = Body(...)):
     return {**result, "config": config}
 
 
-@router.get("/schedules", summary="Configuración de horarios")
+@router.get("/schedules", summary="Configuración de horarios semanales")
 def get_schedules():
-    """Franjas horarias por modo. (TODO: tabla schedule_slots.)"""
-    return {"schedules": []}
+    return get_schedule_config()
 
 
-@router.put("/schedules", summary="Actualizar horarios")
-def put_schedules():
-    """(TODO: validar y guardar en schedule_slots.)"""
-    return {"ok": True}
+@router.put("/schedules", summary="Actualizar horarios semanales")
+def put_schedules(config: dict = Body(...)):
+    result = set_schedule_config(config)
+    notify_schedule_config_changed()
+    return result
 
 
 @router.get("/holidays", summary="Calendario de festivos")

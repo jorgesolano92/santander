@@ -22,6 +22,7 @@ from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
 from zaguan_esp32 import registrar_callback_pulsacion, router as zaguan_esp32_router
 from app.services import zaguan_orchestrator
+from app.services.schedule_runner import schedule_background_loop
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -84,6 +85,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         log.warning("Bootstrap orquestador zaguán: %s", e)
     retention_task = asyncio.create_task(_events_retention_loop())
+    schedule_task = asyncio.create_task(schedule_background_loop())
     auto_rules_task: Optional[asyncio.Task] = None
     if settings.auto_rules_background_enabled:
         auto_rules_task = asyncio.create_task(_auto_rules_background_loop())
@@ -91,12 +93,17 @@ async def lifespan(app: FastAPI):
     yield
     panel_live_pump.cancel()
     retention_task.cancel()
+    schedule_task.cancel()
     if auto_rules_task:
         auto_rules_task.cancel()
     if coce_ws_task:
         coce_ws_task.cancel()
     try:
         await retention_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await schedule_task
     except asyncio.CancelledError:
         pass
     if auto_rules_task:

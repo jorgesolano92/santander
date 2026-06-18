@@ -4,6 +4,7 @@ import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
+import SchedulesPanel from "./components/schedules/SchedulesPanel";
 import { ZAGUAN_LLAVE_ECHADA } from "./components/zaguan/zaguanConstants";
 import { ruleBlockersActive } from "./utils/panelRuleBlockers";
 import {
@@ -122,6 +123,7 @@ const TABS = [
   "Configuración pulsadores",
   "Configuración template",
   "Configuración tablet",
+  "Horarios",
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
 
@@ -4750,6 +4752,10 @@ export default function ETD8A12Panel() {
 
         {tab === 7 && (
           <TabletConfigPanel apiFetch={apiFetch} onNotify={addUI} />
+        )}
+
+        {tab === 8 && (
+          <SchedulesPanel apiFetch={apiFetch} onNotify={addUI} />
         )}
       </div>
       <style>{`*{box-sizing:border-box} ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:${C.borderMid};border-radius:3px}`}</style>
