@@ -69,6 +69,34 @@ def should_start_tablet_call(pulsador: str, panel_mode: Optional[str]) -> bool:
     return pulsador in _tablet_call_pulsadores()
 
 
+def _call_remaining_seconds(call: ActiveCall) -> int:
+    return max(
+        0,
+        int(settings.tablet_call_timeout_seconds - (time.monotonic() - call.started_at)),
+    )
+
+
+def _is_call_expired(call: ActiveCall) -> bool:
+    return _call_remaining_seconds(call) <= 0
+
+
+async def _purge_stale_active_call() -> Optional[str]:
+    """Elimina llamadas caducadas que el timeout no llegó a limpiar."""
+    global _active_call
+    async with _lock:
+        call = _active_call
+        if not call or call.answered_by is not None:
+            return None
+        if not _is_call_expired(call):
+            return None
+        call_id = call.call_id
+        if call.timeout_task and not call.timeout_task.done():
+            call.timeout_task.cancel()
+        _active_call = None
+    log.info("Llamada tablet expirada (purge) call_id=%s", call_id)
+    return call_id
+
+
 async def register(client_id: str, ws: WebSocket, username: str) -> None:
     async with _lock:
         old = _clients.get(client_id)
@@ -76,9 +104,15 @@ async def register(client_id: str, ws: WebSocket, username: str) -> None:
             _clients.pop(client_id, None)
         _clients[client_id] = TabletClient(client_id=client_id, ws=ws, username=username)
     log.info("Tablet WS registrada id=%s user=%s (total=%s)", client_id, username, len(_clients))
+    await _purge_stale_active_call()
     await _send_to_client(client_id, _intercom_status_message())
     call = _active_call
-    if call and call.answered_by is None and client_id not in call.rejected_clients:
+    if (
+        call
+        and call.answered_by is None
+        and client_id not in call.rejected_clients
+        and not _is_call_expired(call)
+    ):
         await _send_to_client(client_id, _incoming_call_message(call))
 
 
@@ -94,10 +128,7 @@ async def unregister(client_id: str) -> None:
 
 
 def _incoming_call_message(call: ActiveCall) -> dict[str, Any]:
-    remaining = max(
-        0,
-        int(settings.tablet_call_timeout_seconds - (time.monotonic() - call.started_at)),
-    )
+    remaining = _call_remaining_seconds(call)
     return {
         "type": "incoming_call",
         "call_id": call.call_id,
@@ -156,6 +187,7 @@ async def _broadcast_intercom_status() -> None:
 
 
 async def _cancel_call_timeout(call: ActiveCall) -> None:
+    global _active_call
     try:
         await asyncio.sleep(max(1, settings.tablet_call_timeout_seconds))
     except asyncio.CancelledError:
@@ -248,63 +280,66 @@ async def handle_client_message(client_id: str, data: dict[str, Any]) -> None:
 
 async def _answer_call(client_id: str, call_id: str) -> None:
     global _active_call
+    error_msg: Optional[dict[str, Any]] = None
+    taken_msg: Optional[dict[str, Any]] = None
+    accepted_msg: Optional[dict[str, Any]] = None
+    broadcast_taken: Optional[dict[str, Any]] = None
+    other_clients: set[str] = set()
+
     async with _lock:
         call = _active_call
         if not call or call.call_id != call_id:
-            await _send_to_client(
-                client_id,
-                {"type": "call_error", "call_id": call_id, "reason": "not_found"},
-            )
-            return
-        if call.answered_by is not None:
-            await _send_to_client(
-                client_id,
-                {
-                    "type": "call_taken",
-                    "call_id": call_id,
-                    "answered_by": call.answered_username,
-                },
-            )
-            return
-        if client_id in call.rejected_clients:
-            await _send_to_client(
-                client_id,
-                {"type": "call_error", "call_id": call_id, "reason": "rejected"},
-            )
-            return
+            error_msg = {"type": "call_error", "call_id": call_id, "reason": "not_found"}
+        elif call.answered_by is not None:
+            taken_msg = {
+                "type": "call_taken",
+                "call_id": call_id,
+                "answered_by": call.answered_username,
+            }
+        elif client_id in call.rejected_clients:
+            error_msg = {"type": "call_error", "call_id": call_id, "reason": "rejected"}
+        else:
+            client = _clients.get(client_id)
+            if not client:
+                return
+            call.answered_by = client_id
+            call.answered_username = client.username
+            if call.timeout_task and not call.timeout_task.done():
+                call.timeout_task.cancel()
+            door = call.door
+            answered_username = client.username
+            other_clients = {cid for cid in _clients if cid != client_id}
+            _active_call = None
+            accepted_msg = {
+                "type": "call_accepted",
+                "call_id": call_id,
+                "door": door,
+                "door_label": DOOR_LABELS.get(door, door.upper()),
+            }
+            broadcast_taken = {
+                "type": "call_taken",
+                "call_id": call_id,
+                "answered_by": answered_username,
+            }
 
-        client = _clients.get(client_id)
-        if not client:
-            return
+    if error_msg:
+        await _send_to_client(client_id, error_msg)
+        return
+    if taken_msg:
+        await _send_to_client(client_id, taken_msg)
+        return
+    if not accepted_msg:
+        return
 
-        call.answered_by = client_id
-        call.answered_username = client.username
-        if call.timeout_task and not call.timeout_task.done():
-            call.timeout_task.cancel()
-
-        answered_username = client.username
-        door = call.door
-        other_clients = {cid for cid in _clients if cid != client_id}
-        _active_call = None
-
-    await _send_to_client(
+    await _send_to_client(client_id, accepted_msg)
+    if broadcast_taken and other_clients:
+        await _broadcast(broadcast_taken, only=other_clients)
+    log.info(
+        "Llamada contestada call_id=%s door=%s client=%s",
+        call_id,
+        accepted_msg.get("door"),
         client_id,
-        {
-            "type": "call_accepted",
-            "call_id": call_id,
-            "door": door,
-            "door_label": DOOR_LABELS.get(door, door.upper()),
-        },
     )
-    await _broadcast(
-        {
-            "type": "call_taken",
-            "call_id": call_id,
-            "answered_by": answered_username,
-        },
-        only=other_clients,
-    )
-    log.info("Llamada contestada call_id=%s por %s (%s)", call_id, answered_username, client_id)
 
 
 async def _reject_call(client_id: str, call_id: str) -> None:
