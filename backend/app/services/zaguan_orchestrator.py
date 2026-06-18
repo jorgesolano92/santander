@@ -47,8 +47,8 @@ WINHOSE_EDGE_GRACE_S = 3.0
 # Presencia zaguán (placa 2 IN10 + placa 3 IN10): único criterio para bloquear entradas P1/P2.
 OCCUPANCY_INPUT_CODES = ("IN_02_10", "IN_03_10")
 ZAGUAN_OCCUPANCY_MODES = frozenset({"horario_autoservicio", "horario_extendido"})
-# Extendido p2→tablet: pendiente app tablet; mientras tanto p2 abre P2 como esclusa.
-EXTENDIDO_TABLET_CALL_ENABLED = False
+# Extendido p2 exterior: llamada a consola/tablet antes de apertura de P2.
+EXTENDIDO_TABLET_CALL_ENABLED = True
 DOOR_PULSE_OFF_SECONDS = 5.0
 # Tras el pulso Modbus (~5 s), si el inductivo no marca apertura, volver LED a libre.
 DOOR_LED_REPOSO_AFTER_S = DOOR_PULSE_OFF_SECONDS + 1.5
@@ -1219,12 +1219,15 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
 
     from app.services import tablet_call_hub
 
-    if tablet_call_hub.should_start_tablet_call(pulsador, panel_mode):
+    is_extendido_p2 = _current_mode == "horario_extendido" and pulsador == "p2"
+    if (not is_extendido_p2) and tablet_call_hub.should_start_tablet_call(
+        pulsador, panel_mode
+    ):
         door = PULSADOR_TO_DOOR[pulsador]
         call_result = await tablet_call_hub.start_call(
             door=door,
             pulsador=pulsador,
-            mode=panel_mode or "",
+            mode=panel_mode or _current_mode or "",
         )
         _record(
             "zaguan_tablet_call",
@@ -1232,7 +1235,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             {
                 "pulsador": pulsador,
                 "door": door,
-                "mode": panel_mode,
+                "mode": panel_mode or _current_mode,
                 "ts": ts,
                 **call_result,
             },
@@ -1241,7 +1244,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             "ok": True,
             "pulsador": pulsador,
             "door": door,
-            "mode": panel_mode,
+            "mode": panel_mode or _current_mode,
             "tablet_call": True,
             "modbus_ok": False,
             "call_id": call_result.get("call_id"),
@@ -1268,14 +1271,33 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
         and _current_mode == "horario_extendido"
         and pulsador == "p2"
     ):
+        call_result = await tablet_call_hub.start_call(
+            door=door,
+            pulsador=pulsador,
+            mode=panel_mode or _current_mode or "",
+        )
         _start_extendido_p2_call()
+        _record(
+            "zaguan_tablet_call",
+            f"Llamada tablet {pulsador} → {door}",
+            {
+                "pulsador": pulsador,
+                "door": door,
+                "mode": panel_mode or _current_mode,
+                "ts": ts,
+                "extendido_call": True,
+                **call_result,
+            },
+        )
         return {
             "ok": True,
             "pulsador": pulsador,
             "door": door,
-            "mode": _current_mode,
+            "mode": panel_mode or _current_mode,
+            "tablet_call": True,
             "extendido_call": True,
             "modbus_ok": False,
+            "call_id": call_result.get("call_id"),
         }
 
     if (
