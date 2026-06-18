@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import WebSocket
 
 from app.core.config import settings
+from app.db.tablet_config_store import get_tablet_call_settings
 
 log = logging.getLogger("tablet.call")
 
@@ -49,20 +50,48 @@ _intercom_door: Optional[str] = None
 _lock = asyncio.Lock()
 
 
+def _tablet_call_cfg() -> dict:
+    try:
+        return get_tablet_call_settings()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _tablet_call_enabled() -> bool:
+    tc = _tablet_call_cfg()
+    if "enabled" in tc:
+        return bool(tc["enabled"])
+    return bool(settings.tablet_call_enabled)
+
+
 def _tablet_call_modes() -> frozenset[str]:
-    raw = (settings.tablet_call_modes or "").strip()
+    tc = _tablet_call_cfg()
+    raw = (tc.get("modes") if tc.get("modes") is not None else settings.tablet_call_modes) or ""
+    raw = str(raw).strip()
     if not raw:
         return frozenset()
     return frozenset(m.strip() for m in raw.split(",") if m.strip())
 
 
 def _tablet_call_pulsadores() -> frozenset[str]:
-    raw = (settings.tablet_call_pulsadores or "p1").strip()
+    tc = _tablet_call_cfg()
+    raw = (tc.get("pulsadores") if tc.get("pulsadores") is not None else settings.tablet_call_pulsadores) or "p1"
+    raw = str(raw).strip()
     return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
+def _tablet_call_timeout_seconds() -> int:
+    tc = _tablet_call_cfg()
+    if tc.get("timeoutSeconds") is not None:
+        try:
+            return max(5, int(tc["timeoutSeconds"]))
+        except (TypeError, ValueError):
+            pass
+    return max(5, int(settings.tablet_call_timeout_seconds))
+
+
 def should_start_tablet_call(pulsador: str, panel_mode: Optional[str]) -> bool:
-    if not settings.tablet_call_enabled:
+    if not _tablet_call_enabled():
         return False
     if not panel_mode or panel_mode not in _tablet_call_modes():
         return False
@@ -72,7 +101,7 @@ def should_start_tablet_call(pulsador: str, panel_mode: Optional[str]) -> bool:
 def _call_remaining_seconds(call: ActiveCall) -> int:
     return max(
         0,
-        int(settings.tablet_call_timeout_seconds - (time.monotonic() - call.started_at)),
+        int(_tablet_call_timeout_seconds() - (time.monotonic() - call.started_at)),
     )
 
 
@@ -136,7 +165,7 @@ def _incoming_call_message(call: ActiveCall) -> dict[str, Any]:
         "door_label": DOOR_LABELS.get(call.door, call.door.upper()),
         "pulsador": call.pulsador,
         "mode": call.mode,
-        "timeout_seconds": settings.tablet_call_timeout_seconds,
+        "timeout_seconds": _tablet_call_timeout_seconds(),
         "remaining_seconds": remaining,
     }
 
@@ -189,7 +218,7 @@ async def _broadcast_intercom_status() -> None:
 async def _cancel_call_timeout(call: ActiveCall) -> None:
     global _active_call
     try:
-        await asyncio.sleep(max(1, settings.tablet_call_timeout_seconds))
+        await asyncio.sleep(max(1, _tablet_call_timeout_seconds()))
     except asyncio.CancelledError:
         return
     async with _lock:

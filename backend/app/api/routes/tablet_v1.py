@@ -12,6 +12,7 @@ from app.api.routes import panel
 from app.core.config import settings
 from app.db import system_events_store as ses
 from app.db import tablet_users_store as tus
+from app.db.tablet_config_store import get_tablet_config_record
 from app.services import tablet_jwt
 from app.services.tablet_password import hash_password, verify_password
 
@@ -109,6 +110,18 @@ def list_modes(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
 @router.get("/get_mode")
 def get_mode(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
     return {"current_mode": panel.api_v1_get_current_mode()}
+
+
+@router.get("/tablet-config")
+def get_tablet_config(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    """Configuración por defecto de la sucursal para tablets."""
+    return get_tablet_config_record()
+
+
+@router.get("/tablet-config/revision")
+def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    rec = get_tablet_config_record()
+    return {"revision": rec.get("revision"), "updated_at": rec.get("updated_at")}
 
 
 class SetModeBody(BaseModel):

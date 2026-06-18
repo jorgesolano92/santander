@@ -3,6 +3,7 @@ import { clearPanelToken, getPanelToken, getPanelWsLiveUrl } from "./panelAuth";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
+import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import { ZAGUAN_LLAVE_ECHADA } from "./components/zaguan/zaguanConstants";
 import { ruleBlockersActive } from "./utils/panelRuleBlockers";
 import {
@@ -120,6 +121,7 @@ const TABS = [
   "Definición placas",
   "Configuración pulsadores",
   "Configuración template",
+  "Configuración tablet",
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
 
@@ -4744,6 +4746,10 @@ export default function ETD8A12Panel() {
             onReset1={resetTemplateConfig1}
             onReset2={resetTemplateConfig2}
           />
+        )}
+
+        {tab === 7 && (
+          <TabletConfigPanel apiFetch={apiFetch} onNotify={addUI} />
         )}
       </div>
       <style>{`*{box-sizing:border-box} ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:${C.borderMid};border-radius:3px}`}</style>

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Query, Body
 from app.hardware.modbus_client import get_boards_config_placeholder, test_board_ports
 from app.db.template_store import get_template_config, set_template_config
+from app.db.tablet_config_store import get_tablet_config_record, set_tablet_config
 
 router = APIRouter(prefix="/config")
 
@@ -15,6 +16,17 @@ def get_template():
 def put_template(config: dict = Body(...)):
     set_template_config(config)
     return {"ok": True}
+
+
+@router.get("/tablet", summary="Configuración por defecto de tablets (sucursal)")
+def get_tablet():
+    return get_tablet_config_record()
+
+
+@router.put("/tablet", summary="Guardar configuración por defecto de tablets")
+def put_tablet(config: dict = Body(...)):
+    result = set_tablet_config(config)
+    return {**result, "config": config}
 
 
 @router.get("/schedules", summary="Configuración de horarios")
