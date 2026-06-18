@@ -1,6 +1,8 @@
 /**
  * Configuración por defecto de tablets en el panel web (espejo del backend).
  */
+import { useEffect, useState } from "react";
+
 export const DEFAULT_TABLET_PANEL_CONFIG = {
   doors: [
     {
