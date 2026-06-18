@@ -249,6 +249,13 @@ def _import_panel():
     return panel
 
 
+def _read_panel_mode() -> Optional[str]:
+    try:
+        return _import_panel().api_v1_get_current_mode()
+    except Exception:  # noqa: BLE001
+        return _current_mode
+
+
 def _import_zaguan_mem():
     import zaguan_esp32
 
@@ -1201,7 +1208,44 @@ def _pulsador_allowed_in_mode(pulsador: PulsadorId) -> tuple[bool, str]:
 
 
 async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
-    log.info("Orquestador pulsación %s (modo=%s, ts=%s)", pulsador, _current_mode, ts)
+    panel_mode = _read_panel_mode()
+    log.info(
+        "Orquestador pulsación %s (modo=%s, panel=%s, ts=%s)",
+        pulsador,
+        _current_mode,
+        panel_mode,
+        ts,
+    )
+
+    from app.services import tablet_call_hub
+
+    if tablet_call_hub.should_start_tablet_call(pulsador, panel_mode):
+        door = PULSADOR_TO_DOOR[pulsador]
+        call_result = await tablet_call_hub.start_call(
+            door=door,
+            pulsador=pulsador,
+            mode=panel_mode or "",
+        )
+        _record(
+            "zaguan_tablet_call",
+            f"Llamada tablet {pulsador} → {door}",
+            {
+                "pulsador": pulsador,
+                "door": door,
+                "mode": panel_mode,
+                "ts": ts,
+                **call_result,
+            },
+        )
+        return {
+            "ok": True,
+            "pulsador": pulsador,
+            "door": door,
+            "mode": panel_mode,
+            "tablet_call": True,
+            "modbus_ok": False,
+            "call_id": call_result.get("call_id"),
+        }
 
     allowed, reason = _pulsador_allowed_in_mode(pulsador)
     if not allowed:

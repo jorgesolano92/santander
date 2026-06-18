@@ -102,8 +102,8 @@ class Settings(BaseSettings):
     static_dir: Optional[str] = None
 
     # Dispositivo ESP32 zaguán (cliente HTTP saliente backend -> ESP32)
-    zaguan_device_host: str = "192.168.10.20"
-    zaguan_device_port: int = 80
+    zaguan_device_host: str = "192.168.1.60"
+    zaguan_device_port: int = 8000
     zaguan_device_timeout_s: float = 2.0
 
     # Canal COCE central (WebSocket saliente + heartbeat)
@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     coce_ingest_token: str = ""
     coce_heartbeat_interval_seconds: int = 60
     coce_reconnect_seconds: int = 5
+
+    # Llamada P1 → tablets (WebSocket)
+    tablet_call_enabled: bool = True
+    tablet_call_timeout_seconds: int = 30
+    # rule_key del panel (coma-separados): horario_manual, horario_carga_cajero, …
+    tablet_call_modes: str = "horario_manual,horario_carga_cajero"
+    tablet_call_pulsadores: str = "p1"
 
     @model_validator(mode="after")
     def normalize_api_prefix(self) -> "Settings":
