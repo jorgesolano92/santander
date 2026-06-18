@@ -2,7 +2,7 @@
 Orquestador zaguán: LEDs ESP32 + apertura Modbus según modo operativo.
 
 Modos implementados: horario_automatico, horario_esclusa, horario_autoservicio,
-horario_extendido, horario_cerrado.
+horario_extendido, horario_carga_cajero, horario_cerrado.
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ SUPPORTED_MODES = frozenset(
         "horario_esclusa",
         "horario_autoservicio",
         "horario_extendido",
+        "horario_carga_cajero",
         "horario_cerrado",
     }
 )
@@ -83,6 +84,14 @@ INITIAL_LED_BY_MODE: dict[str, dict[PulsadorId, EstadoLed]] = {
         "p2": "libre",
         "p3": "libre",
         "p4": "libre",
+    },
+    "horario_carga_cajero": {
+        # Reposo carga cajero:
+        # p1 exterior = ocupado, p1 interior = libre, p2 exterior = abriendo, p2 interior = abriendo.
+        "p1": "ocupado",
+        "p2": "abriendo",
+        "p3": "libre",
+        "p4": "abriendo",
     },
     "horario_cerrado": {
         "p1": "apagado",
@@ -204,6 +213,8 @@ def _cancel_scheduled(task: Optional[ScheduledTask]) -> None:
 _extendido_p2_call_pending: bool = False
 _p3_intermittent: bool = False
 _p3_intermittent_task: Optional[asyncio.Task] = None
+# Carga cajero: p1/p3 disparan llamada a consola; apertura de P1 tras confirmación.
+_carga_p1_call_pending: bool = False
 
 
 def get_led_states() -> dict[str, EstadoLed]:
@@ -236,6 +247,7 @@ def get_autoservicio_status() -> dict[str, Any]:
         "zaguan_occupied": _zaguan_occupied(),
         "extendido_p2_call_pending": _extendido_p2_call_pending,
         "p3_intermittent": _p3_intermittent,
+        "carga_p1_call_pending": _carga_p1_call_pending,
     }
 
 
@@ -452,6 +464,11 @@ def _reset_extendido_state() -> None:
     _p3_intermittent_task = None
 
 
+def _reset_carga_state() -> None:
+    global _carga_p1_call_pending
+    _carga_p1_call_pending = False
+
+
 def _stop_p3_intermittent() -> None:
     global _p3_intermittent, _p3_intermittent_task
     _p3_intermittent = False
@@ -510,6 +527,26 @@ def _start_extendido_p2_call() -> None:
         pass
 
 
+def _carga_cajero_reposo() -> None:
+    _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_carga_cajero"]))
+
+
+def _start_carga_p1_call(pulsador: PulsadorId) -> None:
+    global _carga_p1_call_pending
+    _carga_p1_call_pending = True
+    _carga_cajero_reposo()
+    _record(
+        "zaguan_carga_cajero_call",
+        f"Carga cajero: llamada consola {pulsador} (P1)",
+        {"pulsador": pulsador, "mode": _current_mode},
+    )
+
+
+def _clear_carga_p1_call() -> None:
+    global _carga_p1_call_pending
+    _carga_p1_call_pending = False
+
+
 def _autoservicio_reposo() -> None:
     """Excel ATM reposo: P1 verde, P2 ext rojo, P1 int y P2 int verde."""
     _stop_all_winhose_intermittent()
@@ -525,6 +562,8 @@ def _cerrado_reposo() -> None:
 def _mode_reposo() -> None:
     if _current_mode == "horario_autoservicio":
         _autoservicio_reposo()
+    elif _current_mode == "horario_carga_cajero":
+        _carga_cajero_reposo()
     elif _current_mode == "horario_cerrado":
         _cerrado_reposo()
 
@@ -926,6 +965,7 @@ def on_mode_changed(mode: Optional[str]) -> None:
     _door_closed_streak["p2"] = 0
     _reset_winhose_state()
     _reset_extendido_state()
+    _reset_carga_state()
 
     if mode not in SUPPORTED_MODES:
         log.info("Modo %s sin orquestación LED zaguán", mode)
@@ -983,6 +1023,17 @@ def on_rule_executed(rule_key: str, result: dict[str, Any]) -> None:
             return
         if EXTENDIDO_TABLET_CALL_ENABLED and door == "p2":
             _clear_extendido_p2_call()
+    elif _current_mode == "horario_carga_cajero":
+        if door != "p1":
+            return
+        ok, reason = _can_open_in_interlock("p1")
+        if not ok:
+            log.info("Carga cajero: apertura P1 bloqueada: %s", reason)
+            return
+        if not _carga_p1_call_pending:
+            log.info("Carga cajero: apertura P1 ignorada (sin llamada consola pendiente)")
+            return
+        _clear_carga_p1_call()
     elif _current_mode == "horario_cerrado":
         ok, _ = _can_open_in_interlock(door)
         if not ok:
@@ -1106,6 +1157,9 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
         _automatico_post_close(door)
     elif _current_mode in INTERLOCK_MODES:
         _sync_interlock_leds()
+    elif _current_mode == "horario_carga_cajero":
+        _clear_carga_p1_call()
+        _carga_cajero_reposo()
     _record(
         "zaguan_door_closed",
         f"Puerta {door} cerrada — LED actualizado ({source})",
@@ -1204,6 +1258,12 @@ def _pulsador_allowed_in_mode(pulsador: PulsadorId) -> tuple[bool, str]:
     if _current_mode == "horario_cerrado":
         return _can_open_cerrado(pulsador)
 
+    if _current_mode == "horario_carga_cajero":
+        if pulsador in ("p1", "p3"):
+            # Requiere autorización consola; la validación final se hace en on_rule_executed.
+            return True, ""
+        return False, "Carga cajero: solo P1 exterior/interior generan llamada a consola"
+
     return True, ""
 
 
@@ -1219,8 +1279,52 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
 
     from app.services import tablet_call_hub
 
-    is_extendido_p2 = _current_mode == "horario_extendido" and pulsador == "p2"
-    if (not is_extendido_p2) and tablet_call_hub.should_start_tablet_call(
+    force_extendido_tablet_call = (
+        EXTENDIDO_TABLET_CALL_ENABLED
+        and _current_mode == "horario_extendido"
+        and pulsador == "p2"
+    )
+    force_carga_tablet_call = _current_mode == "horario_carga_cajero" and pulsador in (
+        "p1",
+        "p3",
+    )
+    if force_extendido_tablet_call or force_carga_tablet_call:
+        door = PULSADOR_TO_DOOR[pulsador]
+        call_result = await tablet_call_hub.start_call(
+            door=door,
+            pulsador=pulsador,
+            mode=panel_mode or _current_mode or "",
+        )
+        if force_extendido_tablet_call:
+            _start_extendido_p2_call()
+        if force_carga_tablet_call:
+            _start_carga_p1_call(pulsador)
+        _record(
+            "zaguan_tablet_call",
+            f"Llamada tablet {pulsador} → {door}",
+            {
+                "pulsador": pulsador,
+                "door": door,
+                "mode": panel_mode or _current_mode,
+                "ts": ts,
+                "extendido_call": force_extendido_tablet_call,
+                "carga_cajero_call": force_carga_tablet_call,
+                **call_result,
+            },
+        )
+        return {
+            "ok": True,
+            "pulsador": pulsador,
+            "door": door,
+            "mode": panel_mode or _current_mode,
+            "tablet_call": True,
+            "extendido_call": force_extendido_tablet_call,
+            "carga_cajero_call": force_carga_tablet_call,
+            "modbus_ok": False,
+            "call_id": call_result.get("call_id"),
+        }
+
+    if tablet_call_hub.should_start_tablet_call(
         pulsador, panel_mode
     ):
         door = PULSADOR_TO_DOOR[pulsador]
@@ -1265,40 +1369,6 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
 
     if _current_mode in WINHOSE_MODES and pulsador in ("p1", "p2"):
         _clear_winhose_window(PULSADOR_TO_DOOR[pulsador])
-
-    if (
-        EXTENDIDO_TABLET_CALL_ENABLED
-        and _current_mode == "horario_extendido"
-        and pulsador == "p2"
-    ):
-        call_result = await tablet_call_hub.start_call(
-            door=door,
-            pulsador=pulsador,
-            mode=panel_mode or _current_mode or "",
-        )
-        _start_extendido_p2_call()
-        _record(
-            "zaguan_tablet_call",
-            f"Llamada tablet {pulsador} → {door}",
-            {
-                "pulsador": pulsador,
-                "door": door,
-                "mode": panel_mode or _current_mode,
-                "ts": ts,
-                "extendido_call": True,
-                **call_result,
-            },
-        )
-        return {
-            "ok": True,
-            "pulsador": pulsador,
-            "door": door,
-            "mode": panel_mode or _current_mode,
-            "tablet_call": True,
-            "extendido_call": True,
-            "modbus_ok": False,
-            "call_id": call_result.get("call_id"),
-        }
 
     if (
         EXTENDIDO_TABLET_CALL_ENABLED
