@@ -401,18 +401,63 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
               <Field label="Contraseña ONVIF">
                 <input style={inputStyle()} type="password" value={intercom.onvifPassword || ""} onChange={(e) => patchDoorIntercom(doorIndex, "onvifPassword", e.target.value)} />
               </Field>
-              <Field label="SDIO12 usuario">
+              <Field label="Usuario control puertas">
                 <input style={inputStyle()} value={intercom.doorControlUsername || ""} onChange={(e) => patchDoorIntercom(doorIndex, "doorControlUsername", e.target.value)} />
               </Field>
-              <Field label="SDIO12 contraseña">
+              <Field label="Contraseña control puertas">
                 <input style={inputStyle()} type="password" value={intercom.doorControlPassword || ""} onChange={(e) => patchDoorIntercom(doorIndex, "doorControlPassword", e.target.value)} />
               </Field>
-              <Field label="SDIO12 PCB">
-                <input style={inputStyle()} type="number" value={intercom.doorControlPCB ?? 1} onChange={(e) => patchDoorIntercom(doorIndex, "doorControlPCB", Number(e.target.value))} />
+              <Field label="Acción apertura">
+                <select
+                  style={inputStyle()}
+                  value={intercom.doorControlAction || "set_output"}
+                  onChange={(e) => patchDoorIntercom(doorIndex, "doorControlAction", e.target.value)}
+                >
+                  <option value="set_output">set_output (OUT)</option>
+                  <option value="set_rule">set_rule (regla panel)</option>
+                  <option value="door_endpoint">Endpoint pulsadores</option>
+                </select>
               </Field>
-              <Field label="SDIO12 switch">
-                <input style={inputStyle()} type="number" value={intercom.doorControlSwitch ?? 1} onChange={(e) => patchDoorIntercom(doorIndex, "doorControlSwitch", Number(e.target.value))} />
-              </Field>
+              {(intercom.doorControlAction || "set_output") === "set_rule" && (
+                <Field label="Rule key">
+                  <input
+                    style={inputStyle()}
+                    value={intercom.doorControlRuleKey || ""}
+                    onChange={(e) => patchDoorIntercom(doorIndex, "doorControlRuleKey", e.target.value)}
+                    placeholder="interfono_puerta_calle_interior"
+                  />
+                </Field>
+              )}
+              {(intercom.doorControlAction || "set_output") === "door_endpoint" && (
+                <Field label="Endpoint pulsadores (POST)">
+                  <input
+                    style={inputStyle()}
+                    value={intercom.doorControlEndpoint || ""}
+                    onChange={(e) => patchDoorIntercom(doorIndex, "doorControlEndpoint", e.target.value)}
+                    placeholder={`/api/v1/door/open/p${doorIndex + 1}`}
+                  />
+                </Field>
+              )}
+              {(intercom.doorControlAction || "set_output") === "set_output" && (
+                <>
+                  <Field label="PCB">
+                    <input style={inputStyle()} type="number" value={intercom.doorControlPCB ?? 1} onChange={(e) => patchDoorIntercom(doorIndex, "doorControlPCB", Number(e.target.value))} />
+                  </Field>
+                  <Field label="Switch">
+                    <input style={inputStyle()} type="number" value={intercom.doorControlSwitch ?? 1} onChange={(e) => patchDoorIntercom(doorIndex, "doorControlSwitch", Number(e.target.value))} />
+                  </Field>
+                  <Field label="Modo OUT">
+                    <select
+                      style={inputStyle()}
+                      value={intercom.doorOutputMode || "auto"}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "doorOutputMode", e.target.value)}
+                    >
+                      <option value="auto">Auto (pulso)</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </Field>
+                </>
+              )}
             </div>
           </>
         )}
