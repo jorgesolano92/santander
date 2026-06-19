@@ -2,7 +2,7 @@
 Orquestador zaguán: LEDs ESP32 + apertura Modbus según modo operativo.
 
 Modos implementados: horario_automatico, horario_esclusa, horario_autoservicio,
-horario_extendido, horario_carga_cajero, horario_cerrado.
+horario_extendido, horario_carga_cajero, horario_manual, horario_cerrado.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ SUPPORTED_MODES = frozenset(
         "horario_autoservicio",
         "horario_extendido",
         "horario_carga_cajero",
+        "horario_manual",
         "horario_cerrado",
     }
 )
@@ -92,6 +93,13 @@ INITIAL_LED_BY_MODE: dict[str, dict[PulsadorId, EstadoLed]] = {
         "p2": "abriendo",
         "p3": "libre",
         "p4": "abriendo",
+    },
+    "horario_manual": {
+        # Reposo manual: 4 canales en libre.
+        "p1": "libre",
+        "p2": "libre",
+        "p3": "libre",
+        "p4": "libre",
     },
     "horario_cerrado": {
         "p1": "apagado",
@@ -215,6 +223,9 @@ _p3_intermittent: bool = False
 _p3_intermittent_task: Optional[asyncio.Task] = None
 # Carga cajero: p1/p3 disparan llamada a consola; apertura de P1 tras confirmación.
 _carga_p1_call_pending: bool = False
+# Manual/carga: bulones (OUT_x_01/02) activos por el modo; se sueltan al abrir y se restauran al cerrar.
+TABLET_LOCK_RELEASE_MODES = frozenset({"horario_manual", "horario_carga_cajero"})
+_locks_to_restore: dict[PuertaId, list[str]] = {"p1": [], "p2": []}
 
 
 def get_led_states() -> dict[str, EstadoLed]:
@@ -564,6 +575,8 @@ def _mode_reposo() -> None:
         _autoservicio_reposo()
     elif _current_mode == "horario_carga_cajero":
         _carga_cajero_reposo()
+    elif _current_mode == "horario_manual":
+        _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_manual"]))
     elif _current_mode == "horario_cerrado":
         _cerrado_reposo()
 
@@ -797,18 +810,85 @@ def _cerrado_exterior_uses_direct_pulse(pulsador: PulsadorId) -> bool:
     return _current_mode == "horario_cerrado" and pulsador in ("p1", "p2")
 
 
+def _output_is_on(out_code: str) -> bool:
+    panel = _import_panel()
+    board_id, channel = panel._parse_out_code(out_code)  # noqa: SLF001
+    return bool(panel._read_output_cached(board_id, channel))  # noqa: SLF001
+
+
+def _set_output_direct(out_code: str, on: bool) -> None:
+    """Escribe salida Modbus sin pasar por el hook de apertura tablet."""
+    panel = _import_panel()
+    board_id, channel = panel._parse_out_code(out_code)  # noqa: SLF001
+    if not panel.io_state.get(board_id, {}).get("connected"):
+        panel._connect_board(board_id)  # noqa: SLF001
+    panel._write_output(board_id, channel, on)  # noqa: SLF001
+
+
+def _door_for_open_output(code: str) -> Optional[PuertaId]:
+    for door, out_code in DOOR_OPEN_OUTPUT.items():
+        if out_code == code:
+            return door
+    return None
+
+
+def _validate_tablet_door_open(door: PuertaId) -> tuple[bool, str]:
+    if _current_mode == "horario_carga_cajero":
+        if door != "p1":
+            return False, "Carga cajero: solo P1"
+        if not _carga_p1_call_pending:
+            return False, "Sin llamada consola pendiente"
+    return _can_open_in_interlock(door)
+
+
+def _finalize_tablet_door_open(door: PuertaId, *, source: str) -> None:
+    if _current_mode == "horario_carga_cajero":
+        _clear_carga_p1_call()
+    _set_door_abriendo(door, source=source)
+
+
+def _release_locks_before_open(door: PuertaId) -> list[str]:
+    """Fuerza OFF en bulones OUT_x_01/02 del modo antes de abrir (cache puede no reflejar hardware)."""
+    released: list[str] = []
+    for lock_code in DOOR_LOCK_OUTPUTS[door]:
+        was_on = _output_is_on(lock_code)
+        _set_output_direct(lock_code, False)
+        released.append(lock_code)
+        log.info(
+            "Bulones OFF antes apertura %s: %s (cache_on=%s)",
+            door,
+            lock_code,
+            was_on,
+        )
+    _locks_to_restore[door] = released
+    return released
+
+
+def _restore_locks_after_close(door: PuertaId) -> None:
+    """Vuelve a activar los bulones que se soltaron para abrir desde tablet."""
+    pending = _locks_to_restore.get(door) or []
+    if not pending:
+        return
+    for lock_code in pending:
+        _set_output_direct(lock_code, True)
+        log.info("Bulones ON tras cierre %s: %s", door, lock_code)
+    _locks_to_restore[door] = []
+
+
+def _door_pulse_with_locks_sync(door: PuertaId, *, restore_locks: bool) -> None:
+    """Libera bulones, pulsa apertura; en manual/carga restaura bulones solo al cerrar puerta."""
+    open_code = DOOR_OPEN_OUTPUT[door]
+    _release_locks_before_open(door)
+    _set_output_direct(open_code, True)
+    time.sleep(DOOR_INTERFONO_PULSE_SECONDS)
+    _set_output_direct(open_code, False)
+    if restore_locks:
+        _restore_locks_after_close(door)
+
+
 async def _door_pulse_with_locks(door: PuertaId, *, restore_locks: bool) -> None:
     """Replica interfono: libera cierres, pulsa apertura, restaura cierres en cerrado."""
-    panel = _import_panel()
-    open_code = DOOR_OPEN_OUTPUT[door]
-    for lock_code in DOOR_LOCK_OUTPUTS[door]:
-        await asyncio.to_thread(panel.api_v1_set_output_by_code, lock_code, False)
-    await asyncio.to_thread(panel.api_v1_set_output_by_code, open_code, True)
-    await asyncio.sleep(DOOR_INTERFONO_PULSE_SECONDS)
-    await asyncio.to_thread(panel.api_v1_set_output_by_code, open_code, False)
-    if restore_locks:
-        for lock_code in DOOR_LOCK_OUTPUTS[door]:
-            await asyncio.to_thread(panel.api_v1_set_output_by_code, lock_code, True)
+    await asyncio.to_thread(_door_pulse_with_locks_sync, door, restore_locks=restore_locks)
 
 
 async def _execute_cerrado_exterior_pulse(door: PuertaId) -> dict[str, Any]:
@@ -819,6 +899,96 @@ async def _execute_cerrado_exterior_pulse(door: PuertaId) -> dict[str, Any]:
         "locks_released": list(DOOR_LOCK_OUTPUTS[door]),
         "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
         "reason": "cerrado_exterior_winhose",
+    }
+
+
+def execute_tablet_door_open_sync(rule_key: str) -> Optional[dict[str, Any]]:
+    """
+    Apertura vía regla interfono desde tablet (si la app usa set_rule).
+    """
+    if _current_mode not in TABLET_LOCK_RELEASE_MODES:
+        return None
+    if not rule_key.startswith("interfono_puerta_"):
+        return None
+
+    door = _rule_opens_door(rule_key)
+    if not door:
+        return None
+
+    ok, reason = _validate_tablet_door_open(door)
+    if not ok:
+        return {"executed": False, "rule": rule_key, "reason": reason}
+
+    try:
+        _door_pulse_with_locks_sync(door, restore_locks=False)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Error apertura tablet %s (%s): %s", rule_key, door, e)
+        return {"executed": False, "rule": rule_key, "reason": str(e)}
+
+    _finalize_tablet_door_open(door, source=f"tablet:rule:{rule_key}")
+    released = list(_locks_to_restore.get(door) or [])
+    log.info(
+        "Apertura tablet regla %s puerta %s (modo=%s, bulones=%s)",
+        rule_key,
+        door,
+        _current_mode,
+        released,
+    )
+    return {
+        "executed": True,
+        "rule": rule_key,
+        "door": door,
+        "mode": _current_mode,
+        "locks_released": released,
+        "locks_restore_on_close": True,
+        "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
+    }
+
+
+def execute_tablet_door_output_sync(code: str, on: bool) -> Optional[dict[str, Any]]:
+    """
+    Apertura vía set_output (OUT_02_07 / OUT_03_07) — flujo real de la app tablet.
+    """
+    if _current_mode not in TABLET_LOCK_RELEASE_MODES:
+        return None
+    door = _door_for_open_output(code)
+    if not door:
+        return None
+    if not on:
+        return None
+
+    ok, reason = _validate_tablet_door_open(door)
+    if not ok:
+        log.info("Apertura tablet %s rechazada: %s", code, reason)
+        return {"executed": False, "code": code, "on": on, "reason": reason}
+
+    try:
+        _door_pulse_with_locks_sync(door, restore_locks=False)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Error apertura tablet salida %s: %s", code, e)
+        return {"executed": False, "code": code, "on": on, "reason": str(e)}
+
+    _finalize_tablet_door_open(door, source=f"tablet:set_output:{code}")
+    panel = _import_panel()
+    board_id, channel = panel._parse_out_code(code)  # noqa: SLF001
+    released = list(_locks_to_restore.get(door) or [])
+    log.info(
+        "Apertura tablet salida %s puerta %s (modo=%s, bulones=%s)",
+        code,
+        door,
+        _current_mode,
+        released,
+    )
+    return {
+        "executed": True,
+        "code": code,
+        "on": on,
+        "board_id": board_id,
+        "channel": channel,
+        "door": door,
+        "locks_released": released,
+        "locks_restore_on_close": True,
+        "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
     }
 
 
@@ -966,6 +1136,8 @@ def on_mode_changed(mode: Optional[str]) -> None:
     _reset_winhose_state()
     _reset_extendido_state()
     _reset_carga_state()
+    _locks_to_restore["p1"] = []
+    _locks_to_restore["p2"] = []
 
     if mode not in SUPPORTED_MODES:
         log.info("Modo %s sin orquestación LED zaguán", mode)
@@ -1034,6 +1206,11 @@ def on_rule_executed(rule_key: str, result: dict[str, Any]) -> None:
             log.info("Carga cajero: apertura P1 ignorada (sin llamada consola pendiente)")
             return
         _clear_carga_p1_call()
+    elif _current_mode == "horario_manual":
+        ok, reason = _can_open_in_interlock(door)
+        if not ok:
+            log.info("Manual: apertura %s bloqueada: %s", door, reason)
+            return
     elif _current_mode == "horario_cerrado":
         ok, _ = _can_open_in_interlock(door)
         if not ok:
@@ -1160,6 +1337,10 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
     elif _current_mode == "horario_carga_cajero":
         _clear_carga_p1_call()
         _carga_cajero_reposo()
+    elif _current_mode == "horario_manual":
+        _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_manual"]))
+    if _current_mode in TABLET_LOCK_RELEASE_MODES:
+        _restore_locks_after_close(door)
     _record(
         "zaguan_door_closed",
         f"Puerta {door} cerrada — LED actualizado ({source})",
@@ -1263,6 +1444,9 @@ def _pulsador_allowed_in_mode(pulsador: PulsadorId) -> tuple[bool, str]:
             # Requiere autorización consola; la validación final se hace en on_rule_executed.
             return True, ""
         return False, "Carga cajero: solo P1 exterior/interior generan llamada a consola"
+    if _current_mode == "horario_manual":
+        # Manual: cualquier pulsador genera llamada; la apertura ocurre desde botón tablet.
+        return True, ""
 
     return True, ""
 
@@ -1288,7 +1472,13 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
         "p1",
         "p3",
     )
-    if force_extendido_tablet_call or force_carga_tablet_call:
+    force_manual_tablet_call = _current_mode == "horario_manual" and pulsador in (
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+    )
+    if force_extendido_tablet_call or force_carga_tablet_call or force_manual_tablet_call:
         door = PULSADOR_TO_DOOR[pulsador]
         call_result = await tablet_call_hub.start_call(
             door=door,
@@ -1309,6 +1499,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
                 "ts": ts,
                 "extendido_call": force_extendido_tablet_call,
                 "carga_cajero_call": force_carga_tablet_call,
+                "manual_call": force_manual_tablet_call,
                 **call_result,
             },
         )
@@ -1320,6 +1511,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             "tablet_call": True,
             "extendido_call": force_extendido_tablet_call,
             "carga_cajero_call": force_carga_tablet_call,
+            "manual_call": force_manual_tablet_call,
             "modbus_ok": False,
             "call_id": call_result.get("call_id"),
         }

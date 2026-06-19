@@ -3427,10 +3427,27 @@ def api_v1_read_input_by_code(code: str) -> bool:
 
 
 def api_v1_execute_rule_for_tablet(rule_key: str) -> dict:
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        special = zo.execute_tablet_door_open_sync(rule_key)
+        if special is not None:
+            _zaguan_rule_executed(rule_key, special)
+            return special
+    except Exception:  # noqa: BLE001
+        pass
     return _execute_rule_forced(rule_key, apply_outputs_to_hardware=True)
 
 
 def api_v1_set_output_by_code(code: str, on: bool) -> dict:
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        special = zo.execute_tablet_door_output_sync(code, on)
+        if special is not None:
+            return special
+    except Exception:  # noqa: BLE001
+        pass
     board_id, channel = _parse_out_code(code)
     if not _board_exists(board_id):
         raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
