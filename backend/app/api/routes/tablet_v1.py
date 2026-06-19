@@ -124,6 +124,10 @@ def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username
     return {"revision": rec.get("revision"), "updated_at": rec.get("updated_at")}
 
 
+class OpenDoorBody(BaseModel):
+    door: Literal["p1", "p2"] = Field(description="Puerta a abrir: p1=calle, p2=oficina")
+
+
 class SetModeBody(BaseModel):
     action: Literal["set_rule", "set_output"]
     rule_key: Optional[str] = None
@@ -145,6 +149,52 @@ class SetModeBody(BaseModel):
             if self.on is None and self.value is None:
                 raise ValueError("Indica on (bool) o value (0/1) para set_output")
         return self
+
+
+@router.post("/door/open")
+def open_door(
+    body: OpenDoorBody,
+    user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    """
+    Abre puerta desde tablet (manual / carga cajero).
+    Comprueba bulones OUT_x_01/02, los apaga si están activos, pulsa apertura
+    y los restaura cuando la puerta cierra (sensor).
+    """
+    from app.services import zaguan_orchestrator as zo
+
+    result = zo.open_door_from_tablet(body.door)
+    if not result.get("ok"):
+        reason = str(result.get("reason") or "Apertura rechazada")
+        try:
+            ses.record_event(
+                "WARN",
+                f"Apertura tablet {body.door} rechazada: {reason}",
+                event_type="door_open_blocked",
+                source="tablet_v1",
+                actor_principal="tablet",
+                actor_username=user,
+                payload={"door": body.door, "reason": reason},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": f"No se pudo abrir {body.door}", "reason": reason},
+        )
+    try:
+        ses.record_event(
+            "OK",
+            f"Apertura tablet {body.door}",
+            event_type="door_open",
+            source="tablet_v1",
+            actor_principal="tablet",
+            actor_username=user,
+            payload=result,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, **result}
 
 
 @router.post("/set_mode")

@@ -3426,6 +3426,21 @@ def api_v1_read_input_by_code(code: str) -> bool:
     )
 
 
+def api_v1_refresh_board_io(board_id: int) -> bool:
+    """Refresca entradas/salidas Modbus de una placa (p. ej. antes de leer bulones)."""
+    if not _board_exists(board_id):
+        return False
+    if not io_state.get(board_id, {}).get("connected"):
+        _connect_board(board_id)
+    if not io_state.get(board_id, {}).get("connected"):
+        return False
+    try:
+        _read_all_io(board_id)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def api_v1_execute_rule_for_tablet(rule_key: str) -> dict:
     try:
         from app.services import zaguan_orchestrator as zo
