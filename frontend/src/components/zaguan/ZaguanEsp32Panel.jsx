@@ -29,10 +29,22 @@ import "./zaguanEsp32.css";
 
 let _logId = 0;
 
+function estadosFromBackendPayload(r) {
+  const nuevos = {};
+  for (let n = 1; n <= 4; n += 1) {
+    const est = r[`p${n}`];
+    if (est) nuevos[n] = est;
+  }
+  return nuevos;
+}
+
 export default function ZaguanEsp32Panel({
   apiFetchZaguan,
   active = true,
   activeModeLabel = "Sin modo seleccionado",
+  modeRefreshKey = null,
+  pendingModeRefreshKey = null,
+  ledPushKey = 0,
   pendingModeLabel = null,
   onSimulatePulse,
   onEmulateLlaveEchada,
@@ -107,25 +119,40 @@ export default function ZaguanEsp32Panel({
     };
   }, [api, active, log]);
 
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    const loadWinhose = async () => {
+  const refreshBackendEstado = useCallback(
+    async (silencioso = true) => {
       try {
         const r = await apiFetchZaguan("/api/zaguan/estado");
-        if (cancelled) return;
+        const nuevos = estadosFromBackendPayload(r);
+        if (Object.keys(nuevos).length) {
+          setEstados((p) => ({ ...p, ...nuevos }));
+        }
         setWinhoseParpadeo(r._autoservicio?.winhose_libre_parpadeo || {});
-      } catch {
-        if (!cancelled) setWinhoseParpadeo({});
+        if (!silencioso) {
+          log("rx", `LED orquestador: ${JSON.stringify(nuevos)}`);
+        }
+      } catch (e) {
+        if (!silencioso) {
+          log("err", `Estado backend: ${e.message || "error"}`);
+        }
       }
+    },
+    [apiFetchZaguan, log],
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    refreshBackendEstado(true);
+  }, [active, modeRefreshKey, pendingModeRefreshKey, ledPushKey, refreshBackendEstado]);
+
+  useEffect(() => {
+    if (!active) return;
+    const onFocus = () => {
+      refreshBackendEstado(true);
     };
-    loadWinhose();
-    const id = setInterval(loadWinhose, 4000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [active, apiFetchZaguan]);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [active, refreshBackendEstado]);
 
   const ejecutar = useCallback(
     async (metodo, ...args) => {
@@ -163,7 +190,7 @@ export default function ZaguanEsp32Panel({
     [api, log],
   );
 
-  const refreshEstado = useCallback(
+  const refreshDeviceEstado = useCallback(
     async (silencioso = true) => {
       try {
         const data = await api.getEstado();
@@ -173,7 +200,6 @@ export default function ZaguanEsp32Panel({
           nuevos[c.canal] = c.estado;
           nuevasPuls[c.canal] = c.pulsaciones;
         });
-        setEstados((p) => ({ ...p, ...nuevos }));
         Object.keys(nuevasPuls).forEach((k) => {
           const antes = pulsRef.current[k] || 0;
           if (nuevasPuls[k] > antes && antes !== 0) {
@@ -186,8 +212,9 @@ export default function ZaguanEsp32Panel({
         });
         setPulsaciones((p) => ({ ...p, ...nuevasPuls }));
         setSync(!!data.sync);
-        if (!silencioso)
-          log("rx", `Estado actualizado: ${JSON.stringify(nuevos)}`);
+        if (!silencioso) {
+          log("rx", `ESP32 hardware: ${JSON.stringify(nuevos)}`);
+        }
       } catch {
         /* el ping gestiona el estado online */
       }
@@ -218,7 +245,11 @@ export default function ZaguanEsp32Panel({
             .getOtaVersion()
             .then(setOta)
             .catch(() => {});
-          refreshEstado();
+          api
+            .getOtaVersion()
+            .then(setOta)
+            .catch(() => {});
+          refreshDeviceEstado();
         }
       } catch (e) {
         if (!vivo) return;
@@ -228,24 +259,41 @@ export default function ZaguanEsp32Panel({
     };
     hacerPing();
     const intPing = setInterval(hacerPing, Math.max(3, t.intervaloPing) * 1000);
-    const intEstado = setInterval(() => {
-      if (online) refreshEstado();
-    }, 4000);
     return () => {
       vivo = false;
       clearInterval(intPing);
-      clearInterval(intEstado);
     };
   }, [
     api,
     online,
     t.intervaloPing,
-    refreshEstado,
+    refreshDeviceEstado,
     active,
     log,
     target.host,
     ipDraft,
   ]);
+
+  const handleSimulatePulse = useCallback(
+    async (canal) => {
+      if (onSimulatePulse) {
+        await onSimulatePulse(canal);
+      }
+      marcarPulso(canal);
+      await refreshBackendEstado(true);
+    },
+    [onSimulatePulse, marcarPulso, refreshBackendEstado],
+  );
+
+  const handleEmulateLlaveEchada = useCallback(
+    async (llaveId, action) => {
+      if (onEmulateLlaveEchada) {
+        await onEmulateLlaveEchada(llaveId, action);
+      }
+      await refreshBackendEstado(true);
+    },
+    [onEmulateLlaveEchada, refreshBackendEstado],
+  );
 
   const cambiarEstado = async (canal, estado) => {
     try {
@@ -414,6 +462,14 @@ export default function ZaguanEsp32Panel({
           <button
             type="button"
             className="btn btn-sm btn-ghost"
+            onClick={() => refreshBackendEstado(false)}
+            title="Actualizar LEDs desde el orquestador (GET /api/zaguan/estado)"
+          >
+            LEDs
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
             onClick={() => setTweaksOpen(true)}
             title="Apariencia y sondeo"
           >
@@ -468,8 +524,8 @@ export default function ZaguanEsp32Panel({
               {[3, 4].map(renderCanalCard)}
             </div>
             <ZaguanSimulationSection
-              onSimulatePulse={onSimulatePulse}
-              onEmulateLlaveEchada={onEmulateLlaveEchada}
+              onSimulatePulse={handleSimulatePulse}
+              onEmulateLlaveEchada={handleEmulateLlaveEchada}
             />
           </div>
         </section>

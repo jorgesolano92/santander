@@ -188,6 +188,8 @@ async def get_estado_zaguan():
     try:
         from app.services import zaguan_orchestrator as zo
 
+        for ch, est in zo.get_led_states().items():
+            out[ch] = est
         extra = zo.get_autoservicio_status()
         if (
             any((extra.get("winhose_libre_parpadeo") or {}).values())

@@ -23,7 +23,7 @@ export function TopNavbar({
         <img
           src={logoSrc}
           alt="Logo"
-          className="w-30 h-9"
+          className="w-30 h-auto"
           onError={(e) => {
             e.currentTarget.src = "/assets/logo.png";
           }}

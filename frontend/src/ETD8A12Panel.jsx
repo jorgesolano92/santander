@@ -2293,6 +2293,7 @@ export default function ETD8A12Panel() {
   const [selectedMode, setSelectedMode] = useState(null);
   const [pendingManualEnclavamientoMode, setPendingManualEnclavamientoMode] =
     useState(null);
+  const [zaguanLedPushKey, setZaguanLedPushKey] = useState(0);
   const [activatingQueuedMode, setActivatingQueuedMode] = useState(null);
   const [activeToggleRules, setActiveToggleRules] = useState([]);
   const [globalLoadingCount, setGlobalLoadingCount] = useState(0);
@@ -2595,6 +2596,9 @@ export default function ETD8A12Panel() {
             mergeStatusPayload(data.payload);
             setServer(true);
             setInitialStatusLoaded(true);
+          }
+          if (data.type === "zaguan_led") {
+            setZaguanLedPushKey((n) => n + 1);
           }
         } catch {
           /* ignore */
@@ -4482,6 +4486,9 @@ export default function ETD8A12Panel() {
                 apiFetchZaguan={apiFetchZaguan}
                 active={tab === 5}
                 activeModeLabel={activeModeLabel}
+                modeRefreshKey={selectedMode}
+                pendingModeRefreshKey={pendingManualEnclavamientoMode}
+                ledPushKey={zaguanLedPushKey}
                 pendingModeLabel={
                   pendingManualEnclavamientoMode
                     ? toModeLabel(pendingManualEnclavamientoMode)

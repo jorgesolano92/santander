@@ -5,6 +5,10 @@ venv/
 __pycache__/
 *.py[cod]
 
-# Base de datos SQLite
+# Base de datos SQLite (desarrollo local)
 data/
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
+control_accesos.db

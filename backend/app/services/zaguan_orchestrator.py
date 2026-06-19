@@ -151,6 +151,8 @@ DOOR_LOCK_OUTPUTS: dict[PuertaId, tuple[str, ...]] = {
 DOOR_BOARD_ID: dict[PuertaId, int] = {"p1": 2, "p2": 3}
 # panel_rules interfono exterior/interior: pulse_seconds = 2
 DOOR_INTERFONO_PULSE_SECONDS = 2.0
+# Manual/carga tablet: fallback LED reposo más corto que el pulso genérico (5 s).
+TABLET_LED_REPOSO_AFTER_S = DOOR_INTERFONO_PULSE_SECONDS + 2.0
 
 DOOR_OPEN_RULE_PREFIXES = (
     "radares_interior_puerta_",
@@ -316,6 +318,7 @@ def _apply_led_channels(channels: tuple[PulsadorId, ...], estado: EstadoLed) -> 
         _sync_led_memory()
         if LED_DEVICE_SYNC:
             _push_leds_to_device(payload, push_order=channels)
+    _publish_zaguan_led_state()
 
 
 def _led_states_match(target: dict[PulsadorId, EstadoLed]) -> bool:
@@ -362,6 +365,7 @@ def _apply_led_map(
         _sync_led_memory()
         if LED_DEVICE_SYNC:
             _push_leds_to_device(states, push_order=push_order)
+    _publish_zaguan_led_state()
 
 
 def _sync_led_memory() -> None:
@@ -371,6 +375,24 @@ def _sync_led_memory() -> None:
             z.actualizar_estado_canal(ch, est)
     except Exception as e:  # noqa: BLE001
         log.debug("Sync memoria zaguan_esp32: %s", e)
+
+
+def _publish_zaguan_led_state() -> None:
+    """Notifica consola (WebSocket) sin bloquear el hilo del orquestador."""
+    try:
+        from app.services import panel_live_hub as plh
+
+        plh.publish_sync(
+            {
+                "type": "zaguan_led",
+                "payload": {
+                    "leds": dict(_led_states),
+                    "mode": _current_mode,
+                },
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        log.debug("Publish zaguan_led WS: %s", e)
 
 
 LED_LIBRE_COLOR = (0, 200, 0)
@@ -902,6 +924,41 @@ def _door_for_open_output(code: str) -> Optional[PuertaId]:
     return None
 
 
+def _sync_current_mode_from_panel() -> None:
+    """Alinea modo orquestador con el panel antes de apertura tablet."""
+    mode = _read_panel_mode()
+    if mode == _current_mode:
+        return
+    on_mode_changed(mode)
+
+
+def _try_tablet_maneuver_close(
+    door: PuertaId, *, is_open: bool, age_s: float
+) -> bool:
+    """
+    Manual/carga: cierre por inductivo en OFF tras haber visto apertura.
+    No exige flanco was_open→closed (evita retrasos con baseline del sensor).
+    """
+    if _current_mode not in TABLET_LOCK_RELEASE_MODES:
+        return False
+    if not _pending_abriendo.get(door):
+        return False
+    if is_open:
+        return False
+    if age_s < DOOR_AUTOSERVICIO_MIN_MANEUVER_S:
+        return False
+    if not _saw_open_during_pending.get(door):
+        return False
+    _on_door_closed(door, source="tablet_sensor_closed")
+    return True
+
+
+def _tablet_led_reposo_after_s() -> float:
+    if _current_mode in TABLET_LOCK_RELEASE_MODES:
+        return TABLET_LED_REPOSO_AFTER_S
+    return DOOR_LED_REPOSO_AFTER_S
+
+
 def _validate_tablet_door_open(door: PuertaId) -> tuple[bool, str]:
     """Validación apertura tablet (sin exigir llamada previa)."""
     if _current_mode not in TABLET_LOCK_RELEASE_MODES:
@@ -971,6 +1028,7 @@ def open_door_from_tablet(door: PuertaId) -> dict[str, Any]:
     Apertura explícita desde tablet (POST /api/v1/door/open).
     Comprueba OUT_x_01/02, apaga solo los activos, pulsa apertura y restaura bulones al cerrar.
     """
+    _sync_current_mode_from_panel()
     ok, reason = _validate_tablet_door_open(door)
     if not ok:
         return {"ok": False, "executed": False, "door": door, "reason": reason}
@@ -1017,6 +1075,7 @@ def open_door_from_tablet(door: PuertaId) -> dict[str, Any]:
         "open_output": open_code,
         "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
         "locks_restore_on_close": bool(locks_released),
+        "leds": get_led_states(),
     }
 
 
@@ -1119,7 +1178,7 @@ def _apply_esclusa_led_for_door(door: PuertaId) -> None:
 
 
 def _sync_manual_interlock_leds() -> None:
-    """Manual: reposo 4× libre; al abrir una puerta, la opuesta pasa a ocupado."""
+    """Manual: reposo 4× libre; interlock solo mientras _pending_abriendo (no re-pisar por sensor)."""
     if _current_mode != "horario_manual":
         return
     for door in ("p1", "p2"):
@@ -1129,17 +1188,10 @@ def _sync_manual_interlock_leds() -> None:
                 return
             _apply_esclusa_led_for_door(door)
             return
-    active = _esclusa_active_door()
-    if active is None:
-        target = dict(INITIAL_LED_BY_MODE["horario_manual"])
-        if _led_states_match(target):
-            return
-        _apply_led_map(target)
-    else:
-        expected = _esclusa_led_states_for(active)
-        if _led_states_match(expected):
-            return
-        _apply_esclusa_led_for_door(active)
+    target = dict(INITIAL_LED_BY_MODE["horario_manual"])
+    if _led_states_match(target):
+        return
+    _apply_led_map(target)
 
 
 def _sync_interlock_leds() -> None:
@@ -1472,7 +1524,9 @@ def poll_door_sensors() -> None:
         if _pending_abriendo.get(door) and is_open:
             _saw_open_during_pending[door] = True
 
-        if _current_mode in STRICT_INTERLOCK_MODES and _door_interlock_active.get(door):
+        if _try_tablet_maneuver_close(door, is_open=is_open, age_s=age_s):
+            pass
+        elif _current_mode in STRICT_INTERLOCK_MODES and _door_interlock_active.get(door):
             _try_autoservicio_close_confirm(
                 door, is_open=is_open, was_open=was_open, age_s=age_s
             )
@@ -1489,7 +1543,7 @@ def poll_door_sensors() -> None:
             _current_mode not in STRICT_INTERLOCK_MODES
             and _pending_abriendo.get(door)
             and not is_open
-            and age_s >= DOOR_LED_REPOSO_AFTER_S
+            and age_s >= _tablet_led_reposo_after_s()
             and (
                 _current_mode not in TABLET_LOCK_RELEASE_MODES
                 or _saw_open_during_pending.get(door)

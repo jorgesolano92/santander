@@ -31,10 +31,16 @@ env/
 *.swo
 
 # Base de datos local / datos de desarrollo (no subir datos reales ni credenciales)
-# backend/data/*.db
-# backend/data/*.db-journal
-# coce-api/data/*.db
-# coce-api/data/*.db-journal
+backend/data/
+backend/data/**
+backend/**/*.db
+backend/**/*.db-journal
+backend/**/*.db-wal
+backend/**/*.db-shm
+coce-api/data/
+coce-api/data/**
+coce-api/**/*.db
+coce-api/**/*.db-journal
 
 # Logs y cobertura
 *.log
