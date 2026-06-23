@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Sucursal, SucursalEstado } from '../types';
 import type { BranchLocation } from '../api/coceClient';
 import { SUCURSAL_ESTADO_LABELS } from '../sucursalEstado';
-import { sucursalMarkerIconUrl, SucursalMapPin, MAP_MARKER_ANCHOR, MAP_MARKER_SIZE } from './SucursalDevicesIcon';
+import { sucursalMapDotIconUrl, SucursalMapPin, MAP_DOT_ANCHOR, MAP_DOT_SIZE } from './SucursalDevicesIcon';
 import { hasMapCoords, loadGoogleMaps } from '../utils/googleMaps';
 import { GOOGLE_MAPS_NIGHT_STYLES } from '../utils/googleMapsNightStyles';
 import type { ModeDisplay } from '../utils/ruleModeColors';
@@ -88,6 +88,7 @@ export function SucursalMap({
           fullscreenControl: true,
           gestureHandling: 'greedy',
           backgroundColor: '#242f3e',
+          clickableIcons: false,
         });
         mapRef.current = map;
         setMapReady(true);
@@ -140,9 +141,9 @@ export function SucursalMap({
           map,
           title: item.sucursal.nombre,
           icon: {
-            url: sucursalMarkerIconUrl(item.mode.modeColor),
-            scaledSize: new g.maps.Size(MAP_MARKER_SIZE, MAP_MARKER_SIZE),
-            anchor: new g.maps.Point(MAP_MARKER_ANCHOR, MAP_MARKER_ANCHOR),
+            url: sucursalMapDotIconUrl(item.mode.modeColor),
+            scaledSize: new g.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
+            anchor: new g.maps.Point(MAP_DOT_ANCHOR, MAP_DOT_ANCHOR),
           },
         });
 

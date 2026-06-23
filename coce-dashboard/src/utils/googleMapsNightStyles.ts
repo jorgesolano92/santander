@@ -1,4 +1,4 @@
-/** Estilo nocturno oficial de Google Maps (style-array / night mode). */
+/** Estilo nocturno Google Maps + sin POI (tiendas, mercados, etc.). */
 export const GOOGLE_MAPS_NIGHT_STYLES: google.maps.MapTypeStyle[] = [
   { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
@@ -7,21 +7,6 @@ export const GOOGLE_MAPS_NIGHT_STYLES: google.maps.MapTypeStyle[] = [
     featureType: 'administrative.locality',
     elementType: 'labels.text.fill',
     stylers: [{ color: '#d59563' }],
-  },
-  {
-    featureType: 'poi',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#d59563' }],
-  },
-  {
-    featureType: 'poi.park',
-    elementType: 'geometry',
-    stylers: [{ color: '#263c3f' }],
-  },
-  {
-    featureType: 'poi.park',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#6b9a76' }],
   },
   {
     featureType: 'road',
@@ -54,16 +39,6 @@ export const GOOGLE_MAPS_NIGHT_STYLES: google.maps.MapTypeStyle[] = [
     stylers: [{ color: '#f3d19c' }],
   },
   {
-    featureType: 'transit',
-    elementType: 'geometry',
-    stylers: [{ color: '#2f3948' }],
-  },
-  {
-    featureType: 'transit.station',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#d59563' }],
-  },
-  {
     featureType: 'water',
     elementType: 'geometry',
     stylers: [{ color: '#17263c' }],
@@ -78,4 +53,15 @@ export const GOOGLE_MAPS_NIGHT_STYLES: google.maps.MapTypeStyle[] = [
     elementType: 'labels.text.stroke',
     stylers: [{ color: '#17263c' }],
   },
+  // Ocultar POI de Google (tiendas, mercados, hospitales, etc.)
+  { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.attraction', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.government', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.medical', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.place_of_worship', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.school', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.sports_complex', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ];

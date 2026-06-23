@@ -7,8 +7,10 @@ const ESTADO_STROKE: Record<SucursalEstado, string> = {
 };
 
 export const MAP_ICON_STROKE = '#ec1c24';
-export const MAP_MARKER_SIZE = 56;
-export const MAP_MARKER_ANCHOR = 28;
+export const MAP_PIN_SIZE = 56;
+/** Punto en el mapa (solo color del modo). */
+export const MAP_DOT_SIZE = 22;
+export const MAP_DOT_ANCHOR = 11;
 
 type Props = {
   estado?: SucursalEstado;
@@ -63,10 +65,10 @@ function MapPinIconGlyph() {
   );
 }
 
-/** Pin circular (mapa y panel de detalle): borde = color del modo, icono rojo dentro. */
+/** Pin circular (solo panel al pulsar sucursal): borde = color del modo, icono rojo dentro. */
 export function SucursalMapPin({
   modeColor,
-  size = MAP_MARKER_SIZE,
+  size = MAP_PIN_SIZE,
   className,
 }: {
   modeColor: string;
@@ -90,21 +92,11 @@ export function SucursalMapPin({
   );
 }
 
-/** Pin del mapa Google Maps (misma apariencia que SucursalMapPin). */
-export function sucursalMarkerIconUrl(modeColor: string): string {
-  const border = modeColor || '#6b7280';
-  const s = MAP_ICON_STROKE;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" width="56" height="56">
-    <circle cx="28" cy="28" r="25" fill="#ffffff" stroke="${border}" stroke-width="3.5"/>
-    <g transform="translate(11, 18) scale(0.33)" fill="none" stroke="${s}" stroke-width="2.8">
-      <rect x="4" y="10" width="52" height="38" rx="4" fill="#ffffff"/>
-      <rect x="10" y="16" width="40" height="24" rx="2" fill="${s}" opacity="0.12"/>
-      <rect x="22" y="48" width="16" height="3" rx="1" fill="${s}" opacity="0.35"/>
-      <rect x="16" y="52" width="28" height="2" rx="1" fill="${s}" opacity="0.2"/>
-      <rect x="68" y="6" width="28" height="46" rx="5" fill="#ffffff"/>
-      <rect x="72" y="12" width="20" height="32" rx="2" fill="${s}" opacity="0.12"/>
-      <circle cx="80" cy="48" r="2" fill="${s}" opacity="0.35"/>
-    </g>
+/** Punto de color en el mapa Google Maps (color = modo activo). */
+export function sucursalMapDotIconUrl(modeColor: string): string {
+  const fill = modeColor || '#6b7280';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
+    <circle cx="11" cy="11" r="8" fill="${fill}" stroke="#ffffff" stroke-width="2"/>
   </svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
