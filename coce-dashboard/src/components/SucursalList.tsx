@@ -27,7 +27,11 @@ import { SucursalMap } from "./SucursalMap";
 
 import type { SucursalMapItem } from "./SucursalMap";
 
+import { SucursalKpiBar } from "./SucursalKpiBar";
+
 import { ErrorBoundary } from "./ErrorBoundary";
+
+import { resolveKpiMetrics } from "../data/mockKpiMetrics";
 
 import { hasMapCoords } from "../utils/googleMaps";
 import { resolveBranchModeDisplay } from "../utils/ruleModeColors";
@@ -104,6 +108,7 @@ export function SucursalList() {
   >({});
   const [liveLogs, setLiveLogs] = useState<BranchLog[]>([]);
   const lastLogSignatureRef = useRef<Record<string, string>>({});
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -301,6 +306,31 @@ export function SucursalList() {
     setLiveLogs((prev) => [...incoming, ...prev].slice(0, LIVE_LOG_LIMIT));
   }, [mapItems, live]);
 
+  useEffect(() => {
+    if (!selectedBranchId) return;
+    if (!mapItems.some((item) => item.sucursal.id === selectedBranchId)) {
+      setSelectedBranchId(null);
+    }
+  }, [mapItems, selectedBranchId]);
+
+  const kpiMetrics = useMemo(() => {
+    if (selectedBranchId) {
+      return resolveKpiMetrics([selectedBranchId], live);
+    }
+    return resolveKpiMetrics(
+      mapItems.map((item) => item.sucursal.id),
+      live,
+    );
+  }, [selectedBranchId, mapItems, live]);
+
+  const kpiScopeLabel = useMemo(() => {
+    if (!selectedBranchId) {
+      return `Consolidado general · ${mapItems.length} sucursal${mapItems.length === 1 ? "" : "es"}`;
+    }
+    const selected = mapItems.find((item) => item.sucursal.id === selectedBranchId);
+    return selected ? `Sucursal: ${selected.sucursal.nombre}` : "Sucursal seleccionada";
+  }, [selectedBranchId, mapItems]);
+
   const openBranchInNewTab = useCallback((id: string) => {
     window.open(`/control/${id}`, "_blank", "noopener,noreferrer");
   }, []);
@@ -355,6 +385,13 @@ export function SucursalList() {
         </div>
       ) : (
         <>
+          <SucursalKpiBar
+            metrics={kpiMetrics}
+            scopeLabel={kpiScopeLabel}
+            selectedBranchId={selectedBranchId}
+            onClearSelection={() => setSelectedBranchId(null)}
+          />
+
           <div className="sucursal-toolbar">
             <div className="sucursal-search">
               <label
@@ -417,6 +454,8 @@ export function SucursalList() {
                   items={mapItems}
                   withoutLocation={withoutLocation}
                   locationsLoading={locationsLoading}
+                  selectedBranchId={selectedBranchId}
+                  onSelectBranch={setSelectedBranchId}
                   onOpenBranch={openBranchInNewTab}
                   onDelete={onDelete}
                 />
@@ -438,14 +477,14 @@ export function SucursalList() {
                       return (
                         <article
                           key={item.sucursal.id}
-                          className="sucursal-side-card"
-                          onClick={() => openBranchInNewTab(item.sucursal.id)}
+                          className={`sucursal-side-card${selectedBranchId === item.sucursal.id ? " sucursal-side-card--selected" : ""}`}
+                          onClick={() => setSelectedBranchId(item.sucursal.id)}
                           role="button"
                           tabIndex={0}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
-                              openBranchInNewTab(item.sucursal.id);
+                              setSelectedBranchId(item.sucursal.id);
                             }
                           }}
                         >

@@ -47,3 +47,7 @@ htmlcov/
 Thumbs.db
 Desktop.ini
 .DS_Store
+coce-api/.env
+coce-api/.env.example
+coce-dashboard/.env
+coce-dashboard/.env.example

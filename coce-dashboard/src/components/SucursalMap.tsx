@@ -25,6 +25,8 @@ type Props = {
   items: SucursalMapItem[];
   withoutLocation: SucursalMapItem[];
   locationsLoading?: boolean;
+  selectedBranchId: string | null;
+  onSelectBranch: (id: string | null) => void;
   onOpenBranch: (id: string) => void;
   onDelete: (id: string, nombre: string) => void;
 };
@@ -52,6 +54,8 @@ export function SucursalMap({
   items,
   withoutLocation,
   locationsLoading,
+  selectedBranchId,
+  onSelectBranch,
   onOpenBranch,
   onDelete,
 }: Props) {
@@ -61,7 +65,11 @@ export function SucursalMap({
   const markersRef = useRef<google.maps.Marker[]>([]);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
-  const [selected, setSelected] = useState<SucursalMapItem | null>(null);
+
+  const selected = useMemo(
+    () => items.find((i) => i.sucursal.id === selectedBranchId) ?? null,
+    [items, selectedBranchId],
+  );
   const mappable = useMemo(
     () => items.filter((item) => hasMapCoords(item.location)),
     [items],
@@ -157,7 +165,7 @@ export function SucursalMap({
         });
 
         marker.addListener('click', () => {
-          setSelected(item);
+          onSelectBranch(item.sucursal.id);
           map.panTo(position);
         });
 
@@ -179,13 +187,7 @@ export function SucursalMap({
       console.error('SucursalMap markers:', e);
       setMapError(e instanceof Error ? e.message : String(e));
     }
-  }, [mappableKey, mapReady, mappable]);
-
-  useEffect(() => {
-    if (!selected) return;
-    const stillVisible = mappable.some((i) => i.sucursal.id === selected.sucursal.id);
-    if (!stillVisible) setSelected(null);
-  }, [mappable, selected]);
+  }, [mappableKey, mapReady, mappable, onSelectBranch]);
 
   if (mapError) {
     return (
@@ -218,7 +220,7 @@ export function SucursalMap({
           <button
             type="button"
             className="sucursal-map-detail-close"
-            onClick={() => setSelected(null)}
+            onClick={() => onSelectBranch(null)}
             aria-label="Cerrar"
           >
             ×
