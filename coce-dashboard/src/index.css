@@ -482,7 +482,7 @@ th {
   border-radius: var(--radius);
   border: 1px solid var(--surface2);
   overflow: hidden;
-  background: #e8eef5;
+  background: #242f3e;
 }
 
 .sucursal-map-error {

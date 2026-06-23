@@ -5,6 +5,7 @@ import type { BranchLocation } from '../api/coceClient';
 import { SUCURSAL_ESTADO_LABELS } from '../sucursalEstado';
 import { sucursalMarkerIconUrl, SucursalMapPin, MAP_MARKER_ANCHOR, MAP_MARKER_SIZE } from './SucursalDevicesIcon';
 import { hasMapCoords, loadGoogleMaps } from '../utils/googleMaps';
+import { GOOGLE_MAPS_NIGHT_STYLES } from '../utils/googleMapsNightStyles';
 import type { ModeDisplay } from '../utils/ruleModeColors';
 
 export type SucursalMapItem = {
@@ -81,10 +82,12 @@ export function SucursalMap({
         const map = new g.maps.Map(containerRef.current, {
           center: SPAIN_CENTER,
           zoom: 6,
+          styles: GOOGLE_MAPS_NIGHT_STYLES,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: true,
           gestureHandling: 'greedy',
+          backgroundColor: '#242f3e',
         });
         mapRef.current = map;
         setMapReady(true);
