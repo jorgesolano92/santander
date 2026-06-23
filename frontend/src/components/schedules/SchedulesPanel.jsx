@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  resolveRuleColor,
+  ruleKeyToLabel,
+} from "../../utils/ruleModeColors";
 
 const WEEKDAYS = [
   { key: "monday", label: "Lunes" },
@@ -10,7 +14,7 @@ const WEEKDAYS = [
   { key: "sunday", label: "Domingo" },
 ];
 
-const RULE_OPTIONS = [
+const RULE_OPTIONS_FALLBACK = [
   { value: "horario_automatico", label: "Automático" },
   { value: "horario_esclusa", label: "Esclusa" },
   { value: "horario_extendido", label: "Extendido" },
@@ -42,19 +46,30 @@ function parseMinutes(hhmm) {
   return h * 60 + m;
 }
 
-function slotStyle(slot) {
+function slotStyle(slot, rules) {
   const start = parseMinutes(slot.start);
   let end = parseMinutes(slot.end);
   if (end <= start) end += 24 * 60;
   const left = (start / (24 * 60)) * 100;
   const width = Math.max(0.8, ((end - start) / (24 * 60)) * 100);
   const active = slot.active !== false;
+  const modeColor = resolveRuleColor(slot.rule_key, rules);
   return {
     left: `${left}%`,
     width: `${Math.min(width, 100 - left)}%`,
-    background: active ? "#16a34a" : "#9ca3af",
+    background: active ? modeColor : "#9ca3af",
     opacity: active ? 1 : 0.55,
   };
+}
+
+function buildRuleOptions(rules) {
+  const keys = Object.keys(rules || {}).sort();
+  if (!keys.length) return RULE_OPTIONS_FALLBACK;
+  return keys.map((value) => ({
+    value,
+    label: ruleKeyToLabel(value),
+    color: resolveRuleColor(value, rules),
+  }));
 }
 
 function inputStyle() {
@@ -70,9 +85,12 @@ function inputStyle() {
 
 export default function SchedulesPanel({ apiFetch, onNotify }) {
   const [draft, setDraft] = useState(() => deepClone(DEFAULT_SCHEDULES_CONFIG));
+  const [rules, setRules] = useState({});
   const [dayTab, setDayTab] = useState("monday");
   const [loading, setLoading] = useState(true);
   const [nowPreview, setNowPreview] = useState(() => new Date());
+
+  const ruleOptions = useMemo(() => buildRuleOptions(rules), [rules]);
 
   useEffect(() => {
     const t = setInterval(() => setNowPreview(new Date()), 30_000);
@@ -82,7 +100,11 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch("/api/config/schedules");
+      const [data, rulesData] = await Promise.all([
+        apiFetch("/api/config/schedules"),
+        apiFetch("/rules").catch(() => ({ rules: {} })),
+      ]);
+      setRules(rulesData?.rules || {});
       setDraft({
         ...deepClone(DEFAULT_SCHEDULES_CONFIG),
         ...data,
@@ -243,13 +265,13 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
           {daySlots.map((slot, i) => (
             <div
               key={i}
-              title={`${slot.start}–${slot.end} ${slot.rule_key}`}
+              title={`${slot.start}–${slot.end} ${ruleKeyToLabel(slot.rule_key)}`}
               style={{
                 position: "absolute",
                 top: 10,
                 height: 36,
                 borderRadius: 6,
-                ...slotStyle(slot),
+                ...slotStyle(slot, rules),
               }}
             />
           ))}
@@ -298,14 +320,31 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
               <input style={inputStyle()} value={slot.end} onChange={(e) => updateSlot(index, "end", e.target.value)} placeholder="15:00" />
             </label>
             <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>Modo (rule_key)</span>
-              <select style={inputStyle()} value={slot.rule_key} onChange={(e) => updateSlot(index, "rule_key", e.target.value)}>
-                {RULE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>Modo</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span
+                  title={resolveRuleColor(slot.rule_key, rules)}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: 4,
+                    flexShrink: 0,
+                    border: "1px solid #d1d5db",
+                    background: resolveRuleColor(slot.rule_key, rules),
+                  }}
+                />
+                <select
+                  style={{ ...inputStyle(), flex: 1 }}
+                  value={slot.rule_key}
+                  onChange={(e) => updateSlot(index, "rule_key", e.target.value)}
+                >
+                  {ruleOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 40 }}>
               <input type="checkbox" checked={slot.active !== false} onChange={(e) => updateSlot(index, "active", e.target.checked)} />
@@ -321,6 +360,37 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
       <button type="button" onClick={addSlot} style={{ ...btnSecondary, justifySelf: "start" }}>
         + Añadir franja
       </button>
+
+      {ruleOptions.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            padding: 12,
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+            borderRadius: 10,
+            fontSize: 12,
+          }}
+        >
+          <span style={{ fontWeight: 600, color: "#374151", width: "100%" }}>Leyenda de modos</span>
+          {ruleOptions.map((o) => (
+            <span key={o.value} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: 3,
+                  background: o.color || resolveRuleColor(o.value, rules),
+                  border: "1px solid #d1d5db",
+                }}
+              />
+              {o.label}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

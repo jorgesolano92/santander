@@ -5,6 +5,7 @@ import { GlobalLoader } from "./components/GlobalLoader";
 import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
+import { DEFAULT_MODE_COLORS, normalizeRuleColor } from "./utils/ruleModeColors";
 import { ZAGUAN_LLAVE_ECHADA } from "./components/zaguan/zaguanConstants";
 import { ruleBlockersActive } from "./utils/panelRuleBlockers";
 import {
@@ -118,7 +119,7 @@ const TABS = [
   "Panel",
   "Placas I/O",
   "Histórico",
-  "Configuración",
+  "Configuración Modos",
   "Definición placas",
   "Configuración pulsadores",
   "Configuración template",
@@ -862,6 +863,7 @@ function RulesFormAssistant({
   const [wfDeactTemporary, setWfDeactTemporary] = useState(false);
   const [wfEnabled, setWfEnabled] = useState(true);
   const [wfAuto, setWfAuto] = useState(true);
+  const [wfColor, setWfColor] = useState("#22c55e");
   const [wfType, setWfType] = useState("enclavamiento");
   /** 0 = seguir nivel IN; >0 = pulso temporizado (s). Omisión en JSON = 0 en backend (detección). */
   const [wfPulseSeconds, setWfPulseSeconds] = useState(0);
@@ -900,6 +902,7 @@ function RulesFormAssistant({
     const rule = {
       enabled: wfEnabled,
       auto_execute: wfAuto,
+      color: normalizeRuleColor(wfColor, key),
       type: wfType,
       trigger: wfTrigger,
       blocked_if_active: [...wfBlocked],
@@ -961,6 +964,7 @@ function RulesFormAssistant({
     setWfDeactTemporary(Boolean(r.deactivate_outputs_temporary));
     setWfEnabled(r.enabled !== false);
     setWfAuto(r.auto_execute !== false);
+    setWfColor(normalizeRuleColor(r.color, loadKey));
     setWfType(typeof r.type === "string" ? r.type : "enclavamiento");
     const ps = r.pulse_seconds;
     if (ps !== undefined && ps !== null && ps !== "") {
@@ -1181,6 +1185,36 @@ function RulesFormAssistant({
             onChange={(e) => setWfAuto(e.target.checked)}
           />
           Auto-ejecutar (polling)
+        </label>
+        <label
+          style={{
+            ...assistChk,
+            gap: 10,
+          }}
+          title="Color en la línea de tiempo de horarios"
+        >
+          <span style={{ fontSize: 10, fontWeight: 700, color: C.textSub }}>COLOR</span>
+          <input
+            type="color"
+            value={normalizeHexColor(wfColor, DEFAULT_MODE_COLORS.horario_automatico)}
+            onChange={(e) => setWfColor(e.target.value)}
+            style={{
+              width: 44,
+              height: 32,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              padding: 2,
+              background: C.white,
+              cursor: "pointer",
+            }}
+          />
+          <input
+            className="rules-assist-control"
+            value={wfColor}
+            onChange={(e) => setWfColor(e.target.value)}
+            placeholder="#22c55e"
+            style={{ width: 88, fontFamily: "monospace", fontSize: 12 }}
+          />
         </label>
         <div
           style={{

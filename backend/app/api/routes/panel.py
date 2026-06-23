@@ -3382,6 +3382,7 @@ def api_v1_list_modes_from_rules() -> List[Dict[str, Any]]:
                 "enabled": bool(rule.get("enabled", True)),
                 "type": rule.get("type"),
                 "auto_execute": rule.get("auto_execute"),
+                "color": rule.get("color"),
             }
         )
     return items
