@@ -2,16 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Sucursal, SucursalEstado } from '../types';
 import type { BranchLocation } from '../api/coceClient';
-import { SUCURSAL_ESTADO_LABELS } from '../sucursalEstado';
 import { sucursalMapDotIconUrl, SucursalMapPin, MAP_DOT_ANCHOR, MAP_DOT_SIZE } from './SucursalDevicesIcon';
 import { hasMapCoords, loadGoogleMaps } from '../utils/googleMaps';
 import { GOOGLE_MAPS_NIGHT_STYLES } from '../utils/googleMapsNightStyles';
 import type { ModeDisplay } from '../utils/ruleModeColors';
+import {
+  CONNECTIVITY_DESCRIPTIONS,
+  CONNECTIVITY_LABELS,
+  CONNECTIVITY_PIN_COLORS,
+  type ConnectivityState,
+} from '../utils/connectivityState';
 
 export type SucursalMapItem = {
   sucursal: Sucursal;
   location?: BranchLocation;
   estado: SucursalEstado;
+  connectivity: ConnectivityState;
   mode: ModeDisplay;
 };
 
@@ -19,6 +25,7 @@ type Props = {
   items: SucursalMapItem[];
   withoutLocation: SucursalMapItem[];
   locationsLoading?: boolean;
+  onOpenBranch: (id: string) => void;
   onDelete: (id: string, nombre: string) => void;
 };
 
@@ -45,6 +52,7 @@ export function SucursalMap({
   items,
   withoutLocation,
   locationsLoading,
+  onOpenBranch,
   onDelete,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,7 +62,6 @@ export function SucursalMap({
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [selected, setSelected] = useState<SucursalMapItem | null>(null);
-
   const mappable = useMemo(
     () => items.filter((item) => hasMapCoords(item.location)),
     [items],
@@ -65,7 +72,7 @@ export function SucursalMap({
       mappable
         .map(
           (item) =>
-            `${item.sucursal.id}:${item.location?.latitude}:${item.location?.longitude}:${item.mode.modeKey}:${item.mode.modeColor}`,
+            `${item.sucursal.id}:${item.location?.latitude}:${item.location?.longitude}:${item.connectivity}`,
         )
         .join('|'),
     [mappable],
@@ -136,12 +143,14 @@ export function SucursalMap({
         const lng = Number(item.location!.longitude);
         const position = { lat, lng };
 
+        const pinColor = CONNECTIVITY_PIN_COLORS[item.connectivity];
+
         const marker = new g.maps.Marker({
           position,
           map,
           title: item.sucursal.nombre,
           icon: {
-            url: sucursalMapDotIconUrl(item.mode.modeColor),
+            url: sucursalMapDotIconUrl(pinColor),
             scaledSize: new g.maps.Size(MAP_DOT_SIZE, MAP_DOT_SIZE),
             anchor: new g.maps.Point(MAP_DOT_ANCHOR, MAP_DOT_ANCHOR),
           },
@@ -187,6 +196,10 @@ export function SucursalMap({
   }
 
   const selectedAddress = selected ? formatAddress(selected.location) : null;
+  const selectedHours =
+    selected?.location?.schedulesEnabled === false
+      ? null
+      : selected?.location?.openingHours?.trim() || null;
 
   return (
     <div className="sucursal-map-wrap">
@@ -211,39 +224,33 @@ export function SucursalMap({
             ×
           </button>
           <div className="sucursal-map-detail-icon">
-            <SucursalMapPin modeColor={selected.mode.modeColor} />
+            <SucursalMapPin modeColor={CONNECTIVITY_PIN_COLORS[selected.connectivity]} />
           </div>
           <div className="sucursal-map-detail-name">{selected.sucursal.nombre}</div>
           {selectedAddress ? (
             <div className="sucursal-map-detail-address">{selectedAddress}</div>
           ) : null}
-          {selected.mode.modeLabel ? (
-            <div
-              className="sucursal-map-detail-mode"
-              style={{
-                color: selected.mode.modeColor,
-                borderColor: selected.mode.modeColor,
-                background: `${selected.mode.modeColor}18`,
-              }}
-            >
-              <span
-                className="sucursal-map-detail-mode-dot"
-                style={{ background: selected.mode.modeColor }}
-                aria-hidden
-              />
-              {selected.mode.modeLabel}
+          {selectedHours ? (
+            <div className="sucursal-map-detail-hours">
+              <span className="sucursal-map-detail-hours-label">Horario de atención</span>
+              {selectedHours}
             </div>
           ) : null}
           <div
-            className={`sucursal-map-detail-status sucursal-map-detail-status--${selected.estado}`}
+            className={`sucursal-map-detail-status sucursal-map-detail-status--${selected.connectivity}`}
+            title={CONNECTIVITY_DESCRIPTIONS[selected.connectivity]}
           >
             <span className="sucursal-map-detail-status-dot" aria-hidden />
-            {SUCURSAL_ESTADO_LABELS[selected.estado]}
+            {CONNECTIVITY_LABELS[selected.connectivity]}
           </div>
           <div className="sucursal-map-detail-actions">
-            <Link to={`/control/${selected.sucursal.id}`} className="btn btn-open btn-sm">
+            <button
+              type="button"
+              className="btn btn-open btn-sm"
+              onClick={() => onOpenBranch(selected.sucursal.id)}
+            >
               Abrir
-            </Link>
+            </button>
             <Link to={`/sucursales/editar/${selected.sucursal.id}`} className="btn btn-ghost btn-sm">
               Editar
             </Link>

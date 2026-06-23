@@ -24,6 +24,8 @@ def _default_branch_map_info() -> dict[str, Any]:
         "current_mode": None,
         "mode_label": None,
         "mode_color": None,
+        "opening_hours": None,
+        "schedules_enabled": None,
     }
 
 
@@ -54,6 +56,11 @@ def _branch_map_info_from_response(data: Any) -> dict[str, Any]:
     color = data.get("mode_color")
     if isinstance(color, str) and color.strip():
         base["mode_color"] = color.strip()
+    hours = data.get("opening_hours")
+    if isinstance(hours, str) and hours.strip():
+        base["opening_hours"] = hours.strip()
+    if "schedules_enabled" in data:
+        base["schedules_enabled"] = bool(data.get("schedules_enabled"))
     return base
 
 

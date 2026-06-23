@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.db import system_events_store as ses
 from app.db import tablet_users_store as tus
 from app.db.tablet_config_store import get_tablet_config_record
-from app.db.schedule_store import get_schedule_config, normalize_location
+from app.db.schedule_store import get_schedule_config, normalize_location, opening_hours_summary
 from app.utils.rule_mode_colors import resolve_rule_color, rule_key_to_label
 from app.services import tablet_jwt
 from app.services.tablet_password import hash_password, verify_password
@@ -137,6 +137,8 @@ def get_branch_location(_user: Annotated[str, Depends(get_tablet_username)]) -> 
         "current_mode": mode_key,
         "mode_label": rule_key_to_label(mode_key),
         "mode_color": resolve_rule_color(mode_key, panel.rules_config),
+        "opening_hours": opening_hours_summary(cfg),
+        "schedules_enabled": bool(cfg.get("enabled")),
     }
 
 

@@ -467,11 +467,168 @@ th {
   flex-direction: column;
 }
 
+.sucursal-map-stage--with-panel {
+  flex-direction: row;
+  gap: 0.85rem;
+}
+
 .sucursal-map-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.sucursal-side-panel {
+  width: min(360px, 32vw);
+  min-width: 290px;
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--surface2);
+  border-radius: var(--radius);
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow: hidden;
+}
+
+.sucursal-side-section {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sucursal-side-section--branches {
+  flex: 0 0 80%;
+}
+
+.sucursal-side-section--logs {
+  flex: 0 0 20%;
+}
+
+.sucursal-side-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.sucursal-side-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  padding-right: 0.15rem;
+}
+
+.sucursal-side-card {
+  border: 1px solid var(--surface2);
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+  background: #fff;
+}
+
+.sucursal-side-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 1px 10px rgba(15, 23, 42, 0.06);
+}
+
+.sucursal-side-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.sucursal-side-card-icon {
+  flex-shrink: 0;
+  margin-top: 0.06rem;
+}
+
+.sucursal-side-card-head-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.sucursal-side-card-head-main strong {
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+
+.sucursal-side-card-summary {
+  margin: 0.34rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.sucursal-side-card-hours {
+  margin: 0.2rem 0 0;
+  font-size: 0.73rem;
+  color: #4b5563;
+}
+
+.sucursal-side-log-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.sucursal-side-log-empty {
+  margin: 0;
+  padding: 0.75rem 0.55rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.sucursal-side-log-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--surface2);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.48rem 0.55rem;
+  cursor: pointer;
+}
+
+.sucursal-side-log-item:hover {
+  border-color: var(--accent);
+}
+
+.sucursal-side-log-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+
+.sucursal-side-log-type {
+  margin-top: 0.18rem;
+  display: block;
+  font-size: 0.73rem;
+  color: #111827;
+}
+
+.sucursal-side-log-detail {
+  margin-top: 0.12rem;
+  display: block;
+  font-size: 0.73rem;
+  color: #4b5563;
 }
 
 .sucursal-map {
@@ -483,6 +640,23 @@ th {
   border: 1px solid var(--surface2);
   overflow: hidden;
   background: #242f3e;
+}
+
+@media (max-width: 1200px) {
+  .sucursal-map-stage--with-panel {
+    flex-direction: column;
+  }
+
+  .sucursal-side-panel {
+    width: 100%;
+    min-width: 0;
+    max-height: 44vh;
+  }
+
+  .sucursal-side-section--branches,
+  .sucursal-side-section--logs {
+    flex: unset;
+  }
 }
 
 .sucursal-map-error {
@@ -574,6 +748,24 @@ th {
   line-height: 1.35;
 }
 
+.sucursal-map-detail-hours {
+  margin-top: 0.55rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+}
+
+.sucursal-map-detail-hours-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  margin-bottom: 0.2rem;
+}
+
 .sucursal-map-detail-status {
   display: inline-flex;
   align-items: center;
@@ -586,19 +778,22 @@ th {
   border: 1px solid transparent;
 }
 
-.sucursal-map-detail-status--operativo {
+.sucursal-map-detail-status--operativo,
+.sucursal-map-detail-status--activo {
   color: var(--ok);
   background: #f0fdf4;
   border-color: #bbf7d0;
 }
 
-.sucursal-map-detail-status--no_operativo {
-  color: var(--warn);
-  background: #fffbeb;
-  border-color: #fde68a;
+.sucursal-map-detail-status--no_operativo,
+.sucursal-map-detail-status--inactivo {
+  color: #6b7280;
+  background: #f3f4f6;
+  border-color: #d1d5db;
 }
 
-.sucursal-map-detail-status--apagado {
+.sucursal-map-detail-status--apagado,
+.sucursal-map-detail-status--desconectado {
   color: var(--danger);
   background: #fef2f2;
   border-color: #fecaca;

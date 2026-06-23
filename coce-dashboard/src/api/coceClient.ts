@@ -15,14 +15,24 @@ export function getCoceApiBase(): string {
 }
 
 export function getCoceToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY);
+  const local = localStorage.getItem(TOKEN_KEY);
+  if (local) return local;
+  const session = sessionStorage.getItem(TOKEN_KEY);
+  if (session) {
+    // Migración transparente para evitar re-login al abrir nuevas pestañas.
+    localStorage.setItem(TOKEN_KEY, session);
+    return session;
+  }
+  return null;
 }
 
 export function setCoceToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
   sessionStorage.setItem(TOKEN_KEY, token);
 }
 
 export function clearCoceToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
@@ -183,6 +193,8 @@ export type BranchLocation = {
   currentMode?: string | null;
   modeLabel?: string | null;
   modeColor?: string | null;
+  openingHours?: string | null;
+  schedulesEnabled?: boolean | null;
 };
 
 export type BranchSnapshot = {
@@ -216,6 +228,13 @@ function mapBranchLocation(raw: Record<string, unknown> | BranchLocation): Branc
       (raw as BranchLocation).modeColor ??
       (raw.mode_color as string | null | undefined) ??
       null,
+    openingHours:
+      (raw as BranchLocation).openingHours ??
+      (raw.opening_hours as string | null | undefined) ??
+      null,
+    schedulesEnabled:
+      (raw as BranchLocation).schedulesEnabled ??
+      (typeof raw.schedules_enabled === 'boolean' ? raw.schedules_enabled : null),
   };
 }
 

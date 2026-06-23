@@ -110,6 +110,24 @@ def normalize_schedule_config(data: Any) -> dict[str, Any]:
     return base
 
 
+def opening_hours_summary(cfg: dict | None = None) -> str:
+    """Resumen legible del horario del día actual (para COCE / mapa)."""
+    data = normalize_schedule_config(cfg) if cfg is not None else get_schedule_config()
+    if not data.get("enabled"):
+        return "Detección de horarios desactivada en consola"
+    from datetime import datetime
+
+    weekday_keys = WEEKDAY_KEYS
+    key = weekday_keys[datetime.now().weekday()]
+    label = WEEKDAY_LABELS_ES[key]
+    slots = (data.get("days") or {}).get(key) or []
+    active = [s for s in slots if isinstance(s, dict) and s.get("active", True)]
+    if not active:
+        return f"{label}: sin franjas activas"
+    parts = [f"{s.get('start', '?')}–{s.get('end', '?')}" for s in active]
+    return f"{label}: " + ", ".join(parts)
+
+
 def _init_db() -> None:
     conn = get_connection()
     c = conn.cursor()
