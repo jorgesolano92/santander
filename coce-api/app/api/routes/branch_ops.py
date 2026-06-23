@@ -134,6 +134,38 @@ async def panel_status(
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
+@router.get("/{branch_id}/location")
+async def branch_location(
+    branch_id: str,
+    request: Request,
+    user: str = Depends(get_current_username),
+) -> dict:
+    """Ubicación de la sucursal (lat/long/dirección) vía API tablet de la oficina."""
+    branch = _branch_or_404(branch_id)
+    try:
+        location = await branch_proxy.fetch_branch_location(branch)
+        audit.record_audit(
+            actor_username=user,
+            action="branch.location",
+            branch_id=branch_id,
+            branch_nombre=branch["nombre"],
+            success=True,
+            ip_address=get_client_ip(request),
+        )
+        return {"branchId": branch_id, "location": location}
+    except Exception as e:
+        audit.record_audit(
+            actor_username=user,
+            action="branch.location",
+            branch_id=branch_id,
+            branch_nombre=branch["nombre"],
+            success=False,
+            detail={"error": str(e)},
+            ip_address=get_client_ip(request),
+        )
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
 @router.get("/{branch_id}/health")
 async def branch_health(
     branch_id: str,

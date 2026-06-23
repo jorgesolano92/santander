@@ -175,6 +175,16 @@ export async function deleteBranch(id: string): Promise<void> {
   if (!res.ok) throw new Error(await readError(res));
 }
 
+export type BranchLocation = {
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  captured_at?: string | null;
+  currentMode?: string | null;
+  modeLabel?: string | null;
+  modeColor?: string | null;
+};
+
 export type BranchSnapshot = {
   branchId: string;
   baseUrl: string;
@@ -185,7 +195,42 @@ export type BranchSnapshot = {
   panelTimestamp?: string | null;
   panelOk: boolean;
   panelError: string | null;
+  location?: BranchLocation;
 };
+
+function mapBranchLocation(raw: Record<string, unknown> | BranchLocation): BranchLocation {
+  return {
+    address: String(raw.address ?? '').trim(),
+    latitude: raw.latitude == null || raw.latitude === '' ? null : Number(raw.latitude),
+    longitude: raw.longitude == null || raw.longitude === '' ? null : Number(raw.longitude),
+    captured_at: (raw.captured_at as string | null | undefined) ?? null,
+    currentMode:
+      (raw as BranchLocation).currentMode ??
+      (raw.current_mode as string | null | undefined) ??
+      null,
+    modeLabel:
+      (raw as BranchLocation).modeLabel ??
+      (raw.mode_label as string | null | undefined) ??
+      null,
+    modeColor:
+      (raw as BranchLocation).modeColor ??
+      (raw.mode_color as string | null | undefined) ??
+      null,
+  };
+}
+
+export async function fetchBranchLocation(branchId: string): Promise<BranchLocation> {
+  const res = await apiFetch(`/api/coce/branches/${branchId}/location`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { location?: Record<string, unknown> };
+  return mapBranchLocation(
+    data.location ?? {
+      address: '',
+      latitude: null,
+      longitude: null,
+    },
+  );
+}
 
 export async function fetchBranchSnapshot(
   branchId: string,

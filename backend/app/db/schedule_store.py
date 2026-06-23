@@ -59,7 +59,55 @@ def clone_default_schedules() -> dict[str, Any]:
     return {
         "enabled": False,
         "days": days,
+        "location": default_location(),
     }
+
+
+def default_location() -> dict[str, Any]:
+    return {
+        "address": "",
+        "latitude": None,
+        "longitude": None,
+        "captured_at": None,
+    }
+
+
+def normalize_location(raw: Any) -> dict[str, Any]:
+    base = default_location()
+    if not isinstance(raw, dict):
+        return base
+    address = raw.get("address")
+    if isinstance(address, str):
+        base["address"] = address.strip()
+    for key in ("latitude", "longitude"):
+        val = raw.get(key)
+        if val is None or val == "":
+            base[key] = None
+            continue
+        try:
+            base[key] = float(val)
+        except (TypeError, ValueError):
+            base[key] = None
+    captured = raw.get("captured_at")
+    if isinstance(captured, str) and captured.strip():
+        base["captured_at"] = captured.strip()
+    return base
+
+
+def normalize_schedule_config(data: Any) -> dict[str, Any]:
+    base = clone_default_schedules()
+    if not isinstance(data, dict):
+        return base
+    if "enabled" in data:
+        base["enabled"] = bool(data.get("enabled"))
+    days_in = data.get("days")
+    if isinstance(days_in, dict):
+        for key in WEEKDAY_KEYS:
+            slots = days_in.get(key)
+            if isinstance(slots, list):
+                base["days"][key] = copy.deepcopy(slots)
+    base["location"] = normalize_location(data.get("location"))
+    return base
 
 
 def _init_db() -> None:
@@ -90,13 +138,14 @@ def get_schedule_config() -> dict:
         data = json.loads(row[0])
         if not isinstance(data, dict):
             return clone_default_schedules()
-        return data
+        return normalize_schedule_config(data)
     except json.JSONDecodeError:
         return clone_default_schedules()
 
 
 def set_schedule_config(config: dict) -> dict:
     _init_db()
+    config = normalize_schedule_config(config)
     conn = get_connection()
     c = conn.cursor()
     config_str = json.dumps(config, ensure_ascii=False)

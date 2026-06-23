@@ -9,6 +9,54 @@ import httpx
 from app.services.host_utils import normalize_host
 
 
+def _default_location() -> dict[str, Any]:
+    return {
+        "address": "",
+        "latitude": None,
+        "longitude": None,
+        "captured_at": None,
+    }
+
+
+def _default_branch_map_info() -> dict[str, Any]:
+    return {
+        **_default_location(),
+        "current_mode": None,
+        "mode_label": None,
+        "mode_color": None,
+    }
+
+
+def _branch_map_info_from_response(data: Any) -> dict[str, Any]:
+    base = _default_branch_map_info()
+    if not isinstance(data, dict):
+        return base
+    address = data.get("address")
+    if isinstance(address, str):
+        base["address"] = address.strip()
+    for key in ("latitude", "longitude"):
+        val = data.get(key)
+        if val is None or val == "":
+            continue
+        try:
+            base[key] = float(val)
+        except (TypeError, ValueError):
+            pass
+    captured = data.get("captured_at")
+    if isinstance(captured, str) and captured.strip():
+        base["captured_at"] = captured.strip()
+    mode = data.get("current_mode")
+    if isinstance(mode, str) and mode.strip():
+        base["current_mode"] = mode.strip()
+    label = data.get("mode_label")
+    if isinstance(label, str) and label.strip():
+        base["mode_label"] = label.strip()
+    color = data.get("mode_color")
+    if isinstance(color, str) and color.strip():
+        base["mode_color"] = color.strip()
+    return base
+
+
 def branch_base_url(branch: dict[str, Any]) -> str:
     host = normalize_host(str(branch["host"]))
     proto = "https" if branch.get("useHttps") else "http"
@@ -82,6 +130,25 @@ async def panel_login(base: str, user: str, password: str) -> str:
     return str(tok)
 
 
+async def fetch_branch_location(branch: dict[str, Any]) -> dict[str, Any]:
+    """GET /api/v1/branch/location en sucursal (rápido, solo BD local)."""
+    base = branch_base_url(branch)
+    tablet_tok = await tablet_login(
+        base, branch["usuarioTablet"], branch["passwordTablet"]
+    )
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.get(
+                f"{base}/api/v1/branch/location",
+                headers={"Authorization": f"Bearer {tablet_tok}"},
+            )
+    except (httpx.ConnectError, httpx.ConnectTimeout, socket.gaierror, OSError) as e:
+        raise RuntimeError(_connection_error_message(base, e)) from e
+    if res.status_code >= 400:
+        raise RuntimeError(await _read_error(res))
+    return _branch_map_info_from_response(res.json())
+
+
 async def fetch_branch_snapshot(
     branch: dict[str, Any],
     *,
@@ -111,6 +178,12 @@ async def fetch_branch_snapshot(
     panel_timestamp: Optional[str] = None
     panel_ok = False
     panel_error: Optional[str] = None
+    location = _default_branch_map_info()
+    try:
+        location = await fetch_branch_location(branch)
+    except Exception:
+        pass
+
     pu = (branch.get("usuarioPanel") or "").strip()
     pp = branch.get("passwordPanel") or ""
     if pu and pp:
@@ -142,6 +215,7 @@ async def fetch_branch_snapshot(
         "panelTimestamp": panel_timestamp,
         "panelOk": panel_ok,
         "panelError": panel_error,
+        "location": location,
     }
 
 

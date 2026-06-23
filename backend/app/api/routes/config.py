@@ -1,5 +1,5 @@
 """GET/PUT /api/config/* — horarios, festivos, tiempos, boards (IPs ETD8A12)."""
-from fastapi import APIRouter, Query, Body
+from fastapi import APIRouter, Query, Body, HTTPException
 from app.hardware.modbus_client import get_boards_config_placeholder, test_board_ports
 from app.db.template_store import get_template_config, set_template_config
 from app.db.tablet_config_store import get_tablet_config_record, set_tablet_config
@@ -38,6 +38,27 @@ def get_schedules():
 
 @router.put("/schedules", summary="Actualizar horarios semanales")
 def put_schedules(config: dict = Body(...)):
+    loc = config.get("location") if isinstance(config, dict) else None
+    if isinstance(loc, dict):
+        lat, lng = loc.get("latitude"), loc.get("longitude")
+        for label, val, lo, hi in (
+            ("latitude", lat, -90.0, 90.0),
+            ("longitude", lng, -180.0, 180.0),
+        ):
+            if val is None or val == "":
+                continue
+            try:
+                n = float(val)
+            except (TypeError, ValueError) as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"location.{label} debe ser numérico",
+                ) from e
+            if not lo <= n <= hi:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"location.{label} fuera de rango ({lo}…{hi})",
+                )
     result = set_schedule_config(config)
     notify_schedule_config_changed()
     return result
