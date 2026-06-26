@@ -207,6 +207,7 @@ async def register(client_id: str, ws: WebSocket, username: str) -> None:
 
 
 async def unregister(client_id: str) -> None:
+    global _intercom_holder_id, _intercom_holder_username, _intercom_door
     async with _lock:
         _clients.pop(client_id, None)
         if _intercom_holder_id == client_id:
