@@ -1142,6 +1142,9 @@ def _opposite_door_blocks(door: PuertaId) -> bool:
 
 
 def _can_open_in_interlock(door: PuertaId) -> tuple[bool, str]:
+    # Carga cajero: P2 queda en servicio/abierta; P1 se autoriza sin exigir P2 cerrada.
+    if _current_mode == "horario_carga_cajero" and door == "p1":
+        return True, ""
     if _opposite_door_blocks(door):
         other = OPPOSITE_DOOR[door]
         return False, f"Puerta {other} debe estar totalmente cerrada"
