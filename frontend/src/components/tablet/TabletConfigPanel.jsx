@@ -107,7 +107,7 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
   tabletCall: {
     enabled: true,
     timeoutSeconds: 30,
-    modes: "horario_manual,horario_carga_cajero",
+    modes: "horario_manual,horario_carga_cajero,horario_extendido",
     pulsadores: "p1",
   },
 };

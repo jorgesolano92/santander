@@ -230,8 +230,10 @@ _p3_intermittent: bool = False
 _p3_intermittent_task: Optional[asyncio.Task] = None
 # Carga cajero: p1/p3 disparan llamada a consola; apertura de P1 tras confirmación.
 _carga_p1_call_pending: bool = False
-# Manual/carga: bulones (OUT_x_01/02) activos por el modo; se sueltan al abrir y se restauran al cerrar.
-TABLET_LOCK_RELEASE_MODES = frozenset({"horario_manual", "horario_carga_cajero"})
+# Manual/carga/extendido: bulones (OUT_x_01/02) activos por el modo; se sueltan al abrir y se restauran al cerrar.
+TABLET_LOCK_RELEASE_MODES = frozenset(
+    {"horario_manual", "horario_carga_cajero", "horario_extendido"}
+)
 _locks_to_restore: dict[PuertaId, list[str]] = {"p1": [], "p2": []}
 
 
@@ -965,6 +967,15 @@ def _validate_tablet_door_open(door: PuertaId) -> tuple[bool, str]:
         return False, f"Modo {_current_mode!r} no permite apertura tablet con bulones"
     if _current_mode == "horario_carga_cajero" and door != "p1":
         return False, "Carga cajero: solo P1"
+    if _current_mode == "horario_extendido":
+        if door == "p2":
+            blocked, reason = _exterior_entry_blocked_by_presence("p2")
+            if blocked:
+                return False, f"Extendido: {reason}"
+        elif door == "p1":
+            blocked, reason = _exterior_entry_blocked_by_presence("p1")
+            if blocked:
+                return False, f"Extendido: {reason}"
     return _can_open_in_interlock(door)
 
 

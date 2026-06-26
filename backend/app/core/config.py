@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     tablet_call_enabled: bool = True
     tablet_call_timeout_seconds: int = 30
     # rule_key del panel (coma-separados): horario_manual, horario_carga_cajero, …
-    tablet_call_modes: str = "horario_manual,horario_carga_cajero"
+    tablet_call_modes: str = "horario_manual,horario_carga_cajero,horario_extendido"
     tablet_call_pulsadores: str = "p1"
 
     @model_validator(mode="after")
