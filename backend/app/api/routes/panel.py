@@ -107,6 +107,14 @@ def _coce_notify(event_type: str, payload: dict | None = None) -> None:
         emit_coce_event(event_type, payload or {})
     except Exception:  # noqa: BLE001
         pass
+    if event_type == "mode_changed":
+        try:
+            from app.services import tablet_call_hub
+
+            data = payload or {}
+            tablet_call_hub.notify_mode_changed(data.get("current_mode"))
+        except Exception:  # noqa: BLE001
+            pass
     if event_type != "heartbeat":
         _publish_panel_status_debounced()
 
@@ -164,7 +172,7 @@ def _blocked_active_codes_for_rule(rule: dict) -> List[str]:
     ]
 
 
-def _set_pending_manual_enclavamiento(rule_key: str) -> None:
+def _set_pending_manual_enclavamiento(rule_key: str, blocked_inputs: Optional[List[str]] = None) -> None:
     global pending_manual_enclavamiento_mode
     pending_manual_enclavamiento_mode = rule_key
     add_event(
@@ -172,11 +180,27 @@ def _set_pending_manual_enclavamiento(rule_key: str) -> None:
         f"Modo {rule_key} en cola (esperando liberar bloqueos)",
         1,
     )
+    _notify_tablets_mode_queued(rule_key, blocked_inputs)
 
 
 def _clear_pending_manual_enclavamiento() -> None:
     global pending_manual_enclavamiento_mode
+    had_pending = pending_manual_enclavamiento_mode is not None
     pending_manual_enclavamiento_mode = None
+    if had_pending:
+        _notify_tablets_mode_queued(None)
+
+
+def _notify_tablets_mode_queued(
+    pending_mode: Optional[str],
+    blocked_inputs: Optional[List[str]] = None,
+) -> None:
+    try:
+        from app.services import tablet_call_hub
+
+        tablet_call_hub.notify_mode_queued(pending_mode, blocked_inputs)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _try_execute_pending_manual_enclavamiento(
@@ -2399,7 +2423,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     if blocked_active_codes:
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
         if _rule_eligible_for_manual_queue(rule_key, rule):
-            _set_pending_manual_enclavamiento(rule_key)
+            _set_pending_manual_enclavamiento(rule_key, blocked_active_codes)
             return {
                 "executed": False,
                 "queued": True,
@@ -3390,6 +3414,17 @@ def api_v1_list_modes_from_rules() -> List[Dict[str, Any]]:
 
 def api_v1_get_current_mode() -> Optional[str]:
     return current_mode
+
+
+def api_v1_get_pending_mode() -> Optional[str]:
+    return pending_manual_enclavamiento_mode
+
+
+def api_v1_get_mode_status() -> dict:
+    return {
+        "current_mode": current_mode,
+        "pending_mode": pending_manual_enclavamiento_mode,
+    }
 
 
 def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:

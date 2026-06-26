@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -48,6 +49,7 @@ _intercom_holder_id: Optional[str] = None
 _intercom_holder_username: Optional[str] = None
 _intercom_door: Optional[str] = None
 _lock = asyncio.Lock()
+_pending_broadcasts: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=200)
 
 
 def _tablet_call_cfg() -> dict:
@@ -126,6 +128,49 @@ async def _purge_stale_active_call() -> Optional[str]:
     return call_id
 
 
+def publish_sync(message: dict[str, Any]) -> None:
+    """Encola broadcast para el pump asyncio (desde código síncrono del panel)."""
+    try:
+        _pending_broadcasts.put_nowait(message)
+    except queue.Full:
+        log.warning("Tablet WS cola llena, evento descartado: %s", message.get("type"))
+
+
+async def pump_loop() -> None:
+    while True:
+        await asyncio.sleep(0.05)
+        batch: list[dict[str, Any]] = []
+        for _ in range(50):
+            try:
+                batch.append(_pending_broadcasts.get_nowait())
+            except queue.Empty:
+                break
+        for msg in batch:
+            await _broadcast(msg)
+
+
+def notify_mode_changed(current_mode: Optional[str]) -> None:
+    publish_sync(
+        {
+            "type": "mode_changed",
+            "current_mode": current_mode,
+        }
+    )
+
+
+def notify_mode_queued(
+    pending_mode: Optional[str],
+    blocked_inputs: Optional[list[str]] = None,
+) -> None:
+    publish_sync(
+        {
+            "type": "mode_queued",
+            "pending_mode": pending_mode,
+            "blocked_inputs": blocked_inputs or [],
+        }
+    )
+
+
 async def register(client_id: str, ws: WebSocket, username: str) -> None:
     async with _lock:
         old = _clients.get(client_id)
@@ -135,6 +180,22 @@ async def register(client_id: str, ws: WebSocket, username: str) -> None:
     log.info("Tablet WS registrada id=%s user=%s (total=%s)", client_id, username, len(_clients))
     await _purge_stale_active_call()
     await _send_to_client(client_id, _intercom_status_message())
+    try:
+        from app.api.routes import panel as panel_routes
+
+        status = panel_routes.api_v1_get_mode_status()
+        await _send_to_client(
+            client_id,
+            {"type": "mode_changed", "current_mode": status.get("current_mode")},
+        )
+        pending = status.get("pending_mode")
+        if pending:
+            await _send_to_client(
+                client_id,
+                {"type": "mode_queued", "pending_mode": pending, "blocked_inputs": []},
+            )
+    except Exception:  # noqa: BLE001
+        pass
     call = _active_call
     if (
         call

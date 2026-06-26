@@ -111,7 +111,7 @@ def list_modes(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
 
 @router.get("/get_mode")
 def get_mode(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
-    return {"current_mode": panel.api_v1_get_current_mode()}
+    return panel.api_v1_get_mode_status()
 
 
 @router.get("/tablet-config")

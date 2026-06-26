@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from app.core.config import BASE_DIR, settings
 from app.api.routes import health, status, modes, events, config, panel, panel_ws, tablet_v1, tablet_ws, auth_panel, coce_status
 from app.coce.client import start_coce_client_task
-from app.services import panel_live_hub
+from app.services import panel_live_hub, tablet_call_hub
 from app.db import system_events_store as ses
 from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
     log.info("Iniciando servicio Control de Accesos")
     zaguan_orchestrator.bind_async_loop(asyncio.get_running_loop())
     panel_live_pump = asyncio.create_task(panel_live_hub.pump_loop())
+    tablet_ws_pump = asyncio.create_task(tablet_call_hub.pump_loop())
     try:
         ses.ensure_system_events_schema()
         n0 = ses.purge_events_older_than()
@@ -92,6 +93,7 @@ async def lifespan(app: FastAPI):
     coce_ws_task: Optional[asyncio.Task] = start_coce_client_task()
     yield
     panel_live_pump.cancel()
+    tablet_ws_pump.cancel()
     retention_task.cancel()
     schedule_task.cancel()
     if auto_rules_task:
@@ -116,6 +118,10 @@ async def lifespan(app: FastAPI):
             await coce_ws_task
         except asyncio.CancelledError:
             pass
+    try:
+        await tablet_ws_pump
+    except asyncio.CancelledError:
+        pass
     try:
         await panel_live_pump
     except asyncio.CancelledError:
