@@ -3462,6 +3462,22 @@ def api_v1_read_input_by_code(code: str) -> bool:
     )
 
 
+def api_v1_read_output_by_code(code: str, *, refresh: bool = True) -> bool:
+    """Estado ON/OFF de una salida del panel (snapshot IO, opcional refresh Modbus)."""
+    board_id, channel = _parse_out_code(code)
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
+    if refresh:
+        if not io_state.get(board_id, {}).get("connected"):
+            _connect_board(board_id)
+        if io_state.get(board_id, {}).get("connected"):
+            try:
+                _read_all_io(board_id)
+            except Exception:  # noqa: BLE001
+                pass
+    return _read_output_cached(board_id, channel)
+
+
 def api_v1_refresh_board_io(board_id: int) -> bool:
     """Refresca entradas/salidas Modbus de una placa (p. ej. antes de leer bulones)."""
     if not _board_exists(board_id):
@@ -3514,4 +3530,18 @@ def api_v1_set_output_by_code(code: str, on: bool) -> dict:
         "output_changed",
         {"board_id": board_id, "channel": channel, "state": on, "code": code},
     )
-    return {"code": code, "on": on, "board_id": board_id, "channel": channel}
+    result: dict = {"code": code, "on": on, "board_id": board_id, "channel": channel}
+    if not on:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            door = zo.door_for_hold_output(code)
+            if door is not None:
+                zo.on_tablet_hold_output_released(door)
+                api_v1_refresh_board_io(zo.DOOR_BOARD_ID[door])
+        except Exception:  # noqa: BLE001
+            pass
+        pending = _try_execute_pending_manual_enclavamiento(apply_outputs_to_hardware=True)
+        if pending:
+            result["pending_mode_result"] = pending
+    return result

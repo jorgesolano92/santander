@@ -114,6 +114,20 @@ def get_mode(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
     return panel.api_v1_get_mode_status()
 
 
+@router.get("/output")
+def read_output(
+    code: str,
+    _user: Annotated[str, Depends(get_tablet_username)],
+    refresh: bool = True,
+) -> dict:
+    """Lee estado ON/OFF de una salida (p. ej. OUT_02_07 / OUT_03_07)."""
+    code = code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="code es obligatorio")
+    on = panel.api_v1_read_output_by_code(code, refresh=refresh)
+    return {"code": code, "on": on}
+
+
 @router.get("/tablet-config")
 def get_tablet_config(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
     """Configuración por defecto de la sucursal para tablets."""

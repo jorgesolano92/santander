@@ -926,6 +926,28 @@ def _door_for_open_output(code: str) -> Optional[PuertaId]:
     return None
 
 
+def door_for_hold_output(code: str) -> Optional[PuertaId]:
+    """OUT_xx_07 de mantenimiento de apertura (tablet / cola de modos)."""
+    return _door_for_open_output(code)
+
+
+def door_hold_output_for_sensor(sensor_code: str) -> Optional[str]:
+    """IN_02_04 / IN_03_04 → OUT_02_07 / OUT_03_07."""
+    for door, in_code in DOOR_OPEN_SENSOR.items():
+        if in_code == sensor_code:
+            return DOOR_OPEN_OUTPUT[door]
+    return None
+
+
+def on_tablet_hold_output_released(door: PuertaId) -> None:
+    """Tablet apagó OUT_xx_07 para liberar bloqueo de puerta (p. ej. cola de modo)."""
+    if _current_mode not in TABLET_LOCK_RELEASE_MODES:
+        return
+    _refresh_board_for_door(door)
+    if not _door_is_open(door):
+        _on_door_closed(door, source="tablet_hold_off")
+
+
 def _sync_current_mode_from_panel() -> None:
     """Alinea modo orquestador con el panel antes de apertura tablet."""
     mode = _read_panel_mode()
