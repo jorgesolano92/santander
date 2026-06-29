@@ -1,9 +1,21 @@
+function canalParam(canal) {
+  if (canal == null || canal === "") return "";
+  const ch =
+    typeof canal === "number" ? `p${canal}` : String(canal).toLowerCase();
+  return `?canal=${encodeURIComponent(ch)}`;
+}
+
 export function createZaguanDeviceApi(apiFetchZaguan) {
   return {
-    ping: () => apiFetchZaguan("/api/zaguan/device/ping"),
-    getEstado: () => apiFetchZaguan("/api/zaguan/device/estado"),
-    getConfig: () => apiFetchZaguan("/api/zaguan/device/config"),
-    getOtaVersion: () => apiFetchZaguan("/api/zaguan/device/ota/version"),
+    ping: (canal) =>
+      apiFetchZaguan(`/api/zaguan/device/ping${canalParam(canal)}`),
+    pingAll: () => apiFetchZaguan("/api/zaguan/device/ping-all"),
+    getEstado: (canal) =>
+      apiFetchZaguan(`/api/zaguan/device/estado${canalParam(canal)}`),
+    getConfig: (canal) =>
+      apiFetchZaguan(`/api/zaguan/device/config${canalParam(canal)}`),
+    getOtaVersion: (canal) =>
+      apiFetchZaguan(`/api/zaguan/device/ota/version${canalParam(canal)}`),
     getTarget: () => apiFetchZaguan("/api/zaguan/device/target"),
     saveTarget: (target) =>
       apiFetchZaguan("/api/zaguan/device/target", {
@@ -15,23 +27,23 @@ export function createZaguanDeviceApi(apiFetchZaguan) {
         method: "POST",
         body: JSON.stringify({ estado }),
       }),
-    configRed: (payload) =>
-      apiFetchZaguan("/api/zaguan/device/config/red", {
+    configRed: (payload, canal) =>
+      apiFetchZaguan(`/api/zaguan/device/config/red${canalParam(canal)}`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
-    configCanal: (payload) =>
-      apiFetchZaguan("/api/zaguan/device/config/canal", {
+    configCanal: (payload, canal) =>
+      apiFetchZaguan(`/api/zaguan/device/config/canal${canalParam(canal)}`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
-    configEstado: (payload) =>
-      apiFetchZaguan("/api/zaguan/device/config/estado", {
+    configEstado: (payload, canal) =>
+      apiFetchZaguan(`/api/zaguan/device/config/estado${canalParam(canal)}`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),
-    configFlash: (payload) =>
-      apiFetchZaguan("/api/zaguan/device/config/flash", {
+    configFlash: (payload, canal) =>
+      apiFetchZaguan(`/api/zaguan/device/config/flash${canalParam(canal)}`, {
         method: "POST",
         body: JSON.stringify(payload),
       }),

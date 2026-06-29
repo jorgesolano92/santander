@@ -190,35 +190,67 @@ function hexToRgb(hex) {
   return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
 }
 
-export function ConfigEstadoPanel({ config, ejecutar, busy, haloOn }) {
+export function ConfigEstadoPanel({
+  config,
+  ejecutar,
+  busy,
+  haloOn,
+  deviceCanal = 1,
+  multiDevice = false,
+  onActivarEstado,
+}) {
   const [estado, setEstado] = useState("libre");
-  const [canal, setCanal] = useState(0);
+  const [canal, setCanal] = useState(deviceCanal);
   const [color, setColor] = useState([0, 200, 0]);
   const [animacion, setAnimacion] = useState("respiracion");
   const [velocidad, setVelocidad] = useState(3000);
+  const [activarEnDispositivo, setActivarEnDispositivo] = useState(true);
+
+  const canalEfectivo = multiDevice ? deviceCanal : canal || deviceCanal;
+
+  useEffect(() => {
+    if (multiDevice) setCanal(deviceCanal);
+  }, [deviceCanal, multiDevice]);
 
   useEffect(() => {
     if (!config) return;
-    const c = config.canales[(canal || 1) - 1];
+    const c = config.canales[(canalEfectivo || 1) - 1];
     const e = c && c.estados.find((x) => x.estado === estado);
     if (e) {
       setColor(e.color.slice());
       setAnimacion(e.animacion);
       setVelocidad(e.velocidad);
     }
-  }, [config, estado, canal]);
+  }, [config, estado, canalEfectivo]);
 
-  const enviar = (ev) => {
+  const enviar = async (ev) => {
     ev.preventDefault();
     const payload = { estado, color, animacion, velocidad: Number(velocidad) };
-    if (canal) payload.canal = canal;
-    ejecutar("configEstado", payload);
+    const targetCanal = multiDevice ? deviceCanal : canal;
+    if (targetCanal) payload.canal = targetCanal;
+    await ejecutar("configEstado", payload);
+    if (activarEnDispositivo && targetCanal && onActivarEstado) {
+      await onActivarEstado(targetCanal, estado);
+    }
   };
 
   return (
     <form className="cfg-form" onSubmit={enviar}>
+      <p className="muted">
+        Define color y animación de cada estado. Para cambiar el LED en vivo,
+        marca «Activar en el dispositivo» o usa los botones Libre / Ocupado en
+        la tarjeta del canal.
+        {multiDevice ? (
+          <>
+            {" "}
+            Con varios ESP, la configuración se envía al dispositivo de{" "}
+            <strong>p{deviceCanal}</strong> (fila seleccionada en la tabla de
+            red).
+          </>
+        ) : null}
+      </p>
       <div className="cfg-grid">
-        <Field label="Estado">
+        <Field label="Estado a configurar">
           <select
             className="input"
             value={estado}
@@ -231,19 +263,40 @@ export function ConfigEstadoPanel({ config, ejecutar, busy, haloOn }) {
             ))}
           </select>
         </Field>
-        <Field label="Canal">
-          <select
-            className="input"
-            value={canal}
-            onChange={(e) => setCanal(Number(e.target.value))}
-          >
-            <option value={0}>Todos los canales</option>
-            {[1, 2, 3, 4].map((n) => (
-              <option key={n} value={n}>
-                Canal {n} — {CANAL_INFO[n].puerta}
-              </option>
-            ))}
-          </select>
+        {!multiDevice ? (
+          <Field label="Canal">
+            <select
+              className="input"
+              value={canal}
+              onChange={(e) => setCanal(Number(e.target.value))}
+            >
+              <option value={0}>Todos los canales</option>
+              {[1, 2, 3, 4].map((n) => (
+                <option key={n} value={n}>
+                  Canal {n} — {CANAL_INFO[n].puerta}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label="Dispositivo">
+            <span className="input input-readonly">
+              Canal {deviceCanal} — {CANAL_INFO[deviceCanal].puerta}
+            </span>
+          </Field>
+        )}
+        <Field label="Activar en el dispositivo">
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={activarEnDispositivo}
+              onChange={(e) => setActivarEnDispositivo(e.target.checked)}
+            />
+            <span>
+              Tras guardar, poner el LED en este estado (POST /api/p
+              {canalEfectivo || "n"}/estado)
+            </span>
+          </label>
         </Field>
         <Field label="Color RGB">
           <span className="color-row">
@@ -290,7 +343,9 @@ export function ConfigEstadoPanel({ config, ejecutar, busy, haloOn }) {
         </Field>
       </div>
       <BtnEnviar busy={busy}>
-        {canal ? `Aplicar a canal ${canal}` : "Aplicar a los 4 canales"}
+        {canalEfectivo
+          ? `Aplicar y${activarEnDispositivo ? " activar" : ""} en canal ${canalEfectivo}`
+          : "Aplicar a los 4 canales"}
       </BtnEnviar>
     </form>
   );
@@ -321,7 +376,7 @@ function FlashPreview({ color, nFlashes, duracion, fireKey }) {
   const rgb = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
   return (
     <span
-      className="flash-preview"
+      className={`flash-preview${on ? "" : " flash-preview-idle"}`}
       style={{
         background: on ? rgb : "var(--bg-inset)",
         boxShadow: on ? `0 0 22px ${rgb}` : "none",

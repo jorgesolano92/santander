@@ -241,6 +241,17 @@ def get_led_states() -> dict[str, EstadoLed]:
     return dict(_led_states)
 
 
+def set_led_state_from_console(canal: str, estado: EstadoLed) -> None:
+    """Sincroniza el orquestador tras un cambio manual desde consola (el ESP ya fue actualizado)."""
+    ch: PulsadorId = canal if canal in ("p1", "p2", "p3", "p4") else f"p{int(canal)}"
+    if ch not in _led_states:
+        return
+    with _led_state_lock:
+        _led_states[ch] = estado
+        _sync_led_memory()
+    _publish_zaguan_led_state()
+
+
 def get_autoservicio_status() -> dict[str, Any]:
     """Estado auxiliar (WinHose, intermitente) para depuración/API."""
     now = time.monotonic()

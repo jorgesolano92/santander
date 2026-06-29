@@ -52,8 +52,25 @@ export default function ZaguanEsp32Panel({
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
 
-  const [target, setTarget] = useState({ host: "", port: 80, timeout_s: 2 });
+  const [target, setTarget] = useState({
+    host: "",
+    port: 80,
+    timeout_s: 2,
+    channels: {},
+  });
   const [ipDraft, setIpDraft] = useState("");
+  const [channelDrafts, setChannelDrafts] = useState({
+    1: { host: "", port: "" },
+    2: { host: "", port: "" },
+    3: { host: "", port: "" },
+    4: { host: "", port: "" },
+  });
+  const [channelOnline, setChannelOnline] = useState({
+    1: false,
+    2: false,
+    3: false,
+    4: false,
+  });
   const [online, setOnline] = useState(false);
   const [sync, setSync] = useState(false);
   const [estados, setEstados] = useState({
@@ -98,6 +115,37 @@ export default function ZaguanEsp32Panel({
     );
   }, []);
 
+  const onlineCount = useMemo(
+    () => Object.values(channelOnline).filter(Boolean).length,
+    [channelOnline],
+  );
+
+  const multiDevice = useMemo(() => {
+    const hosts = new Set();
+    for (let n = 1; n <= 4; n += 1) {
+      const ch = target.channels?.[`p${n}`];
+      if (ch?.resolved_host) {
+        hosts.add(`${ch.resolved_host}:${ch.resolved_port ?? target.port ?? 80}`);
+      }
+    }
+    return hosts.size > 1;
+  }, [target]);
+
+  const resolvedChannel = useCallback(
+    (n) => {
+      const ch = target.channels?.[`p${n}`];
+      if (ch?.resolved_host) {
+        const port = ch.resolved_port ?? target.port ?? 80;
+        return `${ch.resolved_host}:${port}`;
+      }
+      if (target.host) {
+        return `${target.host}:${target.port || 80}`;
+      }
+      return "—";
+    },
+    [target],
+  );
+
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
@@ -109,9 +157,19 @@ export default function ZaguanEsp32Panel({
           host: t.host || "",
           port: Number(t.port || 80),
           timeout_s: Number(t.timeout_s || 2),
+          channels: t.channels || {},
         };
         setTarget(next);
         setIpDraft(next.host);
+        const drafts = {};
+        for (let n = 1; n <= 4; n += 1) {
+          const ch = t.channels?.[`p${n}`] || {};
+          drafts[n] = {
+            host: ch.host || "",
+            port: ch.port != null && ch.port !== "" ? String(ch.port) : "",
+          };
+        }
+        setChannelDrafts(drafts);
       })
       .catch((e) => log("err", `Target: ${e.message}`));
     return () => {
@@ -222,38 +280,44 @@ export default function ZaguanEsp32Panel({
     [api, log, marcarPulso],
   );
 
+  const activarEstadoEnDispositivo = useCallback(
+    async (canal, estado) => {
+      await ejecutar("setEstado", canal, estado);
+      setEstados((p) => ({ ...p, [canal]: estado }));
+      await refreshDeviceEstado(true);
+    },
+    [ejecutar, refreshDeviceEstado],
+  );
+
   useEffect(() => {
     if (!active) return;
     let vivo = true;
     const hacerPing = async () => {
       try {
-        const r = await api.ping();
+        const r = await api.pingAll();
         if (!vivo) return;
+        const nextOnline = { 1: false, 2: false, 3: false, 4: false };
+        let anySync = true;
+        Object.entries(r.channels || {}).forEach(([pk, info]) => {
+          const n = Number(String(pk).replace(/^p/, ""));
+          if (n >= 1 && n <= 4) {
+            nextOnline[n] = !!info.ok;
+            if (!info.sync) anySync = false;
+          }
+        });
+        const count = Object.values(nextOnline).filter(Boolean).length;
         const estaba = online;
-        setOnline(!!r.pong);
-        setSync(!!r.sync);
-        if (!estaba && r.pong) {
-          log(
-            "rx",
-            `Dispositivo en línea en ${target.host || ipDraft} (sync: ${r.sync ? "sí" : "no"})`,
-          );
-          api
-            .getConfig()
-            .then(setConfig)
-            .catch(() => {});
-          api
-            .getOtaVersion()
-            .then(setOta)
-            .catch(() => {});
-          api
-            .getOtaVersion()
-            .then(setOta)
-            .catch(() => {});
+        setChannelOnline(nextOnline);
+        setOnline(count > 0);
+        setSync(anySync && count > 0);
+        if (!estaba && count > 0) {
+          log("rx", `Dispositivos en línea (${count}/4)`);
           refreshDeviceEstado();
         }
       } catch (e) {
         if (!vivo) return;
-        log("err", e.message || `Sin respuesta de ${target.host || ipDraft}`);
+        log("err", e.message || "Sin respuesta de dispositivos ESP32");
+        setChannelOnline({ 1: false, 2: false, 3: false, 4: false });
         setOnline(false);
       }
     };
@@ -273,6 +337,18 @@ export default function ZaguanEsp32Panel({
     target.host,
     ipDraft,
   ]);
+
+  useEffect(() => {
+    if (!active || !channelOnline[canalCfg]) return;
+    api
+      .getConfig(canalCfg)
+      .then(setConfig)
+      .catch(() => {});
+    api
+      .getOtaVersion(canalCfg)
+      .then(setOta)
+      .catch(() => {});
+  }, [active, api, canalCfg, channelOnline]);
 
   const handleSimulatePulse = useCallback(
     async (canal) => {
@@ -297,8 +373,7 @@ export default function ZaguanEsp32Panel({
 
   const cambiarEstado = async (canal, estado) => {
     try {
-      await ejecutar("setEstado", canal, estado);
-      setEstados((p) => ({ ...p, [canal]: estado }));
+      await activarEstadoEnDispositivo(canal, estado);
     } catch {
       /* logged */
     }
@@ -311,20 +386,57 @@ export default function ZaguanEsp32Panel({
     setOnline(false);
     setConfig(null);
     setOta(null);
-    const nextTarget = { ...target, host: nueva };
+    const channels = {};
+    for (let n = 1; n <= 4; n += 1) {
+      const d = channelDrafts[n] || {};
+      channels[`p${n}`] = {
+        host: (d.host || "").trim(),
+        port: d.port !== "" && d.port != null ? Number(d.port) : null,
+      };
+    }
+    const nextTarget = {
+      ...target,
+      host: nueva,
+      channels,
+    };
     setTarget(nextTarget);
-    log("tx", `Conectando con ${nueva}…`);
+    log("tx", `Guardando red ESP32 (global ${nueva})…`);
     try {
-      await api.saveTarget(nextTarget);
+      const saved = await api.saveTarget(nextTarget);
+      setTarget((prev) => ({
+        ...prev,
+        channels: saved.channels || prev.channels,
+      }));
       log("rx", "Target guardado en backend");
     } catch (err) {
       log("err", `No se pudo guardar target: ${err.message}`);
     }
   };
 
+  const updateChannelDraft = (n, field, value) => {
+    setChannelDrafts((prev) => ({
+      ...prev,
+      [n]: { ...prev[n], [field]: value },
+    }));
+  };
+
   const enviarConfig = async (metodo, payload) => {
+    const descripciones = {
+      configRed: () => `POST /api/config/red → p${canalCfg}`,
+      configCanal: (p) =>
+        `POST /api/config/canal {canal:${p.canal}} → p${canalCfg}`,
+      configEstado: (p) =>
+        `POST /api/config/estado {estado:"${p.estado}"} → p${canalCfg}`,
+      configFlash: () => `POST /api/config/flash → p${canalCfg}`,
+    };
+    setBusy(true);
+    log(
+      "tx",
+      descripciones[metodo] ? descripciones[metodo](payload) : metodo,
+    );
     try {
-      const res = await ejecutar(metodo, payload);
+      const res = await api[metodo](payload, canalCfg);
+      log("rx", `OK — ${JSON.stringify(res).slice(0, 140)}`);
       if (metodo === "configRed" && payload.ip && payload.ip !== target.host) {
         log(
           "rx",
@@ -336,20 +448,25 @@ export default function ZaguanEsp32Panel({
         api.saveTarget(next).catch(() => {});
       }
       api
-        .getConfig()
+        .getConfig(canalCfg)
         .then(setConfig)
         .catch(() => {});
       return res;
-    } catch {
+    } catch (err) {
+      const msg =
+        err.name === "AbortError" ? "Sin respuesta (timeout)" : err.message;
+      log("err", `${metodo}: ${msg}`);
       return null;
+    } finally {
+      setBusy(false);
     }
   };
 
   const refreshOta = async () => {
     try {
-      setOta(await ejecutar("getOtaVersion"));
-    } catch {
-      /* logged */
+      setOta(await api.getOtaVersion(canalCfg));
+    } catch (err) {
+      log("err", `getOtaVersion: ${err.message}`);
     }
   };
 
@@ -407,7 +524,7 @@ export default function ZaguanEsp32Panel({
               key={s}
               type="button"
               className={`estado-btn estado-btn-${s}${estados[n] === s ? " is-active" : ""}`}
-              disabled={!online || busy}
+              disabled={!channelOnline[n] || busy}
               onClick={() => cambiarEstado(n, s)}
             >
               {ESTADO_META[s].label}
@@ -437,19 +554,22 @@ export default function ZaguanEsp32Panel({
           </span>
         </div>
         <form className="conn" onSubmit={conectar}>
-          <span className={`dot ${online ? "dot-on" : "dot-off"}`} />
+          <span className={`dot ${onlineCount > 0 ? "dot-on" : "dot-off"}`} />
           <span className="conn-status">
-            {online ? "En línea" : "Sin conexión"}
+            {onlineCount > 0
+              ? `En línea (${onlineCount}/4)`
+              : "Sin conexión"}
           </span>
           <input
             className="input input-ip mono"
             value={ipDraft}
             spellCheck={false}
             onChange={(e) => setIpDraft(e.target.value)}
-            aria-label="IP del ESP32"
+            aria-label="IP global ESP32 (fallback)"
+            placeholder="IP global"
           />
           <button type="submit" className="btn btn-sm">
-            Conectar
+            Guardar red
           </button>
         </form>
         <div className="topbar-meta">
@@ -531,6 +651,76 @@ export default function ZaguanEsp32Panel({
         </section>
 
         <aside className="col-side">
+          <div className="panel panel-network">
+            <div className="panel-head">
+              <h2 className="panel-title">Red ESP32 por canal</h2>
+              <span className="panel-hint">
+                Dispositivo activo: p{canalCfg}
+              </span>
+            </div>
+            <table className="device-network-table">
+              <thead>
+                <tr>
+                  <th>Canal</th>
+                  <th>IP propia</th>
+                  <th>Puerto</th>
+                  <th>Resuelve</th>
+                  <th aria-label="Estado" />
+                </tr>
+              </thead>
+              <tbody>
+                {[1, 2, 3, 4].map((n) => (
+                  <tr
+                    key={n}
+                    className={canalCfg === n ? "is-active-row" : ""}
+                    onClick={() => setCanalCfg(n)}
+                  >
+                    <td>
+                      <span className="mono">p{n}</span>
+                      <span className="device-network-label">
+                        {CANAL_INFO[n].puerta}
+                      </span>
+                    </td>
+                    <td>
+                      <input
+                        className="input input-sm mono"
+                        value={channelDrafts[n]?.host || ""}
+                        placeholder="(fallback)"
+                        spellCheck={false}
+                        onChange={(e) =>
+                          updateChannelDraft(n, "host", e.target.value)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input input-sm mono input-port"
+                        value={channelDrafts[n]?.port || ""}
+                        placeholder="—"
+                        spellCheck={false}
+                        onChange={(e) =>
+                          updateChannelDraft(n, "port", e.target.value)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </td>
+                    <td className="mono device-network-resolved">
+                      {resolvedChannel(n)}
+                    </td>
+                    <td>
+                      <span
+                        className={`dot ${channelOnline[n] ? "dot-on" : "dot-off"}`}
+                        title={
+                          channelOnline[n] ? "En línea" : "Sin respuesta"
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div className="panel">
             <nav className="tabs" role="tablist">
               {[
@@ -575,6 +765,9 @@ export default function ZaguanEsp32Panel({
                   ejecutar={enviarConfig}
                   busy={busy}
                   haloOn={haloOn}
+                  deviceCanal={canalCfg}
+                  multiDevice={multiDevice}
+                  onActivarEstado={activarEstadoEnDispositivo}
                 />
               ) : null}
               {tab === "flash" ? (

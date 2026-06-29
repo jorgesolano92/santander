@@ -11,7 +11,7 @@ Añadir al server.py:
     app.include_router(esp32_router)
 """
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 from typing import Any, Literal, Callable
 import logging
@@ -106,10 +106,16 @@ class DeviceConfigFlashBody(BaseModel):
     duracion_ms: int | None = None
 
 
+class ChannelTargetBody(BaseModel):
+    host: str = ""
+    port: int | None = None
+
+
 class DeviceTargetBody(BaseModel):
     host: str
     port: int = 80
     timeout_s: float = 2.0
+    channels: dict[str, ChannelTargetBody] | None = None
 
 
 class LlaveEchadaEmulateBody(BaseModel):
@@ -282,25 +288,32 @@ async def recibir_pulsacion_base(request: Request):
 # ══════════════════════════════════════════════════════════
 
 @router.get("/api/zaguan/device/ping")
-def device_ping():
+def device_ping(canal: CanalValido | None = Query(None)):
     try:
-        return zaguan_led_client.ping()
+        return zaguan_led_client.ping(canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
+@router.get("/api/zaguan/device/ping-all")
+def device_ping_all():
+    return zaguan_led_client.ping_all()
+
+
 @router.get("/api/zaguan/device/estado")
-def device_estado():
+def device_estado(canal: CanalValido | None = Query(None)):
     try:
-        return zaguan_led_client.estado()
+        if canal:
+            return zaguan_led_client.estado(canal)
+        return zaguan_led_client.estado_all()
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.get("/api/zaguan/device/config")
-def device_config():
+def device_config(canal: CanalValido | None = Query(None)):
     try:
-        return zaguan_led_client.config_get()
+        return zaguan_led_client.config_get(canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
@@ -315,51 +328,69 @@ def device_set_estado_canal(
     try:
         result = zaguan_led_client.set_estado_canal(canal, body.estado)
         actualizar_estado_canal(canal, body.estado)
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            zo.set_led_state_from_console(canal, body.estado)
+        except Exception:  # noqa: BLE001
+            pass
         return result
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/api/zaguan/device/config/red")
-def device_config_red(body: DeviceConfigRedBody):
+def device_config_red(
+    body: DeviceConfigRedBody,
+    canal: CanalValido | None = Query(None),
+):
     payload: dict[str, Any] = body.model_dump(exclude_none=True)
     try:
-        return zaguan_led_client.config_red(payload)
+        return zaguan_led_client.config_red(payload, canal=canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/api/zaguan/device/config/canal")
-def device_config_canal(body: DeviceConfigCanalBody):
+def device_config_canal(
+    body: DeviceConfigCanalBody,
+    canal: CanalValido | None = Query(None),
+):
     payload: dict[str, Any] = body.model_dump(exclude_none=True)
     try:
-        return zaguan_led_client.config_canal(payload)
+        return zaguan_led_client.config_canal(payload, canal=canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/api/zaguan/device/config/estado")
-def device_config_estado(body: DeviceConfigEstadoBody):
+def device_config_estado(
+    body: DeviceConfigEstadoBody,
+    canal: CanalValido | None = Query(None),
+):
     payload: dict[str, Any] = body.model_dump(exclude_none=True)
     try:
-        return zaguan_led_client.config_estado(payload)
+        return zaguan_led_client.config_estado(payload, canal=canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.post("/api/zaguan/device/config/flash")
-def device_config_flash(body: DeviceConfigFlashBody):
+def device_config_flash(
+    body: DeviceConfigFlashBody,
+    canal: CanalValido | None = Query(None),
+):
     payload: dict[str, Any] = body.model_dump(exclude_none=True)
     try:
-        return zaguan_led_client.config_flash(payload)
+        return zaguan_led_client.config_flash(payload, canal=canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
 
 @router.get("/api/zaguan/device/ota/version")
-def device_ota_version():
+def device_ota_version(canal: CanalValido | None = Query(None)):
     try:
-        return zaguan_led_client.ota_version()
+        return zaguan_led_client.ota_version(canal)
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
@@ -371,11 +402,18 @@ def device_target_get():
 
 @router.post("/api/zaguan/device/target")
 def device_target_set(body: DeviceTargetBody):
+    channels_payload: dict[str, Any] | None = None
+    if body.channels:
+        channels_payload = {
+            key: entry.model_dump(exclude_none=True)
+            for key, entry in body.channels.items()
+        }
     try:
         return zaguan_led_client.set_target(
             host=body.host,
             port=body.port,
             timeout_s=body.timeout_s,
+            channels=channels_payload,
         )
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
