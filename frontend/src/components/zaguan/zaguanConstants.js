@@ -1,31 +1,51 @@
 export const ESTADOS_VALIDOS = ["libre", "ocupado", "abriendo", "apagado"];
 
+/** IP por defecto de cada ESP (canal lógico p1–p4). */
+export const CANAL_DEFAULT_IPS = {
+  1: "192.168.1.60",
+  2: "192.168.1.62",
+  3: "192.168.1.61",
+  4: "192.168.1.63",
+};
+
 export const CANAL_INFO = {
   1: {
     corto: "C1",
     puerta: "P1",
-    nombre: "Tira exterior — cara calle P1",
+    rol: "Videoportero",
+    ubicacion: "Exterior",
+    nombre: "P1 — videoportero exterior",
+    ip: CANAL_DEFAULT_IPS[1],
     gpioLed: 2,
     gpioBtn: 15,
   },
   2: {
     corto: "C2",
     puerta: "P2",
-    nombre: "Tira exterior — cara oficina P2",
+    rol: "Videoportero",
+    ubicacion: "Interior",
+    nombre: "P2 — videoportero interior",
+    ip: CANAL_DEFAULT_IPS[2],
     gpioLed: 4,
     gpioBtn: 16,
   },
   3: {
     corto: "C3",
     puerta: "P1",
-    nombre: "Tira pulsador interior P1",
+    rol: "Pulsador",
+    ubicacion: "Exterior",
+    nombre: "P1 — pulsador interior",
+    ip: CANAL_DEFAULT_IPS[3],
     gpioLed: 5,
     gpioBtn: 17,
   },
   4: {
     corto: "C4",
     puerta: "P2",
-    nombre: "Tira pulsador interior P2",
+    rol: "Pulsador",
+    ubicacion: "Interior",
+    nombre: "P2 — pulsador interior",
+    ip: CANAL_DEFAULT_IPS[4],
     gpioLed: 6,
     gpioBtn: 18,
   },
@@ -60,35 +80,45 @@ export function withWinhoseParpadeo(canal, estado, baseCfg, winhoseParpadeo) {
   };
 }
 
-/** Canal pN → puerta física y ubicación del pulsador/LED (simulación backend). */
+/** Canales con pulsador físico (simulación POST /api/zaguan/pulsacion/pN). */
 export const ZAGUAN_PULSADOR_CANALES = [
-  {
-    canal: 1,
-    puerta: "P1 (calle)",
-    ubicacion: "Exterior",
-    led: "C1",
-    inModbus: "IN_02_08",
-  },
-  {
-    canal: 2,
-    puerta: "P2 (oficina)",
-    ubicacion: "Exterior",
-    led: "C2",
-    inModbus: "IN_03_08",
-  },
   {
     canal: 3,
     puerta: "P1 (calle)",
-    ubicacion: "Interior",
+    dispositivo: "Pulsador exterior P1",
+    ubicacion: "Exterior",
     led: "C3",
+    ip: CANAL_DEFAULT_IPS[3],
     inModbus: "IN_02_07",
   },
   {
     canal: 4,
     puerta: "P2 (oficina)",
-    ubicacion: "Interior",
+    dispositivo: "Pulsador interior P2",
+    ubicacion: "Interior zaguán",
     led: "C4",
+    ip: CANAL_DEFAULT_IPS[4],
     inModbus: "IN_03_07",
+  },
+];
+
+/** Videoporteros (LED en canal lógico; sin pulsación de apertura en este canal). */
+export const ZAGUAN_VIDEOPORTERO_CANALES = [
+  {
+    canal: 1,
+    puerta: "P1 (calle)",
+    dispositivo: "Videoportero exterior P1",
+    ubicacion: "Exterior",
+    led: "C1",
+    ip: CANAL_DEFAULT_IPS[1],
+  },
+  {
+    canal: 2,
+    puerta: "P2 (oficina)",
+    dispositivo: "Videoportero interior P2",
+    ubicacion: "Interior zaguán",
+    led: "C2",
+    ip: CANAL_DEFAULT_IPS[2],
   },
 ];
 

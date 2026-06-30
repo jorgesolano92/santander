@@ -4,19 +4,19 @@
   "timeout_s": 2.0,
   "channels": {
     "p1": {
-      "host": "",
+      "host": "192.168.1.60",
       "port": null
     },
     "p2": {
-      "host": "",
+      "host": "192.168.1.62",
       "port": null
     },
     "p3": {
-      "host": "",
+      "host": "192.168.1.61",
       "port": null
     },
     "p4": {
-      "host": "",
+      "host": "192.168.1.63",
       "port": null
     }
   }

@@ -115,7 +115,7 @@ export function EstadoBadge({ estado }) {
 
 export function ZaguanDiagram({
   estados,
-  config,
+  resolveCanalConfig,
   onSelectCanal,
   seleccionado,
   pulsos,
@@ -123,8 +123,7 @@ export function ZaguanDiagram({
   winhoseParpadeo = {},
 }) {
   const pulso = pulsos || {};
-  const cfgCanal = (n) =>
-    (config && config.canales && config.canales[n - 1]) || null;
+  const cfgCanal = (n) => resolveCanalConfig(n) || null;
   const estadoCfg = (n) => {
     const c = cfgCanal(n);
     const est = estados[n] || "apagado";
@@ -188,7 +187,7 @@ export function ZaguanDiagram({
           <StripBlock canal={1} vertical max={14} />
           <span
             className={`pulsador-icono${pulso[1] ? " is-pulsed" : ""}`}
-            title="Pulsador exterior calle P1 (GPIO 15)"
+            title={CANAL_INFO[1].nombre}
           >
             ⏻
           </span>
@@ -202,7 +201,7 @@ export function ZaguanDiagram({
             <StripBlock canal={3} vertical max={14} />
             <span
               className={`pulsador-icono${pulso[3] ? " is-pulsed" : ""}`}
-              title="Pulsador interior P1 (GPIO 17)"
+              title={CANAL_INFO[3].nombre}
             >
               ⏻
             </span>
@@ -211,7 +210,7 @@ export function ZaguanDiagram({
             <StripBlock canal={4} vertical max={14} />
             <span
               className={`pulsador-icono${pulso[4] ? " is-pulsed" : ""}`}
-              title="Pulsador interior P2 (GPIO 18)"
+              title={CANAL_INFO[4].nombre}
             >
               ⏻
             </span>
@@ -226,7 +225,7 @@ export function ZaguanDiagram({
           <StripBlock canal={2} vertical max={14} />
           <span
             className={`pulsador-icono${pulso[2] ? " is-pulsed" : ""}`}
-            title="Pulsador exterior oficina P2 (GPIO 16)"
+            title={CANAL_INFO[2].nombre}
           >
             ⏻
           </span>

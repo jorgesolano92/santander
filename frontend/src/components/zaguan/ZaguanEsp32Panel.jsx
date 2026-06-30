@@ -4,6 +4,7 @@ import {
   ESTADOS_VALIDOS,
   ESTADO_META,
   TWEAK_DEFAULTS,
+  CANAL_DEFAULT_IPS,
   withWinhoseParpadeo,
 } from "./zaguanConstants";
 import { createZaguanDeviceApi } from "./zaguanDeviceApi";
@@ -28,6 +29,8 @@ import { ZaguanSimulationSection } from "./ZaguanSimulationSection";
 import "./zaguanEsp32.css";
 
 let _logId = 0;
+
+const EMPTY_CONFIGS = { 1: null, 2: null, 3: null, 4: null };
 
 function estadosFromBackendPayload(r) {
   const nuevos = {};
@@ -80,7 +83,7 @@ export default function ZaguanEsp32Panel({
     4: "apagado",
   });
   const [pulsaciones, setPulsaciones] = useState({ 1: 0, 2: 0, 3: 0, 4: 0 });
-  const [config, setConfig] = useState(null);
+  const [configsByCanal, setConfigsByCanal] = useState(EMPTY_CONFIGS);
   const [ota, setOta] = useState(null);
   const [eventos, setEventos] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -131,6 +134,63 @@ export default function ZaguanEsp32Panel({
     return hosts.size > 1;
   }, [target]);
 
+  const configForPanels = configsByCanal[canalCfg] || null;
+
+  const canalDeviceConfig = useCallback(
+    (n) => {
+      if (multiDevice) {
+        const devCfg = configsByCanal[n];
+        if (!devCfg?.canales?.length) return null;
+        return devCfg.canales[n - 1] || devCfg.canales[0] || null;
+      }
+      const unified = configsByCanal[1] || configsByCanal[n];
+      return unified?.canales?.[n - 1] || null;
+    },
+    [configsByCanal, multiDevice],
+  );
+
+  const refreshConfigs = useCallback(async () => {
+    if (!active) return;
+    if (multiDevice) {
+      const entries = await Promise.all(
+        [1, 2, 3, 4].map(async (n) => {
+          if (!channelOnline[n]) return [n, null];
+          try {
+            return [n, await api.getConfig(n)];
+          } catch {
+            return [n, null];
+          }
+        }),
+      );
+      setConfigsByCanal(Object.fromEntries(entries));
+      return;
+    }
+    const ch = [1, 2, 3, 4].find((n) => channelOnline[n]);
+    if (!ch) return;
+    try {
+      const cfg = await api.getConfig(ch);
+      setConfigsByCanal({ 1: cfg, 2: cfg, 3: cfg, 4: cfg });
+    } catch {
+      /* ping / log gestionan offline */
+    }
+  }, [active, api, channelOnline, multiDevice]);
+
+  const refreshConfigForCanal = useCallback(
+    async (canal) => {
+      if (!channelOnline[canal]) return;
+      try {
+        const cfg = await api.getConfig(canal);
+        setConfigsByCanal((prev) => {
+          if (multiDevice) return { ...prev, [canal]: cfg };
+          return { 1: cfg, 2: cfg, 3: cfg, 4: cfg };
+        });
+      } catch {
+        /* logged elsewhere */
+      }
+    },
+    [api, channelOnline, multiDevice],
+  );
+
   const resolvedChannel = useCallback(
     (n) => {
       const ch = target.channels?.[`p${n}`];
@@ -165,7 +225,7 @@ export default function ZaguanEsp32Panel({
         for (let n = 1; n <= 4; n += 1) {
           const ch = t.channels?.[`p${n}`] || {};
           drafts[n] = {
-            host: ch.host || "",
+            host: ch.host || CANAL_DEFAULT_IPS[n] || "",
             port: ch.port != null && ch.port !== "" ? String(ch.port) : "",
           };
         }
@@ -313,6 +373,7 @@ export default function ZaguanEsp32Panel({
         if (!estaba && count > 0) {
           log("rx", `Dispositivos en línea (${count}/4)`);
           refreshDeviceEstado();
+          refreshConfigs();
         }
       } catch (e) {
         if (!vivo) return;
@@ -332,6 +393,7 @@ export default function ZaguanEsp32Panel({
     online,
     t.intervaloPing,
     refreshDeviceEstado,
+    refreshConfigs,
     active,
     log,
     target.host,
@@ -339,11 +401,12 @@ export default function ZaguanEsp32Panel({
   ]);
 
   useEffect(() => {
+    if (!active) return;
+    refreshConfigs();
+  }, [active, refreshConfigs]);
+
+  useEffect(() => {
     if (!active || !channelOnline[canalCfg]) return;
-    api
-      .getConfig(canalCfg)
-      .then(setConfig)
-      .catch(() => {});
     api
       .getOtaVersion(canalCfg)
       .then(setOta)
@@ -384,7 +447,7 @@ export default function ZaguanEsp32Panel({
     const nueva = ipDraft.trim();
     if (!nueva) return;
     setOnline(false);
-    setConfig(null);
+    setConfigsByCanal(EMPTY_CONFIGS);
     setOta(null);
     const channels = {};
     for (let n = 1; n <= 4; n += 1) {
@@ -447,10 +510,7 @@ export default function ZaguanEsp32Panel({
         setIpDraft(payload.ip);
         api.saveTarget(next).catch(() => {});
       }
-      api
-        .getConfig(canalCfg)
-        .then(setConfig)
-        .catch(() => {});
+      await refreshConfigForCanal(canalCfg);
       return res;
     } catch (err) {
       const msg =
@@ -471,7 +531,7 @@ export default function ZaguanEsp32Panel({
   };
 
   const estadoCfgDe = (canal, estado) => {
-    const c = config && config.canales && config.canales[canal - 1];
+    const c = canalDeviceConfig(canal);
     if (!c) {
       return withWinhoseParpadeo(
         canal,
@@ -492,7 +552,7 @@ export default function ZaguanEsp32Panel({
   const haloOn = t.halo;
 
   const renderCanalCard = (n) => {
-    const c = config && config.canales && config.canales[n - 1];
+    const c = canalDeviceConfig(n);
     return (
       <article
         key={n}
@@ -626,22 +686,35 @@ export default function ZaguanEsp32Panel({
             </div>
             <ZaguanDiagram
               estados={estados}
-              config={config}
+              resolveCanalConfig={canalDeviceConfig}
               seleccionado={canalSel}
               pulsos={pulsos}
               haloOn={haloOn}
               winhoseParpadeo={winhoseParpadeo}
-              onSelectCanal={(c) => setCanalSel(c === canalSel ? null : c)}
+              onSelectCanal={(c) => {
+                setCanalSel((prev) => (c === prev ? null : c));
+                if (c != null) setCanalCfg(c);
+              }}
             />
           </div>
 
-          <div className="canales-grid canales-grid-exterior">
-            {[1, 2].map(renderCanalCard)}
+          <div className="canales-section">
+            <p className="canales-grid-label">
+              P1 — exterior (C1 videoportero · C3 pulsador)
+            </p>
+            <div className="canales-grid canales-grid-exterior">
+              {[1, 3].map(renderCanalCard)}
+            </div>
           </div>
 
           <div className="canales-interior-block">
-            <div className="canales-grid canales-grid-interior">
-              {[3, 4].map(renderCanalCard)}
+            <div className="canales-section">
+              <p className="canales-grid-label">
+                P2 — interior zaguán (C2 videoportero · C4 pulsador)
+              </p>
+              <div className="canales-grid canales-grid-interior">
+                {[2, 4].map(renderCanalCard)}
+              </div>
             </div>
             <ZaguanSimulationSection
               onSimulatePulse={handleSimulatePulse}
@@ -678,7 +751,11 @@ export default function ZaguanEsp32Panel({
                     <td>
                       <span className="mono">p{n}</span>
                       <span className="device-network-label">
+                        {CANAL_INFO[n].rol} · {CANAL_INFO[n].ubicacion}{" "}
                         {CANAL_INFO[n].puerta}
+                      </span>
+                      <span className="device-network-ip mono">
+                        {CANAL_DEFAULT_IPS[n]}
                       </span>
                     </td>
                     <td>
@@ -745,23 +822,24 @@ export default function ZaguanEsp32Panel({
             <div className="tab-body">
               {tab === "red" ? (
                 <ConfigRedPanel
-                  config={config}
+                  config={configForPanels}
                   ejecutar={enviarConfig}
                   busy={busy}
                 />
               ) : null}
               {tab === "canal" ? (
                 <ConfigCanalPanel
-                  config={config}
+                  config={configForPanels}
                   ejecutar={enviarConfig}
                   busy={busy}
                   canal={canalCfg}
                   setCanal={setCanalCfg}
+                  multiDevice={multiDevice}
                 />
               ) : null}
               {tab === "estado" ? (
                 <ConfigEstadoPanel
-                  config={config}
+                  config={configForPanels}
                   ejecutar={enviarConfig}
                   busy={busy}
                   haloOn={haloOn}
@@ -772,7 +850,7 @@ export default function ZaguanEsp32Panel({
               ) : null}
               {tab === "flash" ? (
                 <ConfigFlashPanel
-                  config={config}
+                  config={configForPanels}
                   ejecutar={enviarConfig}
                   busy={busy}
                 />

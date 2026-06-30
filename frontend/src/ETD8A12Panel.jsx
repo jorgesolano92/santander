@@ -5,7 +5,10 @@ import { GlobalLoader } from "./components/GlobalLoader";
 import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
-import { DEFAULT_MODE_COLORS, normalizeRuleColor } from "./utils/ruleModeColors";
+import {
+  DEFAULT_MODE_COLORS,
+  normalizeRuleColor,
+} from "./utils/ruleModeColors";
 import { ZAGUAN_LLAVE_ECHADA } from "./components/zaguan/zaguanConstants";
 import { ruleBlockersActive } from "./utils/panelRuleBlockers";
 import {
@@ -156,7 +159,9 @@ function mixHex(hex, target, amount) {
 }
 
 function templateColors(config) {
-  const primary = normalizeHexColor(config.primaryColor || DEFAULT_TEMPLATE_CONFIG.primaryColor);
+  const primary = normalizeHexColor(
+    config.primaryColor || DEFAULT_TEMPLATE_CONFIG.primaryColor,
+  );
   return {
     primary,
     primaryDark: mixHex(primary, "#000000", 0.25),
@@ -287,7 +292,8 @@ const Btn = ({
         fontWeight: 600,
         padding: small ? "4px 10px" : "9px 16px",
         borderRadius: 8,
-        boxShadow: variant === "primary" ? "0 1px 3px rgba(0,0,0,0.12)" : undefined,
+        boxShadow:
+          variant === "primary" ? "0 1px 3px rgba(0,0,0,0.12)" : undefined,
         opacity: disabled ? 0.5 : 1,
         cursor: disabled ? "not-allowed" : "pointer",
         width: full ? "100%" : undefined,
@@ -544,18 +550,18 @@ function TemplateConfigPanel({
             background: C.white,
           }}
         >
-            <div
-              style={{
-                minHeight: 58,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 16,
-                padding: "10px 16px",
-                color: C.white,
-                background: `linear-gradient(90deg, ${themeColors.primary} 0%, ${themeColors.primaryDark} 100%)`,
-              }}
-            >
+          <div
+            style={{
+              minHeight: 58,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
+              padding: "10px 16px",
+              color: C.white,
+              background: `linear-gradient(90deg, ${themeColors.primary} 0%, ${themeColors.primaryDark} 100%)`,
+            }}
+          >
             <img
               src={draft.mainLogo || DEFAULT_TEMPLATE_CONFIG.mainLogo}
               alt="Logo principal"
@@ -1193,10 +1199,15 @@ function RulesFormAssistant({
           }}
           title="Color en la línea de tiempo de horarios"
         >
-          <span style={{ fontSize: 10, fontWeight: 700, color: C.textSub }}>COLOR</span>
+          <span style={{ fontSize: 10, fontWeight: 700, color: C.textSub }}>
+            COLOR
+          </span>
           <input
             type="color"
-            value={normalizeHexColor(wfColor, DEFAULT_MODE_COLORS.horario_automatico)}
+            value={normalizeHexColor(
+              wfColor,
+              DEFAULT_MODE_COLORS.horario_automatico,
+            )}
             onChange={(e) => setWfColor(e.target.value)}
             style={{
               width: 44,
@@ -1644,7 +1655,10 @@ function ModuleChannelRow({
         method: "PUT",
         body: JSON.stringify({ pulse_limit }),
       });
-      addUI("OK", pulse_limit ? `Límite: ${pulse_limit}` : "Sin límite de pulsaciones");
+      addUI(
+        "OK",
+        pulse_limit ? `Límite: ${pulse_limit}` : "Sin límite de pulsaciones",
+      );
       await onRefresh();
     } catch (e) {
       addUI("ERR", e.message);
@@ -1660,10 +1674,9 @@ function ModuleChannelRow({
       return;
     }
     try {
-      await apiFetch(
-        `/modules/${mod.id}/channels/${channel.id}/reset-pulses`,
-        { method: "POST" },
-      );
+      await apiFetch(`/modules/${mod.id}/channels/${channel.id}/reset-pulses`, {
+        method: "POST",
+      });
       addUI("OK", `Contador IN${index + 1} reiniciado`);
       await onRefresh();
     } catch (e) {
@@ -2300,7 +2313,9 @@ export default function ETD8A12Panel() {
           const parsed = {
             ...DEFAULT_TEMPLATE_CONFIG,
             ...data,
-            primaryColor: normalizeHexColor(data.primaryColor || DEFAULT_TEMPLATE_CONFIG.primaryColor)
+            primaryColor: normalizeHexColor(
+              data.primaryColor || DEFAULT_TEMPLATE_CONFIG.primaryColor,
+            ),
           };
           setTemplateConfig(parsed);
           setTemplateDraft(parsed);
@@ -2442,7 +2457,7 @@ export default function ETD8A12Panel() {
     try {
       await apiFetch("/api/config/template", {
         method: "PUT",
-        body: JSON.stringify(next)
+        body: JSON.stringify(next),
       });
       setTemplateConfig(next);
       setTemplateDraft(next);
@@ -2470,7 +2485,8 @@ export default function ETD8A12Panel() {
   );
 
   const resetTemplateConfig1 = useCallback(
-    () => applyTemplatePreset(DEFAULT_TEMPLATE_CONFIG_1, "Invia (por defecto 1)"),
+    () =>
+      applyTemplatePreset(DEFAULT_TEMPLATE_CONFIG_1, "Invia (por defecto 1)"),
     [applyTemplatePreset],
   );
 
@@ -3154,10 +3170,7 @@ export default function ETD8A12Panel() {
           );
           return;
         }
-        addUI(
-          res?.winhose_window_active ? "OK" : "INFO",
-          msg,
-        );
+        addUI(res?.winhose_window_active ? "OK" : "INFO", msg);
         void afterPanelMutation();
       } catch (e) {
         addUI("ERR", `Llave echada ${llaveId}: ${e.message}`);
@@ -3322,8 +3335,8 @@ export default function ETD8A12Panel() {
                 >
                   <strong>En cola:</strong>{" "}
                   {toModeLabel(pendingManualEnclavamientoMode)}. Se activará
-                  automáticamente cuando las entradas de bloqueo (p. ej. IN 10 —
-                  alarma conectada) pasen a inactivas.
+                  automáticamente cuando las entradas de bloqueo pasen a
+                  inactivas.
                 </div>
               )}
               {/* <div
@@ -4795,9 +4808,7 @@ export default function ETD8A12Panel() {
           <TabletConfigPanel apiFetch={apiFetch} onNotify={addUI} />
         )}
 
-        {tab === 8 && (
-          <SchedulesPanel apiFetch={apiFetch} onNotify={addUI} />
-        )}
+        {tab === 8 && <SchedulesPanel apiFetch={apiFetch} onNotify={addUI} />}
       </div>
       <style>{`*{box-sizing:border-box} ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:${C.borderMid};border-radius:3px}`}</style>
     </div>

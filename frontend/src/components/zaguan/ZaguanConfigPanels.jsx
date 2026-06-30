@@ -101,7 +101,14 @@ export function ConfigRedPanel({ config, ejecutar, busy }) {
   );
 }
 
-export function ConfigCanalPanel({ config, ejecutar, busy, canal, setCanal }) {
+export function ConfigCanalPanel({
+  config,
+  ejecutar,
+  busy,
+  canal,
+  setCanal,
+  multiDevice = false,
+}) {
   const c = config && config.canales && config.canales[canal - 1];
   const [leds, setLeds] = useState("");
   const [brillo, setBrillo] = useState("");
@@ -125,20 +132,27 @@ export function ConfigCanalPanel({ config, ejecutar, busy, canal, setCanal }) {
 
   return (
     <form className="cfg-form" onSubmit={enviar}>
-      <div className="canal-tabs" role="tablist">
-        {[1, 2, 3, 4].map((n) => (
-          <button
-            key={n}
-            type="button"
-            role="tab"
-            aria-selected={canal === n}
-            className={`canal-tab${canal === n ? " is-active" : ""}`}
-            onClick={() => setCanal(n)}
-          >
-            C{n}
-          </button>
-        ))}
-      </div>
+      {!multiDevice ? (
+        <div className="canal-tabs" role="tablist">
+          {[1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="tab"
+              aria-selected={canal === n}
+              className={`canal-tab${canal === n ? " is-active" : ""}`}
+              onClick={() => setCanal(n)}
+            >
+              C{n}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">
+          Configuración del canal lógico <strong>p{canal}</strong> en este ESP (
+          {CANAL_INFO[canal].nombre}).
+        </p>
+      )}
       <p className="muted">
         {CANAL_INFO[canal].nombre} · GPIO LED {c.gpio_led} · GPIO pulsador{" "}
         {c.gpio_boton}
@@ -165,7 +179,9 @@ export function ConfigCanalPanel({ config, ejecutar, busy, canal, setCanal }) {
           />
         </Field>
       </div>
-      <BtnEnviar busy={busy}>Aplicar a canal {canal}</BtnEnviar>
+      <BtnEnviar busy={busy}>
+        Aplicar canal {canal} en este ESP
+      </BtnEnviar>
     </form>
   );
 }
