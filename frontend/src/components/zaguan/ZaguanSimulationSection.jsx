@@ -1,8 +1,4 @@
-import {
-  ZAGUAN_PULSADOR_CANALES,
-  ZAGUAN_VIDEOPORTERO_CANALES,
-  ZAGUAN_LLAVE_ECHADA,
-} from "./zaguanConstants";
+import { ZAGUAN_PULSADOR_CANALES, ZAGUAN_LLAVE_ECHADA } from "./zaguanConstants";
 
 export function ZaguanSimulationSection({
   onSimulatePulse,
@@ -17,64 +13,47 @@ export function ZaguanSimulationSection({
       </div>
 
       {onSimulatePulse ? (
-        <>
-          <div className="sim-block">
-            <h3 className="sim-block-title">Pulsadores → backend</h3>
-            <p className="muted sim-block-desc">
-              Simula la pulsación del botón físico (
-              <code className="mono">POST /api/zaguan/pulsacion/pN</code>). C3
-              y C4 son los únicos pulsadores; cada ESP debe estar configurado
-              con su canal lógico (p3 / p4).
-            </p>
-            <div className="sim-grid sim-grid-pulse">
-              {ZAGUAN_PULSADOR_CANALES.map(
-                ({ canal, puerta, dispositivo, ubicacion, led, ip, inModbus }) => (
-                  <article key={canal} className="sim-card">
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm sim-card-action"
-                      onClick={() => onSimulatePulse(canal)}
-                    >
-                      Simular pulsación p{canal}
-                    </button>
-                    <div className="sim-card-title">
-                      <span className="canal-chip">{led}</span>
-                      {dispositivo}
-                    </div>
-                    <div className="sim-card-subtitle">{puerta}</div>
-                    <div className="sim-card-meta mono">
-                      {ubicacion} · {ip} · {inModbus}
-                    </div>
-                  </article>
-                ),
-              )}
-            </div>
+        <div className="sim-block">
+          <h3 className="sim-block-title">Simular pulsación → backend</h3>
+          <p className="muted sim-block-desc">
+            Igual que cuando el ESP32 pulsa: avisa al <strong>backend</strong> (
+            <code className="mono">POST /api/zaguan/pulsacion/pN</code>), no al
+            ESP32. Cada canal lógico (p1–p4) tiene su IP y rol en la tabla de
+            red.
+          </p>
+          <div className="sim-grid sim-grid-pulse">
+            {ZAGUAN_PULSADOR_CANALES.map(
+              ({
+                canal,
+                puerta,
+                dispositivo,
+                ubicacion,
+                led,
+                ip,
+                inModbus,
+              }) => (
+                <article key={canal} className="sim-card">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm sim-card-action"
+                    onClick={() => onSimulatePulse(canal)}
+                  >
+                    Simular pulsación p{canal}
+                  </button>
+                  <div className="sim-card-title">
+                    <span className="canal-chip">{led}</span>
+                    {dispositivo}
+                  </div>
+                  <div className="sim-card-subtitle">{puerta}</div>
+                  <div className="sim-card-meta mono">
+                    {ubicacion} · {ip}
+                    {inModbus ? ` · ${inModbus}` : ""}
+                  </div>
+                </article>
+              ),
+            )}
           </div>
-
-          <div className="sim-block">
-            <h3 className="sim-block-title">Videoporteros (referencia)</h3>
-            <p className="muted sim-block-desc">
-              LEDs en canal p1 / p2. La apertura por interfono usa otras reglas;
-              aquí solo se indica el mapeo IP ↔ canal del ESP.
-            </p>
-            <div className="sim-grid sim-grid-pulse">
-              {ZAGUAN_VIDEOPORTERO_CANALES.map(
-                ({ canal, puerta, dispositivo, ubicacion, led, ip }) => (
-                  <article key={canal} className="sim-card sim-card-ref">
-                    <div className="sim-card-title">
-                      <span className="canal-chip">{led}</span>
-                      {dispositivo}
-                    </div>
-                    <div className="sim-card-subtitle">{puerta}</div>
-                    <div className="sim-card-meta mono">
-                      Canal p{canal} · {ubicacion} · {ip}
-                    </div>
-                  </article>
-                ),
-              )}
-            </div>
-          </div>
-        </>
+        </div>
       ) : null}
 
       {onEmulateLlaveEchada ? (

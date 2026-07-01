@@ -93,6 +93,7 @@ export default function ZaguanEsp32Panel({
   const [winhoseParpadeo, setWinhoseParpadeo] = useState({});
   const pulsRef = useRef(pulsaciones);
   pulsRef.current = pulsaciones;
+  const configsLoadedForSession = useRef(false);
 
   const api = useMemo(
     () => createZaguanDeviceApi(apiFetchZaguan),
@@ -124,6 +125,10 @@ export default function ZaguanEsp32Panel({
   );
 
   const multiDevice = useMemo(() => {
+    for (let n = 1; n <= 4; n += 1) {
+      const ch = target.channels?.[`p${n}`];
+      if (ch?.enabled === false) return true;
+    }
     const hosts = new Set();
     for (let n = 1; n <= 4; n += 1) {
       const ch = target.channels?.[`p${n}`];
@@ -133,6 +138,11 @@ export default function ZaguanEsp32Panel({
     }
     return hosts.size > 1;
   }, [target]);
+
+  const channelIsEnabled = useCallback(
+    (n) => target.channels?.[`p${n}`]?.enabled !== false,
+    [target],
+  );
 
   const configForPanels = configsByCanal[canalCfg] || null;
 
@@ -149,51 +159,74 @@ export default function ZaguanEsp32Panel({
     [configsByCanal, multiDevice],
   );
 
-  const refreshConfigs = useCallback(async () => {
+  const loadInitialConfigs = useCallback(async () => {
     if (!active) return;
-    if (multiDevice) {
-      const entries = await Promise.all(
-        [1, 2, 3, 4].map(async (n) => {
-          if (!channelOnline[n]) return [n, null];
-          try {
-            return [n, await api.getConfig(n)];
-          } catch {
-            return [n, null];
-          }
-        }),
-      );
-      setConfigsByCanal(Object.fromEntries(entries));
-      return;
-    }
-    const ch = [1, 2, 3, 4].find((n) => channelOnline[n]);
-    if (!ch) return;
     try {
-      const cfg = await api.getConfig(ch);
-      setConfigsByCanal({ 1: cfg, 2: cfg, 3: cfg, 4: cfg });
+      const t = await api.getTarget();
+      const hosts = new Set();
+      for (let n = 1; n <= 4; n += 1) {
+        const ch = t.channels?.[`p${n}`];
+        if (ch?.resolved_host) {
+          hosts.add(`${ch.resolved_host}:${ch.resolved_port ?? t.port ?? 80}`);
+        }
+      }
+      const isMulti = hosts.size > 1;
+      if (isMulti) {
+        const entries = await Promise.all(
+          [1, 2, 3, 4].map(async (n) => {
+            const ch = t.channels?.[`p${n}`];
+            if (ch?.enabled === false) return [n, null];
+            try {
+              return [n, await api.getConfig(n)];
+            } catch {
+              return [n, null];
+            }
+          }),
+        );
+        setConfigsByCanal(Object.fromEntries(entries));
+      } else {
+        const ch =
+          [1, 2, 3, 4].find((n) => t.channels?.[`p${n}`]?.resolved_host) || 1;
+        try {
+          const cfg = await api.getConfig(ch);
+          setConfigsByCanal({ 1: cfg, 2: cfg, 3: cfg, 4: cfg });
+        } catch {
+          /* sin ESP al entrar */
+        }
+      }
     } catch {
-      /* ping / log gestionan offline */
+      /* target no disponible */
     }
-  }, [active, api, channelOnline, multiDevice]);
+  }, [active, api]);
 
   const refreshConfigForCanal = useCallback(
     async (canal) => {
-      if (!channelOnline[canal]) return;
       try {
         const cfg = await api.getConfig(canal);
         setConfigsByCanal((prev) => {
-          if (multiDevice) return { ...prev, [canal]: cfg };
+          const hosts = new Set();
+          for (let n = 1; n <= 4; n += 1) {
+            const ch = target.channels?.[`p${n}`];
+            if (ch?.resolved_host) {
+              hosts.add(
+                `${ch.resolved_host}:${ch.resolved_port ?? target.port ?? 80}`,
+              );
+            }
+          }
+          if (hosts.size > 1) return { ...prev, [canal]: cfg };
           return { 1: cfg, 2: cfg, 3: cfg, 4: cfg };
         });
       } catch {
         /* logged elsewhere */
       }
     },
-    [api, channelOnline, multiDevice],
+    [api, target],
   );
 
   const resolvedChannel = useCallback(
     (n) => {
       const ch = target.channels?.[`p${n}`];
+      if (ch?.enabled === false) return "deshabilitado";
       if (ch?.resolved_host) {
         const port = ch.resolved_port ?? target.port ?? 80;
         return `${ch.resolved_host}:${port}`;
@@ -205,6 +238,16 @@ export default function ZaguanEsp32Panel({
     },
     [target],
   );
+
+  useEffect(() => {
+    if (!active) {
+      configsLoadedForSession.current = false;
+      return;
+    }
+    if (configsLoadedForSession.current) return;
+    configsLoadedForSession.current = true;
+    loadInitialConfigs();
+  }, [active, loadInitialConfigs]);
 
   useEffect(() => {
     if (!active) return;
@@ -225,7 +268,7 @@ export default function ZaguanEsp32Panel({
         for (let n = 1; n <= 4; n += 1) {
           const ch = t.channels?.[`p${n}`] || {};
           drafts[n] = {
-            host: ch.host || CANAL_DEFAULT_IPS[n] || "",
+            host: typeof ch.host === "string" ? ch.host : "",
             port: ch.port != null && ch.port !== "" ? String(ch.port) : "",
           };
         }
@@ -360,21 +403,18 @@ export default function ZaguanEsp32Panel({
         let anySync = true;
         Object.entries(r.channels || {}).forEach(([pk, info]) => {
           const n = Number(String(pk).replace(/^p/, ""));
-          if (n >= 1 && n <= 4) {
-            nextOnline[n] = !!info.ok;
-            if (!info.sync) anySync = false;
+          if (n < 1 || n > 4) return;
+          if (info.disabled) {
+            nextOnline[n] = false;
+            return;
           }
+          nextOnline[n] = !!info.ok;
+          if (!info.sync) anySync = false;
         });
         const count = Object.values(nextOnline).filter(Boolean).length;
-        const estaba = online;
         setChannelOnline(nextOnline);
         setOnline(count > 0);
         setSync(anySync && count > 0);
-        if (!estaba && count > 0) {
-          log("rx", `Dispositivos en línea (${count}/4)`);
-          refreshDeviceEstado();
-          refreshConfigs();
-        }
       } catch (e) {
         if (!vivo) return;
         log("err", e.message || "Sin respuesta de dispositivos ESP32");
@@ -388,30 +428,15 @@ export default function ZaguanEsp32Panel({
       vivo = false;
       clearInterval(intPing);
     };
-  }, [
-    api,
-    online,
-    t.intervaloPing,
-    refreshDeviceEstado,
-    refreshConfigs,
-    active,
-    log,
-    target.host,
-    ipDraft,
-  ]);
+  }, [api, t.intervaloPing, active]);
 
   useEffect(() => {
     if (!active) return;
-    refreshConfigs();
-  }, [active, refreshConfigs]);
-
-  useEffect(() => {
-    if (!active || !channelOnline[canalCfg]) return;
     api
       .getOtaVersion(canalCfg)
       .then(setOta)
       .catch(() => {});
-  }, [active, api, canalCfg, channelOnline]);
+  }, [active, api, canalCfg]);
 
   const handleSimulatePulse = useCallback(
     async (canal) => {
@@ -471,6 +496,7 @@ export default function ZaguanEsp32Panel({
         channels: saved.channels || prev.channels,
       }));
       log("rx", "Target guardado en backend");
+      await loadInitialConfigs();
     } catch (err) {
       log("err", `No se pudo guardar target: ${err.message}`);
     }
@@ -584,7 +610,7 @@ export default function ZaguanEsp32Panel({
               key={s}
               type="button"
               className={`estado-btn estado-btn-${s}${estados[n] === s ? " is-active" : ""}`}
-              disabled={!channelOnline[n] || busy}
+              disabled={!channelIsEnabled(n) || !channelOnline[n] || busy}
               onClick={() => cambiarEstado(n, s)}
             >
               {ESTADO_META[s].label}
@@ -755,14 +781,18 @@ export default function ZaguanEsp32Panel({
                         {CANAL_INFO[n].puerta}
                       </span>
                       <span className="device-network-ip mono">
-                        {CANAL_DEFAULT_IPS[n]}
+                        ej. {CANAL_DEFAULT_IPS[n]}
                       </span>
                     </td>
                     <td>
                       <input
                         className="input input-sm mono"
                         value={channelDrafts[n]?.host || ""}
-                        placeholder="(fallback)"
+                        placeholder={
+                          channelIsEnabled(n)
+                            ? `ej. ${CANAL_DEFAULT_IPS[n]}`
+                            : "deshabilitado"
+                        }
                         spellCheck={false}
                         onChange={(e) =>
                           updateChannelDraft(n, "host", e.target.value)

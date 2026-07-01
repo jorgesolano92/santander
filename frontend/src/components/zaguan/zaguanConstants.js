@@ -80,8 +80,26 @@ export function withWinhoseParpadeo(canal, estado, baseCfg, winhoseParpadeo) {
   };
 }
 
-/** Canales con pulsador físico (simulación POST /api/zaguan/pulsacion/pN). */
+/** Canales p1–p4: simulación POST /api/zaguan/pulsacion/pN al orquestador. */
 export const ZAGUAN_PULSADOR_CANALES = [
+  {
+    canal: 1,
+    puerta: "P1 (calle)",
+    dispositivo: "Videoportero exterior P1",
+    ubicacion: "Exterior",
+    led: "C1",
+    ip: CANAL_DEFAULT_IPS[1],
+    inModbus: "IN_02_08",
+  },
+  {
+    canal: 2,
+    puerta: "P2 (oficina)",
+    dispositivo: "Videoportero interior P2",
+    ubicacion: "Interior zaguán",
+    led: "C2",
+    ip: CANAL_DEFAULT_IPS[2],
+    inModbus: "IN_03_08",
+  },
   {
     canal: 3,
     puerta: "P1 (calle)",
@@ -99,26 +117,6 @@ export const ZAGUAN_PULSADOR_CANALES = [
     led: "C4",
     ip: CANAL_DEFAULT_IPS[4],
     inModbus: "IN_03_07",
-  },
-];
-
-/** Videoporteros (LED en canal lógico; sin pulsación de apertura en este canal). */
-export const ZAGUAN_VIDEOPORTERO_CANALES = [
-  {
-    canal: 1,
-    puerta: "P1 (calle)",
-    dispositivo: "Videoportero exterior P1",
-    ubicacion: "Exterior",
-    led: "C1",
-    ip: CANAL_DEFAULT_IPS[1],
-  },
-  {
-    canal: 2,
-    puerta: "P2 (oficina)",
-    dispositivo: "Videoportero interior P2",
-    ubicacion: "Interior zaguán",
-    led: "C2",
-    ip: CANAL_DEFAULT_IPS[2],
   },
 ];
 
