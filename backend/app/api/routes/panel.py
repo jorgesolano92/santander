@@ -1059,6 +1059,52 @@ def _write_output_if_connected(
     return True
 
 
+def _apply_output_for_rule(
+    board_id: int,
+    channel: int,
+    state: bool,
+    *,
+    out_code: str,
+    origin: str,
+    apply_outputs_to_hardware: bool,
+) -> bool:
+    """
+    Aplica salida de regla/modo: hardware si la placa está conectada; si no, solo snapshot RAM
+    (permite cambiar de modo con una o varias placas offline).
+    Devuelve True si se escribió en hardware.
+    """
+    if apply_outputs_to_hardware:
+        if io_state.get(board_id, {}).get("connected"):
+            return _write_output_if_connected(
+                board_id, channel, state, out_code=out_code, origin=origin
+            )
+        _, outs = pms.get_channels_for_module(board_id)
+        if 1 <= channel <= len(outs):
+            io_state[board_id]["outputs"][channel - 1] = state
+        return False
+    _, outs = pms.get_channels_for_module(board_id)
+    if 1 <= channel <= len(outs):
+        io_state[board_id]["outputs"][channel - 1] = state
+    return False
+
+
+def _read_input_for_blocker(
+    code: str,
+    *,
+    use_overrides: bool = True,
+    physical_inputs: bool = False,
+) -> bool:
+    """IN para bloqueos: sin intentar reconectar placas desconectadas (evita 503 en cambio de modo)."""
+    board_id, _ = _parse_in_code(code)
+    connected = bool(io_state.get(board_id, {}).get("connected"))
+    return _read_input_effective(
+        code,
+        use_hardware_if_no_override=connected,
+        use_overrides=use_overrides,
+        physical_inputs=physical_inputs if connected else False,
+    )
+
+
 def _parse_in_code(code: str) -> tuple[int, int]:
     parsed = pms.parse_smcse_code(code)
     if parsed:
@@ -1182,17 +1228,15 @@ def _blocked_signal_active(
             return True
         if _horario_blocker_suppressed_by_operative_mode(mode_key):
             return False
-        return _read_input_effective(
+        return _read_input_for_blocker(
             code,
-            use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
-            physical_inputs=False,
+            physical_inputs=physical_inputs,
         )
-    return _read_input_effective(
+    return _read_input_for_blocker(
         code,
-        use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
-        physical_inputs=False,
+        physical_inputs=physical_inputs,
     )
 
 
@@ -1316,18 +1360,15 @@ def _restore_temp_deactivate_outputs(
         if not was_on:
             continue
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state.get(board_id, {}).get("connected"):
-                _connect_board(board_id)
-            if _write_output_if_connected(
-                board_id, channel, True, out_code=do_code, origin=origin
-            ):
-                restored.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = True
-                restored.append(do_code)
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
+        restored.append(do_code)
     _clear_temp_deactivate_snapshot(rule_key)
     _cancel_pending_temp_deactivate_restore(rule_key)
     if restored:
@@ -1418,16 +1459,14 @@ def _apply_deactivate_outputs(
         _snapshot_temp_deactivate_outputs(rule, rule_key)
     for do_code in rule.get("deactivate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            _write_output_if_connected(
-                board_id, channel, False, out_code=do_code, origin=tag
-            )
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = False
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            False,
+            out_code=do_code,
+            origin=tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
 
 
 def _pulse_apply_deactivate_outputs(
@@ -1443,20 +1482,14 @@ def _pulse_apply_activate_outputs(
     tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            _write_output_if_connected(
-                board_id, channel, state, out_code=do_code, origin=tag
-            )
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = state
-                if state:
-                    add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
-                else:
-                    add_event("INFO", f"SIMULADO {do_code} -> OFF (sin hardware)", board_id)
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            state,
+            out_code=do_code,
+            origin=tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
 
 
 def _evaluate_pulse_5_sg_rule(
@@ -1807,15 +1840,15 @@ def _restore_snapshotted_deactivate_outputs(
         if not was_on:
             continue
         b, ch = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if io_state.get(b, {}).get("connected"):
-                if _write_output_if_connected(b, ch, True, out_code=do_code, origin=origin):
-                    restored.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = True
-                restored.append(do_code)
+        _apply_output_for_rule(
+            b,
+            ch,
+            True,
+            out_code=do_code,
+            origin=origin,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
+        restored.append(do_code)
     _clear_temp_deactivate_snapshot(rule_key)
     _cancel_pending_temp_deactivate_restore(rule_key)
     if restored:
@@ -1847,17 +1880,15 @@ def _apply_toggle_enclavamiento_on(
     skipped_disconnected: List[str] = []
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            if not _write_output_if_connected(
-                board_id, channel, True, out_code=do_code, origin=origin_tag
-            ):
-                skipped_disconnected.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = True
+        if not _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin_tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        ):
+            skipped_disconnected.append(do_code)
     _apply_deactivate_outputs(
         rule, apply_outputs_to_hardware, rule_key=rule_key, origin=origin_tag
     )
@@ -1905,15 +1936,14 @@ def _apply_toggle_enclavamiento_off(
     )
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if io_state.get(b, {}).get("connected"):
-                _write_output_if_connected(
-                    b, ch, False, out_code=out_code, origin=origin_tag
-                )
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = False
+        _apply_output_for_rule(
+            b,
+            ch,
+            False,
+            out_code=out_code,
+            origin=origin_tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
     trigger_code = rule.get("trigger")
     if isinstance(trigger_code, str) and trigger_code:
         mode_latches[trigger_code] = False
@@ -2159,18 +2189,15 @@ def _evaluate_trigger_rule(
     skipped_disconnected: List[str] = []
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            if not _write_output_if_connected(
-                board_id, channel, True, out_code=do_code, origin=origin_tag
-            ):
-                skipped_disconnected.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = True
-                add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
+        if not _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin_tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        ):
+            skipped_disconnected.append(do_code)
     _apply_deactivate_outputs(
         rule, apply_outputs_to_hardware, rule_key=rule_key, origin=origin_tag
     )
@@ -2281,16 +2308,14 @@ def _deactivate_rule_on_fall(
     # Al desactivar por flanco OFF, soltamos las salidas que activó esta regla.
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            _write_output_if_connected(
-                b, ch, False, out_code=out_code, origin=f"desactiva_flanco:{rule_key}"
-            )
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = False
+        _apply_output_for_rule(
+            b,
+            ch,
+            False,
+            out_code=out_code,
+            origin=f"desactiva_flanco:{rule_key}",
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
 
     add_event("INFO", f"Modo desactivado por trigger OFF: {rule_key}", 1)
     return True
@@ -2513,17 +2538,15 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     skipped_disconnected: List[str] = []
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            if not _write_output_if_connected(
-                b, ch, True, out_code=out_code, origin=f"forzado:{rule_key}"
-            ):
-                skipped_disconnected.append(out_code)
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = True
+        if not _apply_output_for_rule(
+            b,
+            ch,
+            True,
+            out_code=out_code,
+            origin=f"forzado:{rule_key}",
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        ):
+            skipped_disconnected.append(out_code)
 
     _apply_deactivate_outputs(
         rule, apply_outputs_to_hardware, rule_key=rule_key, origin=f"forzado:{rule_key}"
@@ -2539,6 +2562,14 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     _persist_overrides_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
+    if skipped_disconnected:
+        add_event(
+            "INFO",
+            f"Modo {rule_key}: salidas omitidas en placas desconectadas (estado en RAM): "
+            f"{', '.join(skipped_disconnected)}",
+            1,
+        )
+        _publish_panel_status_debounced(force=True)
     add_event("OK", f"Regla forzada ejecutada: {rule_key}", 1)
     out = {
         "executed": True,
