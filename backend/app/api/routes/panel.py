@@ -160,6 +160,7 @@ def _rule_eligible_for_manual_queue(rule_key: str, rule: Optional[dict] = None) 
 
 
 def _blocked_active_codes_for_rule(rule: dict) -> List[str]:
+    """Bloqueos para cola de modo: IN efectivo del panel (override OFF libera), sin forzar lectura física."""
     return [
         code
         for code in rule.get("blocked_if_active", [])
@@ -167,7 +168,7 @@ def _blocked_active_codes_for_rule(rule: dict) -> List[str]:
             code,
             use_hardware_if_no_override=True,
             use_overrides=True,
-            physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
+            physical_inputs=False,
         )
     ]
 

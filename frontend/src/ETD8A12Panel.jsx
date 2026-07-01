@@ -2723,11 +2723,28 @@ export default function ETD8A12Panel() {
         setActivatingQueuedMode(pending);
         beginGlobalLoading();
         try {
-          const d = await apiFetch("/status", { timeoutMs: 120000 });
+          const result = await apiFetch(
+            `/rules/${encodeURIComponent(pending)}/run`,
+            { method: "POST" },
+          );
           if (cancelled) break;
-          mergeStatusRef.current?.(d);
-          setServer(true);
-          if (!d.pending_manual_enclavamiento_mode) break;
+          if (result?.queued) {
+            setPendingManualEnclavamientoMode(
+              result.pending_manual_mode || pending,
+            );
+            applyAutoRulesPanelFeedback(result, () => {}, setActiveToggleRules);
+          } else if (result?.executed) {
+            setPendingManualEnclavamientoMode(null);
+            if (pending.startsWith("horario_")) setSelectedMode(pending);
+          }
+          const d = await apiFetch("/status?refresh_hardware=false", {
+            timeoutMs: 20000,
+          });
+          if (!cancelled) {
+            mergeStatusRef.current?.(d);
+            setServer(true);
+            if (!d.pending_manual_enclavamiento_mode) break;
+          }
         } catch {
           if (!cancelled) setServer(false);
         } finally {
