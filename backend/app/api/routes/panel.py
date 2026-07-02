@@ -2903,10 +2903,49 @@ def update_board_config(board_id: int, config: BoardConfig):
 
 
 @router.post("/boards/{board_id}/output")
-def set_output(board_id: int, action: ChannelAction):
+def set_output(
+    board_id: int,
+    action: ChannelAction,
+    force: bool = Query(
+        False,
+        description="Si true y la placa está offline, actualiza solo el estado en RAM (sin Modbus).",
+    ),
+):
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
     _, outs = pms.get_channels_for_module(board_id)
     if not 1 <= action.channel <= len(outs):
         raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(outs)}")
+
+    connected = bool(io_state.get(board_id, {}).get("connected"))
+    if not connected:
+        if not force:
+            raise HTTPException(status_code=503, detail=f"Módulo {board_id} no conectado")
+        io_state[board_id]["outputs"][action.channel - 1] = action.state
+        add_event(
+            "WARN",
+            f"CH{action.channel:02d} -> {'ON' if action.state else 'OFF'} "
+            f"(force RAM, placa {board_id} sin Modbus)",
+            board_id,
+        )
+        _coce_notify(
+            "output_changed",
+            {
+                "board_id": board_id,
+                "channel": action.channel,
+                "state": action.state,
+                "forced_ram": True,
+            },
+        )
+        _publish_panel_status_debounced(force=True)
+        return {
+            "board_id": board_id,
+            "channel": action.channel,
+            "state": action.state,
+            "hardware_written": False,
+            "forced_ram": True,
+        }
+
     client = get_client(board_id)
     cfg = _board_cfg(board_id)
     ch = outs[action.channel - 1]
@@ -2929,7 +2968,14 @@ def set_output(board_id: int, action: ChannelAction):
                 "state": action.state,
             },
         )
-        return {"board_id": board_id, "channel": action.channel, "state": action.state}
+        _publish_panel_status_debounced(force=True)
+        return {
+            "board_id": board_id,
+            "channel": action.channel,
+            "state": action.state,
+            "hardware_written": True,
+            "forced_ram": False,
+        }
     except ModbusException as e:
         raise HTTPException(status_code=502, detail=f"Error Modbus: {e}")
 
