@@ -15,8 +15,9 @@ class ZaguanLedClientError(RuntimeError):
 
 
 CHANNEL_IDS = ("p1", "p2", "p3", "p4")
-# Un solo intento rápido en ping; no bloquear con timeout largo de operaciones LED.
-PING_TIMEOUT_S = 0.8
+# Un solo intento HTTP; fallo rápido si el ESP32 no responde (sin reintentos).
+LED_DEVICE_TIMEOUT_S = 0.5
+PING_TIMEOUT_S = LED_DEVICE_TIMEOUT_S
 _TARGET_FILE = BASE_DIR / "data" / "zaguan_device_target.json"
 _runtime_target: dict[str, Any] | None = None
 
@@ -108,7 +109,7 @@ def _resolve_channel_target(canal: str, storage: dict[str, Any] | None = None) -
         host = host_override or str(data.get("host") or "").strip()
     port_raw = override.get("port")
     port = int(port_raw) if port_raw not in (None, "") else int(data.get("port") or 80)
-    timeout_s = float(data.get("timeout_s") or 2.0)
+    timeout_s = float(data.get("timeout_s") or LED_DEVICE_TIMEOUT_S)
     if not host:
         raise ZaguanLedClientError(f"IP no configurada para {ch} (ni global)")
     if port <= 0:

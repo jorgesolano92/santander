@@ -58,7 +58,7 @@ export default function ZaguanEsp32Panel({
   const [target, setTarget] = useState({
     host: "",
     port: 80,
-    timeout_s: 2,
+    timeout_s: 0.5,
     channels: {},
   });
   const [ipDraft, setIpDraft] = useState("");
@@ -259,7 +259,7 @@ export default function ZaguanEsp32Panel({
         const next = {
           host: t.host || "",
           port: Number(t.port || 80),
-          timeout_s: Number(t.timeout_s || 2),
+          timeout_s: Number(t.timeout_s || 0.5),
           channels: t.channels || {},
         };
         setTarget(next);

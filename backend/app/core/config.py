@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     # Dispositivo ESP32 zaguán (cliente HTTP saliente backend -> ESP32)
     zaguan_device_host: str = "192.168.1.60"
     zaguan_device_port: int = 8000
-    zaguan_device_timeout_s: float = 2.0
+    zaguan_device_timeout_s: float = 0.5
     # Polling sensores de puerta + sync LED zaguán (hilo aparte del ciclo auto-rules / IN).
     zaguan_door_poll_interval_seconds: float = 0.5
 

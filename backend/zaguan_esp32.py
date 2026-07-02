@@ -114,7 +114,7 @@ class ChannelTargetBody(BaseModel):
 class DeviceTargetBody(BaseModel):
     host: str
     port: int = 80
-    timeout_s: float = 2.0
+    timeout_s: float = 0.5
     channels: dict[str, ChannelTargetBody] | None = None
 
 
