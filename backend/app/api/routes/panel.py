@@ -1092,6 +1092,7 @@ def _apply_output_for_rule(
 def _read_input_for_blocker(
     code: str,
     *,
+    use_hardware_if_no_override: bool = True,
     use_overrides: bool = True,
     physical_inputs: bool = False,
 ) -> bool:
@@ -1100,7 +1101,7 @@ def _read_input_for_blocker(
     connected = bool(io_state.get(board_id, {}).get("connected"))
     return _read_input_effective(
         code,
-        use_hardware_if_no_override=connected,
+        use_hardware_if_no_override=use_hardware_if_no_override and connected,
         use_overrides=use_overrides,
         physical_inputs=physical_inputs if connected else False,
     )
@@ -1231,11 +1232,13 @@ def _blocked_signal_active(
             return False
         return _read_input_for_blocker(
             code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
             physical_inputs=physical_inputs,
         )
     return _read_input_for_blocker(
         code,
+        use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
         physical_inputs=physical_inputs,
     )
