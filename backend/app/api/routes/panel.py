@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -1773,14 +1774,21 @@ def _in_code_for_board_channel(board_id: int, channel: int) -> str:
     return f"IN_{board_id:02d}_{channel:02d}"
 
 
-def _blocked_inputs_for_rule(rule: dict) -> List[str]:
+def _blocked_inputs_for_rule(
+    rule: dict,
+    *,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
+    physical_inputs: bool = False,
+) -> List[str]:
     return [
         code
         for code in rule.get("blocked_if_active") or []
         if _blocked_signal_active(
             code,
-            use_hardware_if_no_override=True,
-            use_overrides=True,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            physical_inputs=physical_inputs,
         )
     ]
 
@@ -1798,7 +1806,12 @@ def _override_request_blocked(board_id: int, channel: int, state: Optional[bool]
             continue
         if not _rule_participates_in_auto_cycle(rk, rule):
             continue
-        blocked = _blocked_inputs_for_rule(rule)
+        blocked = _blocked_inputs_for_rule(
+            rule,
+            use_hardware_if_no_override=False,
+            use_overrides=True,
+            physical_inputs=False,
+        )
         if blocked:
             hits.append(
                 {
@@ -2325,34 +2338,77 @@ def _deactivate_rule_on_fall(
     return True
 
 
-def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
-    """
-    Ciclo autónomo de backend:
-    - refresca IO real de placas conectadas (lectura Modbus con lock por placa en TCP)
-    - evalúa reglas usando ese snapshot (`use_hardware_if_no_override=False`) para no repetir
-      `_read_all_io` por cada regla (en RTU multiplica tráfico serie y satura el bus / CPU).
-    - opcional: desactiva regla activa al caer su trigger
-    """
-    global background_auto_rules_last_run_at
-    global background_auto_rules_last_result
-    global background_auto_rules_last_error
+def _refresh_connected_boards_snapshot(*, board_ids: Optional[List[int]] = None) -> None:
+    """Una lectura Modbus por placa. En TCP, placas en paralelo (evita N×timeout en serie)."""
+    targets = board_ids if board_ids is not None else _module_ids()
+    connected = [
+        bid
+        for bid in targets
+        if bid in io_state and io_state[bid].get("connected")
+    ]
+    if not connected:
+        return
+
+    def _read_one(board_id: int) -> None:
+        with _board_modbus_lock(board_id):
+            _read_all_io(board_id, _modbus_lock_held=True)
+
+    if _is_rtu_mode() or len(connected) == 1:
+        for board_id in connected:
+            _read_one(board_id)
+        return
+
+    workers = min(len(connected), 4)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_read_one, bid) for bid in connected]
+        for fut in as_completed(futures):
+            fut.result()
+
+
+def _rule_keys_for_in_code(code: str) -> List[str]:
+    keys: List[str] = []
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True):
+            continue
+        if not rule.get("auto_execute", True):
+            continue
+        if rule.get("type") not in AUTO_RULE_TYPES:
+            continue
+        if rule.get("trigger") != code:
+            continue
+        keys.append(rk)
+    return keys
+
+
+def _all_auto_rule_keys() -> List[str]:
+    keys: List[str] = []
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True):
+            continue
+        if not rule.get("auto_execute", True):
+            continue
+        if rule.get("type") not in AUTO_RULE_TYPES:
+            continue
+        keys.append(rk)
+    return keys
+
+
+def _evaluate_auto_rule_keys(
+    rule_keys: List[str],
+    *,
+    deactivate_on_fall: bool,
+    use_hardware_if_no_override: bool = False,
+) -> dict:
     checked = 0
     executed = 0
     deactivated = 0
     errors = 0
     error_messages: List[str] = []
     blocked_rules: List[dict] = []
-    for board_id in _module_ids():
-        if board_id in io_state and io_state[board_id]["connected"]:
-            with _board_modbus_lock(board_id):
-                _read_all_io(board_id, _modbus_lock_held=True)
-    pending_restores = _process_pending_temp_deactivate_restores(
-        apply_outputs_to_hardware=True
-    )
-    pending_mode_result = _try_execute_pending_manual_enclavamiento(
-        apply_outputs_to_hardware=True
-    )
-    for rk, rule in rules_config.items():
+    for rk in rule_keys:
+        rule = rules_config.get(rk)
+        if not rule:
+            continue
         if not rule.get("enabled", True):
             continue
         if not rule.get("auto_execute", True):
@@ -2366,7 +2422,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             result = _evaluate_trigger_rule(
                 rk,
                 manual=False,
-                use_hardware_if_no_override=False,
+                use_hardware_if_no_override=use_hardware_if_no_override,
                 use_overrides=True,
                 apply_outputs_to_hardware=True,
             )
@@ -2385,7 +2441,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
                 )
             if deactivate_on_fall and _deactivate_rule_on_fall(
                 rk,
-                use_hardware_if_no_override=False,
+                use_hardware_if_no_override=use_hardware_if_no_override,
                 use_overrides=True,
                 apply_outputs_to_hardware=True,
             ):
@@ -2394,23 +2450,98 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             errors += 1
             error_messages.append(f"{rk}: {e}")
             add_event("ERR", f"Error ciclo auto background {rk}: {e}", 1)
-    result = {
+    return {
         "checked_rules": checked,
         "executed_rules": executed,
         "deactivated_rules": deactivated,
+        "errors": errors,
+        "error_messages": error_messages[:10],
+        "blocked_rules": blocked_rules[:20],
+    }
+
+
+def _auto_rules_for_input(
+    board_id: int,
+    channel: int,
+    *,
+    deactivate_on_fall: bool = True,
+) -> dict:
+    """
+    Tras cambio en un IN (override o lectura focalizada): refresca solo esa placa y
+    evalúa únicamente reglas cuyo trigger es ese IN (radar, modo, etc.).
+    """
+    t0 = time.perf_counter()
+    code = _in_code_for_board_channel(board_id, channel)
+    _refresh_connected_boards_snapshot(board_ids=[board_id])
+    pending_restores = _process_pending_temp_deactivate_restores(
+        apply_outputs_to_hardware=True
+    )
+    pending_mode_result = _try_execute_pending_manual_enclavamiento(
+        apply_outputs_to_hardware=True
+    )
+    eval_result = _evaluate_auto_rule_keys(
+        _rule_keys_for_in_code(code),
+        deactivate_on_fall=deactivate_on_fall,
+        use_hardware_if_no_override=False,
+    )
+    result = {
+        **eval_result,
+        "trigger_code": code,
         "pending_temp_restores": pending_restores,
         "pending_mode_executed": bool(
             pending_mode_result and pending_mode_result.get("executed")
         ),
         "pending_manual_mode": pending_manual_enclavamiento_mode,
-        "errors": errors,
-        "error_messages": error_messages[:10],
-        "blocked_rules": blocked_rules[:20],
         "timestamp": datetime.now().isoformat(),
+        "duration_ms": int((time.perf_counter() - t0) * 1000),
     }
     background_auto_rules_last_run_at = result["timestamp"]
     background_auto_rules_last_result = result
-    background_auto_rules_last_error = error_messages[0] if error_messages else None
+    background_auto_rules_last_error = (
+        eval_result["error_messages"][0] if eval_result["error_messages"] else None
+    )
+    return result
+
+
+def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
+    """
+    Ciclo autónomo de backend:
+    - refresca IO real de placas conectadas (lectura Modbus con lock por placa en TCP)
+    - evalúa reglas usando ese snapshot (`use_hardware_if_no_override=False`) para no repetir
+      `_read_all_io` por cada regla (en RTU multiplica tráfico serie y satura el bus / CPU).
+    - opcional: desactiva regla activa al caer su trigger
+    """
+    global background_auto_rules_last_run_at
+    global background_auto_rules_last_result
+    global background_auto_rules_last_error
+    t0 = time.perf_counter()
+    _refresh_connected_boards_snapshot()
+    pending_restores = _process_pending_temp_deactivate_restores(
+        apply_outputs_to_hardware=True
+    )
+    pending_mode_result = _try_execute_pending_manual_enclavamiento(
+        apply_outputs_to_hardware=True
+    )
+    eval_result = _evaluate_auto_rule_keys(
+        _all_auto_rule_keys(),
+        deactivate_on_fall=deactivate_on_fall,
+        use_hardware_if_no_override=False,
+    )
+    result = {
+        **eval_result,
+        "pending_temp_restores": pending_restores,
+        "pending_mode_executed": bool(
+            pending_mode_result and pending_mode_result.get("executed")
+        ),
+        "pending_manual_mode": pending_manual_enclavamiento_mode,
+        "timestamp": datetime.now().isoformat(),
+        "duration_ms": int((time.perf_counter() - t0) * 1000),
+    }
+    background_auto_rules_last_run_at = result["timestamp"]
+    background_auto_rules_last_result = result
+    background_auto_rules_last_error = (
+        eval_result["error_messages"][0] if eval_result["error_messages"] else None
+    )
     return result
 
 
@@ -3191,8 +3322,10 @@ def set_input_override(action: InputOverrideAction):
     auto_rules: Optional[dict] = None
     if settings.auto_rules_background_enabled:
         try:
-            auto_rules = background_auto_rules_cycle(
-                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall)
+            auto_rules = _auto_rules_for_input(
+                action.board_id,
+                action.channel,
+                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall),
             )
         except Exception:  # noqa: BLE001
             pass
@@ -3223,8 +3356,10 @@ def clear_input_override(board_id: int, channel: int):
     auto_rules: Optional[dict] = None
     if settings.auto_rules_background_enabled:
         try:
-            auto_rules = background_auto_rules_cycle(
-                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall)
+            auto_rules = _auto_rules_for_input(
+                board_id,
+                channel,
+                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall),
             )
         except Exception:  # noqa: BLE001
             pass
