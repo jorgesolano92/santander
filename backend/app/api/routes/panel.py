@@ -290,6 +290,7 @@ serial_client: Optional[ModbusSerialClient] = None
 modbus_io_lock = threading.RLock()
 _board_modbus_locks: Dict[int, threading.RLock] = {}
 _board_modbus_locks_guard = threading.Lock()
+_auto_rules_eval_lock = threading.RLock()
 
 
 def _board_modbus_lock(board_id: int) -> threading.RLock:
@@ -2338,7 +2339,61 @@ def _deactivate_rule_on_fall(
     return True
 
 
-def _refresh_connected_boards_snapshot(*, board_ids: Optional[List[int]] = None) -> None:
+def _raw_inputs_tuple(board_id: int) -> tuple[bool, ...]:
+    st = io_state.get(board_id)
+    if not st:
+        return ()
+    return tuple(bool(v) for v in (st.get("inputs_raw") or []))
+
+
+def _evaluate_rules_for_input(
+    board_id: int,
+    channel: int,
+    *,
+    deactivate_on_fall: bool = True,
+) -> dict:
+    """Evalúa solo reglas cuyo trigger es este IN (snapshot ya actualizado)."""
+    code = _in_code_for_board_channel(board_id, channel)
+    return _evaluate_auto_rule_keys(
+        _rule_keys_for_in_code(code),
+        deactivate_on_fall=deactivate_on_fall,
+        use_hardware_if_no_override=False,
+    )
+
+
+def _read_board_and_eval_input_edges(
+    board_id: int,
+    *,
+    deactivate_on_fall: bool,
+) -> None:
+    """Lee una placa; si cambió un IN físico (inputs_raw), evalúa sus reglas al instante."""
+    before = _raw_inputs_tuple(board_id)
+    with _board_modbus_lock(board_id):
+        _read_all_io(board_id, _modbus_lock_held=True)
+    after = _raw_inputs_tuple(board_id)
+    n = min(len(before), len(after))
+    for i in range(n):
+        if before[i] != after[i]:
+            try:
+                _evaluate_rules_for_input(
+                    board_id,
+                    i + 1,
+                    deactivate_on_fall=deactivate_on_fall,
+                )
+            except Exception as e:  # noqa: BLE001
+                add_event(
+                    "ERR",
+                    f"Evaluación rápida IN{i + 1} placa {board_id}: {e}",
+                    board_id,
+                )
+
+
+def _refresh_connected_boards_snapshot(
+    *,
+    board_ids: Optional[List[int]] = None,
+    eval_on_edge: bool = False,
+    deactivate_on_fall: bool = True,
+) -> None:
     """Una lectura Modbus por placa. En TCP, placas en paralelo (evita N×timeout en serie)."""
     targets = board_ids if board_ids is not None else _module_ids()
     connected = [
@@ -2350,6 +2405,12 @@ def _refresh_connected_boards_snapshot(*, board_ids: Optional[List[int]] = None)
         return
 
     def _read_one(board_id: int) -> None:
+        if eval_on_edge:
+            _read_board_and_eval_input_edges(
+                board_id,
+                deactivate_on_fall=deactivate_on_fall,
+            )
+            return
         with _board_modbus_lock(board_id):
             _read_all_io(board_id, _modbus_lock_held=True)
 
@@ -2399,65 +2460,66 @@ def _evaluate_auto_rule_keys(
     deactivate_on_fall: bool,
     use_hardware_if_no_override: bool = False,
 ) -> dict:
-    checked = 0
-    executed = 0
-    deactivated = 0
-    errors = 0
-    error_messages: List[str] = []
-    blocked_rules: List[dict] = []
-    for rk in rule_keys:
-        rule = rules_config.get(rk)
-        if not rule:
-            continue
-        if not rule.get("enabled", True):
-            continue
-        if not rule.get("auto_execute", True):
-            continue
-        if rule.get("type") not in AUTO_RULE_TYPES:
-            continue
-        if not _rule_participates_in_auto_cycle(rk, rule):
-            continue
-        checked += 1
-        try:
-            result = _evaluate_trigger_rule(
-                rk,
-                manual=False,
-                use_hardware_if_no_override=use_hardware_if_no_override,
-                use_overrides=True,
-                apply_outputs_to_hardware=True,
-            )
-            if result.get("executed"):
-                executed += 1
-                _zaguan_rule_executed(rk, result)
-            elif result.get("blocked_inputs") and "Bloqueado" in (
-                result.get("reason") or ""
-            ):
-                blocked_rules.append(
-                    {
-                        "rule_key": rk,
-                        "blocked_inputs": list(result.get("blocked_inputs") or []),
-                        "reason": result.get("reason"),
-                    }
+    with _auto_rules_eval_lock:
+        checked = 0
+        executed = 0
+        deactivated = 0
+        errors = 0
+        error_messages: List[str] = []
+        blocked_rules: List[dict] = []
+        for rk in rule_keys:
+            rule = rules_config.get(rk)
+            if not rule:
+                continue
+            if not rule.get("enabled", True):
+                continue
+            if not rule.get("auto_execute", True):
+                continue
+            if rule.get("type") not in AUTO_RULE_TYPES:
+                continue
+            if not _rule_participates_in_auto_cycle(rk, rule):
+                continue
+            checked += 1
+            try:
+                result = _evaluate_trigger_rule(
+                    rk,
+                    manual=False,
+                    use_hardware_if_no_override=use_hardware_if_no_override,
+                    use_overrides=True,
+                    apply_outputs_to_hardware=True,
                 )
-            if deactivate_on_fall and _deactivate_rule_on_fall(
-                rk,
-                use_hardware_if_no_override=use_hardware_if_no_override,
-                use_overrides=True,
-                apply_outputs_to_hardware=True,
-            ):
-                deactivated += 1
-        except Exception as e:  # noqa: BLE001
-            errors += 1
-            error_messages.append(f"{rk}: {e}")
-            add_event("ERR", f"Error ciclo auto background {rk}: {e}", 1)
-    return {
-        "checked_rules": checked,
-        "executed_rules": executed,
-        "deactivated_rules": deactivated,
-        "errors": errors,
-        "error_messages": error_messages[:10],
-        "blocked_rules": blocked_rules[:20],
-    }
+                if result.get("executed"):
+                    executed += 1
+                    _zaguan_rule_executed(rk, result)
+                elif result.get("blocked_inputs") and "Bloqueado" in (
+                    result.get("reason") or ""
+                ):
+                    blocked_rules.append(
+                        {
+                            "rule_key": rk,
+                            "blocked_inputs": list(result.get("blocked_inputs") or []),
+                            "reason": result.get("reason"),
+                        }
+                    )
+                if deactivate_on_fall and _deactivate_rule_on_fall(
+                    rk,
+                    use_hardware_if_no_override=use_hardware_if_no_override,
+                    use_overrides=True,
+                    apply_outputs_to_hardware=True,
+                ):
+                    deactivated += 1
+            except Exception as e:  # noqa: BLE001
+                errors += 1
+                error_messages.append(f"{rk}: {e}")
+                add_event("ERR", f"Error ciclo auto background {rk}: {e}", 1)
+        return {
+            "checked_rules": checked,
+            "executed_rules": executed,
+            "deactivated_rules": deactivated,
+            "errors": errors,
+            "error_messages": error_messages[:10],
+            "blocked_rules": blocked_rules[:20],
+        }
 
 
 def _auto_rules_for_input(
@@ -2479,10 +2541,10 @@ def _auto_rules_for_input(
     pending_mode_result = _try_execute_pending_manual_enclavamiento(
         apply_outputs_to_hardware=True
     )
-    eval_result = _evaluate_auto_rule_keys(
-        _rule_keys_for_in_code(code),
+    eval_result = _evaluate_rules_for_input(
+        board_id,
+        channel,
         deactivate_on_fall=deactivate_on_fall,
-        use_hardware_if_no_override=False,
     )
     result = {
         **eval_result,
@@ -2515,7 +2577,10 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     global background_auto_rules_last_result
     global background_auto_rules_last_error
     t0 = time.perf_counter()
-    _refresh_connected_boards_snapshot()
+    _refresh_connected_boards_snapshot(
+        eval_on_edge=True,
+        deactivate_on_fall=deactivate_on_fall,
+    )
     pending_restores = _process_pending_temp_deactivate_restores(
         apply_outputs_to_hardware=True
     )
