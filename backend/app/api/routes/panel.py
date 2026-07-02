@@ -2408,12 +2408,6 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     background_auto_rules_last_run_at = result["timestamp"]
     background_auto_rules_last_result = result
     background_auto_rules_last_error = error_messages[0] if error_messages else None
-    try:
-        from app.services import zaguan_orchestrator as zo
-
-        zo.poll_door_sensors()
-    except Exception:  # noqa: BLE001
-        pass
     return result
 
 

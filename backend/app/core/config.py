@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     zaguan_device_host: str = "192.168.1.60"
     zaguan_device_port: int = 8000
     zaguan_device_timeout_s: float = 2.0
+    # Polling sensores de puerta + sync LED zaguán (hilo aparte del ciclo auto-rules / IN).
+    zaguan_door_poll_interval_seconds: float = 0.5
 
     # Canal COCE central (WebSocket saliente + heartbeat)
     coce_ws_enabled: bool = False

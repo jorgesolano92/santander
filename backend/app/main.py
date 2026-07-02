@@ -57,6 +57,17 @@ async def _auto_rules_background_loop() -> None:
             log.warning("Ciclo auto-rules background: %s", e)
 
 
+async def _zaguan_door_sensors_loop() -> None:
+    """Sensores de puerta + LEDs zaguán: separado del ciclo de IN/reglas (no bloquear Modbus)."""
+    interval_s = max(0.15, float(settings.zaguan_door_poll_interval_seconds))
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await asyncio.to_thread(zaguan_orchestrator.poll_door_sensors)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Poll sensores puerta zaguán: %s", e)
+
+
 async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
     """Orquestador zaguán: LEDs + apertura según modo (automático / autoservicio)."""
     log.info("Pulsación zaguán recibida: canal=%s ts=%s", canal, ts)
@@ -90,6 +101,7 @@ async def lifespan(app: FastAPI):
     auto_rules_task: Optional[asyncio.Task] = None
     if settings.auto_rules_background_enabled:
         auto_rules_task = asyncio.create_task(_auto_rules_background_loop())
+    door_sensors_task = asyncio.create_task(_zaguan_door_sensors_loop())
     coce_ws_task: Optional[asyncio.Task] = start_coce_client_task()
     yield
     panel_live_pump.cancel()
@@ -98,6 +110,7 @@ async def lifespan(app: FastAPI):
     schedule_task.cancel()
     if auto_rules_task:
         auto_rules_task.cancel()
+    door_sensors_task.cancel()
     if coce_ws_task:
         coce_ws_task.cancel()
     try:
@@ -113,6 +126,10 @@ async def lifespan(app: FastAPI):
             await auto_rules_task
         except asyncio.CancelledError:
             pass
+    try:
+        await door_sensors_task
+    except asyncio.CancelledError:
+        pass
     if coce_ws_task:
         try:
             await coce_ws_task

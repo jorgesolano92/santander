@@ -185,6 +185,7 @@ _abriendo_since: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
 # Manual/carga: el inductivo debe marcar apertura antes de aceptar flanco de cierre.
 _saw_open_during_pending: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _led_state_lock = threading.RLock()
+_led_push_serial = threading.Lock()
 # Autoservicio: bloquea la puerta opuesta hasta cierre confirmado (IN_xx_04).
 _door_interlock_active: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _saw_open_while_interlock: dict[PuertaId, bool] = {"p1": False, "p2": False}
@@ -323,15 +324,35 @@ def _rule_opens_door(rule_key: str) -> Optional[PuertaId]:
     return None
 
 
+def _schedule_led_device_push(
+    states: dict[PulsadorId, EstadoLed],
+    *,
+    push_order: Optional[tuple[PulsadorId, ...]] = None,
+) -> None:
+    """HTTP a ESP32 en segundo plano: no bloquear ciclo Modbus / reglas automáticas."""
+    if not LED_DEVICE_SYNC:
+        return
+    snapshot = dict(states)
+    order = push_order
+
+    async def _worker() -> None:
+        def _run() -> None:
+            with _led_push_serial:
+                _push_leds_to_device(snapshot, push_order=order)
+
+        await asyncio.to_thread(_run)
+
+    _schedule_coro(_worker())
+
+
 def _apply_led_channels(channels: tuple[PulsadorId, ...], estado: EstadoLed) -> None:
     payload = {ch: estado for ch in channels}
     with _led_state_lock:
         for ch in channels:
             _led_states[ch] = estado
         _sync_led_memory()
-        if LED_DEVICE_SYNC:
-            _push_leds_to_device(payload, push_order=channels)
     _publish_zaguan_led_state()
+    _schedule_led_device_push(payload, push_order=channels)
 
 
 def _led_states_match(target: dict[PulsadorId, EstadoLed]) -> bool:
@@ -371,14 +392,15 @@ def _apply_led_map(
     *,
     priority_door: Optional[PuertaId] = None,
 ) -> None:
+    if _led_states_match(states):
+        return
     push_order = _led_map_push_order(states, priority_door=priority_door)
     with _led_state_lock:
         for ch, est in states.items():
             _led_states[ch] = est
         _sync_led_memory()
-        if LED_DEVICE_SYNC:
-            _push_leds_to_device(states, push_order=push_order)
     _publish_zaguan_led_state()
+    _schedule_led_device_push(states, push_order=push_order)
 
 
 def _sync_led_memory() -> None:
@@ -601,10 +623,11 @@ def _clear_extendido_p2_call() -> None:
     _extendido_p2_call_pending = False
     _stop_p3_intermittent()
     if _current_mode == "horario_extendido":
-        _led_states["p3"] = "libre"
-        _sync_led_memory()
-        if LED_DEVICE_SYNC:
-            _push_leds_to_device({"p3": "libre"})
+        with _led_state_lock:
+            _led_states["p3"] = "libre"
+            _sync_led_memory()
+        _publish_zaguan_led_state()
+        _schedule_led_device_push({"p3": "libre"})
 
 
 def _start_extendido_p2_call() -> None:
@@ -700,9 +723,12 @@ def _apply_winhose_window_leds(door: PuertaId) -> None:
             {"p1": "libre", "p2": "libre", "p3": "libre", "p4": "libre"}
         )
     elif _current_mode == "horario_cerrado":
-        _push_leds_to_device({EXTERIOR_PULSADOR[door]: "libre"})
-        _led_states[EXTERIOR_PULSADOR[door]] = "libre"
-        _sync_led_memory()
+        ch = EXTERIOR_PULSADOR[door]
+        with _led_state_lock:
+            _led_states[ch] = "libre"
+            _sync_led_memory()
+        _publish_zaguan_led_state()
+        _schedule_led_device_push({ch: "libre"})
 
 
 def _start_winhose_window(door: PuertaId) -> None:
