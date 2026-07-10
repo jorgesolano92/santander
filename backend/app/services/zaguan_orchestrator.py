@@ -1081,16 +1081,23 @@ def _restore_locks_after_close(door: PuertaId) -> None:
 
 
 def _door_pulse_with_locks_sync(door: PuertaId, *, restore_locks: bool) -> None:
-    """Libera bulones, pulsa apertura; en manual/carga restaura bulones solo al cerrar puerta."""
+    """Libera bulones, pulsa apertura; por defecto restaura bulones solo al cerrar puerta."""
     open_code = DOOR_OPEN_OUTPUT[door]
     _, released = _release_locks_before_open(door)
-    _set_output_direct(open_code, True)
-    time.sleep(DOOR_INTERFONO_PULSE_SECONDS)
-    _set_output_direct(open_code, False)
-    if restore_locks:
-        _restore_locks_after_close(door)
-    elif not released:
-        _locks_to_restore[door] = []
+    try:
+        _set_output_direct(open_code, True)
+        time.sleep(DOOR_INTERFONO_PULSE_SECONDS)
+        _set_output_direct(open_code, False)
+        if restore_locks:
+            _restore_locks_after_close(door)
+        elif not released:
+            _locks_to_restore[door] = []
+    except Exception:
+        if released and not restore_locks:
+            for lock_code in released:
+                _set_output_direct(lock_code, True)
+            _locks_to_restore[door] = []
+        raise
 
 
 def open_door_from_tablet(door: PuertaId) -> dict[str, Any]:
@@ -1150,17 +1157,18 @@ def open_door_from_tablet(door: PuertaId) -> dict[str, Any]:
 
 
 async def _door_pulse_with_locks(door: PuertaId, *, restore_locks: bool) -> None:
-    """Replica interfono: libera cierres, pulsa apertura, restaura cierres en cerrado."""
+    """Replica interfono: libera cierres, pulsa apertura; restaura al cerrar salvo restore_locks."""
     await asyncio.to_thread(_door_pulse_with_locks_sync, door, restore_locks=restore_locks)
 
 
 async def _execute_cerrado_exterior_pulse(door: PuertaId) -> dict[str, Any]:
-    await _door_pulse_with_locks(door, restore_locks=True)
+    await _door_pulse_with_locks(door, restore_locks=False)
     return {
         "executed": True,
         "direct_output": DOOR_OPEN_OUTPUT[door],
-        "locks_released": list(DOOR_LOCK_OUTPUTS[door]),
+        "locks_released": list(_locks_to_restore.get(door) or []),
         "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
+        "locks_restore_on_close": True,
         "reason": "cerrado_exterior_winhose",
     }
 
@@ -1540,6 +1548,8 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
             return
         _release_autoservicio_door(door)
         _strict_interlock_post_close(door)
+        if _current_mode == "horario_cerrado":
+            _restore_locks_after_close(door)
         _record(
             "zaguan_door_closed",
             f"Puerta {door} cerrada — LED actualizado ({source})",
