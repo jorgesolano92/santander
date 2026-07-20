@@ -153,7 +153,23 @@ class LiveHub:
                     st.current_mode = payload.get("current_mode")
             elif msg_type == "mode_changed":
                 st.current_mode = payload.get("current_mode")
-                st.partial = {"currentMode": st.current_mode}
+                st.partial = {
+                    **(st.partial or {}),
+                    "currentMode": st.current_mode,
+                }
+            elif msg_type == "branch_alert":
+                alerts = dict((st.partial or {}).get("alerts") or {})
+                alert_type = str(payload.get("alert_type") or "unknown")
+                if payload.get("active"):
+                    alerts[alert_type] = payload
+                else:
+                    alerts.pop(alert_type, None)
+                st.partial = {**(st.partial or {}), "alerts": alerts}
+            elif msg_type == "toggle_rules_changed":
+                st.partial = {
+                    **(st.partial or {}),
+                    "active_toggle_rules": payload.get("active_toggle_rules") or [],
+                }
             elif msg_type in ("output_changed", "input_override", "board_connected", "board_disconnected"):
                 st.partial = payload
             elif msg_type in ("snapshot", "panel_status"):
@@ -161,7 +177,12 @@ class LiveHub:
                 st.boards_connected = int(payload.get("boards_connected") or 0)
                 st.boards_total = int(payload.get("boards_total") or 0)
                 st.current_mode = payload.get("current_mode")
-                st.partial = payload
+                st.partial = {
+                    **(st.partial or {}),
+                    **payload,
+                    "currentMode": payload.get("current_mode"),
+                    "active_toggle_rules": payload.get("active_toggle_rules") or [],
+                }
 
             self._states[installation_id] = st
             event = self._branch_update_event(installation_id, st, msg_type, payload)

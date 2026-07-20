@@ -57,3 +57,16 @@ async def pump_loop() -> None:
                 break
         for msg in batch:
             await broadcast(msg)
+
+
+def notify_coce_message(message: dict[str, Any]) -> None:
+    publish_sync(
+        {
+            "type": "coce_notification",
+            "id": message.get("id"),
+            "title": message.get("title"),
+            "body": message.get("body"),
+            "urgent": bool(message.get("urgent")),
+            "received_at": message.get("received_at"),
+        }
+    )

@@ -8,6 +8,7 @@ export function TopNavbar({
   logoSrc = "/assets/logo.png",
   primaryColor = "#E50914",
   primaryDarkColor = "#B20710",
+  rightSlot = null,
 }) {
   return (
     <div
@@ -50,6 +51,8 @@ export function TopNavbar({
           <div className="border-b-2 border-white pb-3.5"></div>
         </nav>
       </div>
+
+      {rightSlot ? <div className="flex items-center gap-3">{rightSlot}</div> : null}
 
       {/* <div className="flex items-center gap-4 text-sm">
         <span className="flex items-center gap-2">

@@ -149,6 +149,15 @@ async def pump_loop() -> None:
             await _broadcast(msg)
 
 
+def notify_toggle_rules_changed(active_toggle_rules: list[str]) -> None:
+    publish_sync(
+        {
+            "type": "toggle_rules_changed",
+            "active_toggle_rules": active_toggle_rules,
+        }
+    )
+
+
 def notify_mode_changed(current_mode: Optional[str]) -> None:
     publish_sync(
         {
@@ -171,6 +180,19 @@ def notify_mode_queued(
     )
 
 
+def notify_coce_message(message: dict[str, Any]) -> None:
+    publish_sync(
+        {
+            "type": "coce_notification",
+            "id": message.get("id"),
+            "title": message.get("title"),
+            "body": message.get("body"),
+            "urgent": bool(message.get("urgent")),
+            "received_at": message.get("received_at"),
+        }
+    )
+
+
 async def register(client_id: str, ws: WebSocket, username: str) -> None:
     async with _lock:
         old = _clients.get(client_id)
@@ -187,6 +209,13 @@ async def register(client_id: str, ws: WebSocket, username: str) -> None:
         await _send_to_client(
             client_id,
             {"type": "mode_changed", "current_mode": status.get("current_mode")},
+        )
+        await _send_to_client(
+            client_id,
+            {
+                "type": "toggle_rules_changed",
+                "active_toggle_rules": status.get("active_toggle_rules") or [],
+            },
         )
         pending = status.get("pending_mode")
         if pending:

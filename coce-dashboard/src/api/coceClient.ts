@@ -202,6 +202,7 @@ export type BranchSnapshot = {
   baseUrl: string;
   modes: PanelModeRule[];
   currentMode: string | null;
+  activeToggleRules?: string[];
   boards: Record<string, PanelBoardState & Record<string, unknown>>;
   modulesConfig?: PanelModuleConfig[];
   panelTimestamp?: string | null;
@@ -359,4 +360,55 @@ export async function listAuditLogs(params?: {
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as { logs?: AuditLog[] };
   return data.logs ?? [];
+}
+
+export type CoceOutboundMessage = {
+  id: string;
+  createdAt: string;
+  actorUsername: string;
+  title: string;
+  body: string;
+  urgent: boolean;
+  branchId: string;
+  branchNombre: string;
+  deliveryStatus: 'pending' | 'delivered' | 'offline';
+  deliveredAt?: string | null;
+};
+
+export async function sendCoceMessage(payload: {
+  title: string;
+  body: string;
+  urgent: boolean;
+  branchIds: string[];
+  sendToAll: boolean;
+}): Promise<CoceOutboundMessage[]> {
+  const res = await apiFetch('/api/coce/messages/send', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { messages?: CoceOutboundMessage[] };
+  return data.messages ?? [];
+}
+
+export async function fetchCoceMessages(params?: {
+  limit?: number;
+  offset?: number;
+  branchId?: string;
+  urgent?: boolean;
+  deliveryStatus?: 'pending' | 'delivered' | 'offline';
+  q?: string;
+}): Promise<CoceOutboundMessage[]> {
+  const q = new URLSearchParams();
+  if (params?.limit) q.set('limit', String(params.limit));
+  if (params?.offset) q.set('offset', String(params.offset));
+  if (params?.branchId) q.set('branch_id', params.branchId);
+  if (params?.urgent !== undefined) q.set('urgent', params.urgent ? 'true' : 'false');
+  if (params?.deliveryStatus) q.set('delivery_status', params.deliveryStatus);
+  if (params?.q) q.set('q', params.q);
+  const qs = q.toString();
+  const res = await apiFetch(`/api/coce/messages${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { messages?: CoceOutboundMessage[] };
+  return data.messages ?? [];
 }

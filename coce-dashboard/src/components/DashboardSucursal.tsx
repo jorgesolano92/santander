@@ -16,6 +16,8 @@ import {
 } from "../api/coceClient";
 import { resolveSucursalEstado, useCoceLive } from "../context/CoceLiveContext";
 import { applyLivePatch } from "../utils/applyLivePatch";
+import { BranchCriticalAlertBanner } from "./BranchCriticalAlertBanner";
+import { isPanelModeActiveNow, deriveAlertsFromBranchState } from "../utils/branchAlerts";
 import {
   DOOR_BOARD_CONFIG,
   DOOR_STATE_HINTS,
@@ -30,6 +32,8 @@ import { BoardIoPanel } from "./BoardIoPanel";
 type LoadState = {
   modes: PanelModeRule[];
   currentMode: string | null;
+  activeToggleRules: string[];
+  branchAlerts: import("../utils/branchAlerts").BranchAlertsMap;
   boards: Array<{ id: string; data: PanelBoardState }>;
   modulesConfig: PanelModuleConfig[];
   panelTimestamp: string | null;
@@ -410,6 +414,12 @@ export function DashboardSucursal() {
           setData({
             modes: snap.modes,
             currentMode: snap.currentMode,
+            activeToggleRules: snap.activeToggleRules ?? [],
+            branchAlerts: deriveAlertsFromBranchState(
+              snap.currentMode,
+              snap.activeToggleRules ?? [],
+              {},
+            ),
             boards,
             modulesConfig: snap.modulesConfig ?? [],
             panelTimestamp: snap.panelTimestamp ?? null,
@@ -559,6 +569,16 @@ export function DashboardSucursal() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      {data ? (
+        <BranchCriticalAlertBanner
+          branchId={sucursal.id}
+          branchName={sucursal.nombre}
+          currentMode={data.currentMode}
+          activeToggleRules={data.activeToggleRules}
+          storedAlerts={data.branchAlerts}
+        />
+      ) : null}
+
       {!data && !error && loading && <p>Conectando con el sistema local…</p>}
 
       {data && (
@@ -696,7 +716,11 @@ export function DashboardSucursal() {
                   </thead>
                   <tbody>
                     {data.modes.map((m) => {
-                      const isCurrent = data.currentMode === m.key;
+                      const isCurrent = isPanelModeActiveNow(
+                        m.key,
+                        data.currentMode,
+                        data.activeToggleRules,
+                      );
                       return (
                         <tr
                           key={m.key}

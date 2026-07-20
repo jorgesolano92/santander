@@ -9,11 +9,15 @@ import {
 } from 'react';
 import { getCoceApiBase, getCoceToken } from '../api/coceClient';
 import type { SucursalEstado } from '../types';
+import { parseBranchAlerts, type BranchAlertsMap } from '../utils/branchAlerts';
 
 export type LiveBranchInfo = {
   installationId: string;
+  nombre: string;
   status: SucursalEstado;
   currentMode?: string | null;
+  activeToggleRules?: string[];
+  alerts?: BranchAlertsMap;
   wsConnected?: boolean;
   modbus?: boolean;
   boardsConnected?: number;
@@ -26,6 +30,7 @@ type CoceLiveContextValue = {
   connected: boolean;
   getLiveStatus: (installationId: string) => SucursalEstado | undefined;
   getLiveBranch: (installationId: string) => LiveBranchInfo | undefined;
+  getAllLiveBranches: () => LiveBranchInfo[];
 };
 
 const CoceLiveContext = createContext<CoceLiveContextValue | null>(null);
@@ -40,10 +45,17 @@ function wsLiveUrl(): string | null {
 
 function parseBranch(raw: Record<string, unknown>): LiveBranchInfo {
   const status = (raw.status as SucursalEstado) || 'apagado';
+  const partial = (raw.partial as Record<string, unknown> | null) ?? {};
+  const activeToggleRules = Array.isArray(partial.active_toggle_rules)
+    ? partial.active_toggle_rules.map(String)
+    : [];
   return {
     installationId: String(raw.installationId ?? ''),
+    nombre: String(raw.nombre ?? ''),
     status,
     currentMode: (raw.currentMode as string | null) ?? null,
+    activeToggleRules,
+    alerts: parseBranchAlerts(partial.alerts),
     wsConnected: Boolean(raw.wsConnected),
     modbus: Boolean(raw.modbus),
     boardsConnected: Number(raw.boardsConnected ?? 0),
@@ -133,9 +145,14 @@ export function CoceLiveProvider({ children }: { children: ReactNode }) {
     [branches],
   );
 
+  const getAllLiveBranches = useCallback(
+    () => Object.values(branches),
+    [branches],
+  );
+
   const value = useMemo(
-    () => ({ connected, getLiveStatus, getLiveBranch }),
-    [connected, getLiveStatus, getLiveBranch],
+    () => ({ connected, getLiveStatus, getLiveBranch, getAllLiveBranches }),
+    [connected, getLiveStatus, getLiveBranch, getAllLiveBranches],
   );
 
   return <CoceLiveContext.Provider value={value}>{children}</CoceLiveContext.Provider>;
@@ -148,6 +165,7 @@ export function useCoceLive(): CoceLiveContextValue {
       connected: false,
       getLiveStatus: () => undefined,
       getLiveBranch: () => undefined,
+      getAllLiveBranches: () => [],
     };
   }
   return ctx;

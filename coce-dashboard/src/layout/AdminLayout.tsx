@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { clearCoceToken, coceMe, getCoceToken } from '../api/coceClient';
 import { CoceLiveProvider } from '../context/CoceLiveContext';
+import { CoceGlobalAlertsBar } from '../components/CoceGlobalAlertsBar';
 
 const MENU = [
   { to: '/overview', label: 'Resumen ejecutivo' },
@@ -80,6 +81,7 @@ export function AdminLayout() {
             </button>
           </div>
         </header>
+        <CoceGlobalAlertsBar />
         <main className="coce-content">
           <Outlet />
         </main>

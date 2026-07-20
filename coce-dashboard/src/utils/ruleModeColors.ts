@@ -6,6 +6,7 @@ export const DEFAULT_MODE_COLORS: Record<string, string> = {
   horario_cerrado: '#6b7280',
   horario_carga_cajero: '#f97316',
   horario_manual: '#ef4444',
+  senal_de_incendio_activada: '#E85D04',
 };
 
 const FALLBACK_COLOR = '#6b7280';

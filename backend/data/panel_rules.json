@@ -611,6 +611,7 @@
   "pulsador_emergencia_verde_puerta_oficina": {
     "enabled": true,
     "auto_execute": true,
+    "color": "#6b7280",
     "type": "enclavamiento",
     "trigger": "IN_03_06",
     "blocked_if_active": [],
@@ -622,11 +623,15 @@
       "OUT_03_01",
       "OUT_03_02"
     ],
+    "also_execute_rules": [
+      "pulsador_emergencia_verde_puerta_calle"
+    ],
     "deactivate_outputs_temporary": true
   },
   "pulsador_emergencia_verde_puerta_calle": {
     "enabled": true,
     "auto_execute": true,
+    "color": "#6b7280",
     "type": "enclavamiento",
     "trigger": "IN_02_06",
     "blocked_if_active": [],
@@ -637,6 +642,9 @@
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02"
+    ],
+    "also_execute_rules": [
+      "pulsador_emergencia_verde_puerta_oficina"
     ],
     "deactivate_outputs_temporary": true
   },

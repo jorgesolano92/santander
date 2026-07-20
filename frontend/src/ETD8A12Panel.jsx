@@ -5,6 +5,7 @@ import { GlobalLoader } from "./components/GlobalLoader";
 import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
+import { CoceMessageNotifications } from "./components/CoceMessageNotifications";
 import {
   DEFAULT_MODE_COLORS,
   normalizeRuleColor,
@@ -24,6 +25,7 @@ import {
   faFileLines,
   faFloppyDisk,
   faLock,
+  faLink,
   faRotateLeft,
   faPenToSquare,
   faPowerOff,
@@ -99,9 +101,61 @@ function isToggleEnclavamiento(ruleKey, rule) {
   return true;
 }
 
+/** Modos operativos globales (horarios + señal de incendio), no interruptores. */
+function isOperativePanelMode(ruleKey) {
+  return (
+    typeof ruleKey === "string" &&
+    (ruleKey.startsWith("horario_") || ruleKey === "senal_de_incendio_activada")
+  );
+}
+
 function applyAutoRulesPanelFeedback(res, addUI, setActiveToggleRules) {
   if (Array.isArray(res?.active_toggle_rules) && setActiveToggleRules) {
     setActiveToggleRules(res.active_toggle_rules);
+  }
+  const linkedOn = res?.also_execute_results;
+  if (Array.isArray(linkedOn) && setActiveToggleRules) {
+    setActiveToggleRules((prev) => {
+      const s = new Set(prev);
+      for (const item of linkedOn) {
+        if (!item.rule) continue;
+        if (item.executed && (item.toggle_active || item.toggle_action === "on")) {
+          s.add(item.rule);
+        }
+      }
+      return [...s];
+    });
+  }
+  if (Array.isArray(linkedOn)) {
+    for (const item of linkedOn) {
+      const rk = item.rule || "?";
+      const label = rk.replaceAll("_", " ");
+      if (item.executed) {
+        addUI("OK", `Vinculada activada: ${label}`);
+      } else if (item.reason || item.error) {
+        addUI(
+          "WARN",
+          `Vinculada ${label} no ejecutada: ${item.reason || item.error}`,
+        );
+      }
+    }
+  }
+  const linkedOff = res?.also_deactivate_results;
+  if (Array.isArray(linkedOff) && setActiveToggleRules) {
+    setActiveToggleRules((prev) => {
+      const s = new Set(prev);
+      for (const item of linkedOff) {
+        if (item.rule && item.executed) s.delete(item.rule);
+      }
+      return [...s];
+    });
+  }
+  if (Array.isArray(linkedOff)) {
+    for (const item of linkedOff) {
+      if (!item.executed) continue;
+      const rk = item.rule || "?";
+      addUI("INFO", `Vinculada desactivada: ${rk.replaceAll("_", " ")}`);
+    }
   }
   const blocked = res?.auto_rules?.blocked_rules;
   if (!Array.isArray(blocked)) return;
@@ -863,6 +917,8 @@ function RulesFormAssistant({
   const [wfTrigger, setWfTrigger] = useState("");
   const [wfBlocked, setWfBlocked] = useState([]);
   const [wfDeactivate, setWfDeactivate] = useState([]);
+  const [wfAlsoTriggers, setWfAlsoTriggers] = useState([]);
+  const [wfAlsoExecuteRules, setWfAlsoExecuteRules] = useState([]);
   const [wfActOut, setWfActOut] = useState([]);
   const [wfDeactOut, setWfDeactOut] = useState([]);
   /** Si true → JSON `deactivate_outputs_temporary`: al soltar la regla, restaura OUT que estaban ON. */
@@ -876,6 +932,8 @@ function RulesFormAssistant({
   const [loadKey, setLoadKey] = useState("");
   const [pickBl, setPickBl] = useState("");
   const [pickDeact, setPickDeact] = useState("");
+  const [pickAlsoTrigger, setPickAlsoTrigger] = useState("");
+  const [pickAlsoRule, setPickAlsoRule] = useState("");
   const [pickOutOn, setPickOutOn] = useState("");
   const [pickOutOff, setPickOutOff] = useState("");
 
@@ -916,6 +974,12 @@ function RulesFormAssistant({
       activate_outputs: [...wfActOut],
       deactivate_outputs: [...wfDeactOut],
     };
+    if (wfAlsoTriggers.length) {
+      rule.also_triggers = [...wfAlsoTriggers];
+    }
+    if (wfAlsoExecuteRules.length) {
+      rule.also_execute_rules = [...wfAlsoExecuteRules];
+    }
     if (wfDeactTemporary) {
       rule.deactivate_outputs_temporary = true;
     }
@@ -960,6 +1024,12 @@ function RulesFormAssistant({
     );
     setWfDeactivate(
       Array.isArray(r.deactivate_modes) ? [...r.deactivate_modes] : [],
+    );
+    setWfAlsoTriggers(
+      Array.isArray(r.also_triggers) ? [...r.also_triggers] : [],
+    );
+    setWfAlsoExecuteRules(
+      Array.isArray(r.also_execute_rules) ? [...r.also_execute_rules] : [],
     );
     setWfActOut(
       Array.isArray(r.activate_outputs) ? [...r.activate_outputs] : [],
@@ -1293,6 +1363,113 @@ function RulesFormAssistant({
           </label>
         </div>
       )}
+
+      <div style={assistSection}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+            paddingLeft: 10,
+            borderLeft: `3px solid ${C.amber}`,
+          }}
+        >
+          <FontAwesomeIcon
+            icon={faLink}
+            style={{ color: C.amber, fontSize: 14 }}
+          />
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: C.textMid,
+              lineHeight: 1.35,
+            }}
+          >
+            Vínculos (activar IN o reglas adicionales a la vez)
+          </span>
+        </div>
+        <p style={{ fontSize: 11, color: C.textSub, lineHeight: 1.5, margin: "0 0 12px" }}>
+          <strong>IN vinculados</strong> (<code>also_triggers</code>): al ejecutar esta
+          regla, los pulsadores indicados quedan activos junto con el disparador principal
+          (p. ej. IN6 placa 2 + IN6 placa 3 en emergencia).{" "}
+          <strong>Reglas vinculadas</strong> (<code>also_execute_rules</code>): ejecuta
+          otra actuación completa en el mismo momento.
+        </p>
+        <div style={{ ...assistLbl, marginBottom: 6 }}>IN vinculados</div>
+        <div style={{ marginBottom: 10, minHeight: 28 }}>
+          <ChipList
+            items={wfAlsoTriggers}
+            onRemove={(c) =>
+              setWfAlsoTriggers(wfAlsoTriggers.filter((x) => x !== c))
+            }
+            C={C}
+            labelByCode={ioLabelByCode}
+          />
+        </div>
+        <select
+          className="rules-assist-control"
+          value={pickAlsoTrigger}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            setWfAlsoTriggers((prev) =>
+              prev.includes(v) ? prev : [...prev, v],
+            );
+            setPickAlsoTrigger("");
+          }}
+          style={{ width: "100%", minWidth: 200, marginBottom: 14 }}
+        >
+          <option value="">Añadir IN vinculado…</option>
+          {ins
+            .filter(
+              (o) =>
+                o.code !== wfTrigger && !wfAlsoTriggers.includes(o.code),
+            )
+            .map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.label}
+              </option>
+            ))}
+        </select>
+        <div style={{ ...assistLbl, marginBottom: 6 }}>Reglas vinculadas</div>
+        <div style={{ marginBottom: 10, minHeight: 28 }}>
+          <ChipList
+            items={wfAlsoExecuteRules}
+            onRemove={(c) =>
+              setWfAlsoExecuteRules(wfAlsoExecuteRules.filter((x) => x !== c))
+            }
+            C={C}
+            labelByCode={(k) => k.replace(/_/g, " ")}
+          />
+        </div>
+        <select
+          className="rules-assist-control"
+          value={pickAlsoRule}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            setWfAlsoExecuteRules((prev) =>
+              prev.includes(v) ? prev : [...prev, v],
+            );
+            setPickAlsoRule("");
+          }}
+          style={{ width: "100%", minWidth: 200 }}
+        >
+          <option value="">Añadir regla vinculada…</option>
+          {ruleKeys
+            .filter(
+              (k) =>
+                k !== slugPreview && !wfAlsoExecuteRules.includes(k),
+            )
+            .map((k) => (
+              <option key={k} value={k}>
+                {k.replace(/_/g, " ")}
+              </option>
+            ))}
+        </select>
+      </div>
 
       <div style={assistSection}>
         <div
@@ -2303,6 +2480,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
 
 export default function ETD8A12Panel() {
   const [tab, setTab] = useState(0);
+  const [coceMessageWsEvent, setCoceMessageWsEvent] = useState(null);
   const [templateConfig, setTemplateConfig] = useState(DEFAULT_TEMPLATE_CONFIG);
   const [templateDraft, setTemplateDraft] = useState(DEFAULT_TEMPLATE_CONFIG);
 
@@ -2650,6 +2828,9 @@ export default function ETD8A12Panel() {
           if (data.type === "zaguan_led") {
             setZaguanLedPushKey((n) => n + 1);
           }
+          if (data.type === "coce_notification") {
+            setCoceMessageWsEvent({ ...data, _ts: Date.now() });
+          }
         } catch {
           /* ignore */
         }
@@ -2735,7 +2916,8 @@ export default function ETD8A12Panel() {
             applyAutoRulesPanelFeedback(result, () => {}, setActiveToggleRules);
           } else if (result?.executed) {
             setPendingManualEnclavamientoMode(null);
-            if (pending.startsWith("horario_")) setSelectedMode(pending);
+            if (pending.startsWith("horario_") || pending === "senal_de_incendio_activada")
+              setSelectedMode(pending);
           }
           const d = await apiFetch("/status?refresh_hardware=false", {
             timeoutMs: 20000,
@@ -3106,7 +3288,7 @@ export default function ETD8A12Panel() {
             );
           } else {
             addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
-            if (ruleKey.startsWith("horario_")) setSelectedMode(ruleKey);
+            if (isOperativePanelMode(ruleKey)) setSelectedMode(ruleKey);
           }
           applyAutoRulesPanelFeedback(result, addUI, setActiveToggleRules);
           void afterPanelMutation();
@@ -3325,6 +3507,9 @@ export default function ETD8A12Panel() {
         logoSrc={templateConfig.mainLogo}
         primaryColor={activeTemplateColors.primary}
         primaryDarkColor={activeTemplateColors.primaryDark}
+        rightSlot={
+          <CoceMessageNotifications apiFetch={apiFetch} wsEvent={coceMessageWsEvent} />
+        }
       />
       <div style={{ padding: "30px 12px" }}>
         {tab === 0 && (
@@ -3390,15 +3575,18 @@ export default function ETD8A12Panel() {
                   )
                   .map((ruleKey) => {
                     const rule = rulesMap[ruleKey];
-                    const isHorarioMode = ruleKey.startsWith("horario_");
+                    const isOperativeMode = isOperativePanelMode(ruleKey);
+                    const isFireMode = ruleKey === "senal_de_incendio_activada";
                     const isModeActive =
-                      isHorarioMode && selectedMode === ruleKey;
+                      isOperativeMode && selectedMode === ruleKey;
                     const isToggleOn =
                       isToggleEnclavamiento(ruleKey, rule) &&
                       activeToggleRules.includes(ruleKey);
                     const isQueued =
-                      isHorarioMode &&
+                      isOperativeMode &&
                       pendingManualEnclavamientoMode === ruleKey;
+                    const activeAccent = isFireMode ? "#E85D04" : C.red;
+                    const activeAccentDark = isFireMode ? "#C2410C" : C.redDark;
                     return (
                       <button
                         key={ruleKey}
@@ -3410,7 +3598,7 @@ export default function ETD8A12Panel() {
                           borderRadius: 8,
                           border: `1px solid ${
                             isModeActive
-                              ? C.red
+                              ? activeAccent
                               : isQueued
                                 ? "#fdba74"
                                 : isToggleOn
@@ -3418,7 +3606,7 @@ export default function ETD8A12Panel() {
                                   : C.border
                           }`,
                           background: isModeActive
-                            ? `linear-gradient(90deg, ${C.red} 0%, ${C.redDark} 100%)`
+                            ? `linear-gradient(90deg, ${activeAccent} 0%, ${activeAccentDark} 100%)`
                             : isQueued
                               ? "#fff7ed"
                               : isToggleOn

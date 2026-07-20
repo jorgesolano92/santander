@@ -217,6 +217,8 @@ async def fetch_branch_snapshot(
         "baseUrl": base,
         "modes": modes_data.get("modes") or [],
         "currentMode": mode_data.get("current_mode"),
+        "activeToggleRules": mode_data.get("active_toggle_rules") or [],
+        "pendingMode": mode_data.get("pending_mode"),
         "boards": boards,
         "modulesConfig": modules_config,
         "panelTimestamp": panel_timestamp,

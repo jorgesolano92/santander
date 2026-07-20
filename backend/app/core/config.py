@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     coce_ingest_token: str = ""
     coce_heartbeat_interval_seconds: int = 60
     coce_reconnect_seconds: int = 5
+    # Mensajes COCE → sucursal: canales de entrega (persistencia siempre en BD local).
+    coce_message_send_tablet: bool = True
+    coce_message_send_web: bool = True
 
     # Llamada P1 → tablets (WebSocket)
     tablet_call_enabled: bool = True

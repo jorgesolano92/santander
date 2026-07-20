@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.api.deps_tablet import get_tablet_username
 from app.api.routes import panel
 from app.core.config import settings
+from app.db import coce_message_store
 from app.db import system_events_store as ses
 from app.db import tablet_users_store as tus
 from app.db.tablet_config_store import get_tablet_config_record
@@ -288,8 +289,8 @@ def set_mode(
                     },
                 )
             return {"ok": True, "action": "set_rule", "result": result}
-        cleared = panel.api_v1_clear_current_mode_if_match(rk)
-        return {"ok": True, "action": "set_rule", "active": False, **cleared}
+        deactivated = panel.api_v1_deactivate_rule_for_tablet(rk)
+        return {"ok": True, "action": "set_rule", "active": False, **deactivated}
     code = body.code.strip()  # type: ignore[union-attr]
     on = body.on
     if on is None and body.value is not None:
@@ -299,3 +300,11 @@ def set_mode(
     assert on is not None
     out = panel.api_v1_set_output_by_code(code, on)
     return {"ok": True, "action": "set_output", **out}
+
+
+@router.get("/coce-messages", summary="Historial de mensajes COCE (solo lectura)")
+def list_coce_messages(
+    _user: Annotated[str, Depends(get_tablet_username)],
+    limit: int = 100,
+) -> dict:
+    return {"messages": coce_message_store.list_messages(limit=limit)}
