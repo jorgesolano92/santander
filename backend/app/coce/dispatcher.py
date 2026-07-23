@@ -1,4 +1,4 @@
-"""Mensajes COCE → sucursal (notificaciones operador)."""
+"""Mensajes COCE → sucursal (notificaciones operador / sync técnicos)."""
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.db import coce_message_store
+from app.db import technicians_store
 from app.services import panel_live_hub, tablet_call_hub
 
 log = logging.getLogger("coce.dispatcher")
@@ -47,9 +48,24 @@ def _handle_coce_message_sync(message: dict[str, Any]) -> None:
     )
 
 
+def _handle_technicians_sync_sync(message: dict[str, Any]) -> None:
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    items = payload.get("technicians")
+    if not isinstance(items, list):
+        log.warning("technicians_sync sin lista")
+        return
+    count = technicians_store.replace_all(items)
+    log.info("Técnicos sincronizados desde COCE: %s", count)
+
+
 async def handle_coce_message(message: dict[str, Any]) -> None:
     msg_type = message.get("type")
     if msg_type == "coce_message":
         await asyncio.to_thread(_handle_coce_message_sync, message)
+        return
+    if msg_type == "technicians_sync":
+        await asyncio.to_thread(_handle_technicians_sync_sync, message)
         return
     log.debug("Mensaje COCE→sucursal no manejado: %s", msg_type)

@@ -10,6 +10,7 @@ const MENU = [
   { to: '/auditoria', label: 'Auditoría' },
   { to: '/updates', label: 'Actualizaciones remotas' },
   { to: '/mensajeria', label: 'Mensajeria avanzada' },
+  { to: '/tecnicos', label: 'Técnicos habilitados' },
   { to: '/reporting', label: 'Reporting avanzado' },
   { to: '/roles', label: 'Roles y permisos' },
   { to: '/alertas', label: 'Alertas y notificaciones' },

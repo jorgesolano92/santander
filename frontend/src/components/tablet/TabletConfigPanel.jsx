@@ -110,6 +110,17 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
     modes: "horario_manual,horario_carga_cajero,horario_extendido",
     pulsadores: "p1",
   },
+  configLogin: {
+    ordinal: "admin",
+    password: "123456",
+    revision: "factory",
+  },
+  visualization: {
+    autoStartCameras: true,
+  },
+  cargaCajero: {
+    videoporteroDoorId: "P2",
+  },
 };
 
 const MODE_LABELS = {
@@ -129,6 +140,7 @@ const SUB_TABS = [
   { id: "emergencia", label: "Emergencia" },
   { id: "llamadas", label: "Llamadas tablet" },
   { id: "oficina", label: "Tipo oficina" },
+  { id: "acceso", label: "Acceso config" },
 ];
 
 function deepClone(obj) {
@@ -542,6 +554,58 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
             <input type="checkbox" checked={!!draft.officeWithATM} onChange={(e) => patch("officeWithATM", e.target.checked)} />
             <span>Oficina con cajero (muestra modo «Carga de cajero»)</span>
           </label>
+        )}
+
+        {subTab === "acceso" && (
+          <div style={grid2}>
+            <p style={{ gridColumn: "1 / -1", margin: 0, color: "#64748b", fontSize: 13 }}>
+              Ordinal y contraseña de acceso a Configuración en la tablet. Al guardar, las tablets
+              aplican estos valores en el próximo pull de defaults (o restauración).
+            </p>
+            <Field label="Ordinal">
+              <input
+                style={inputStyle()}
+                value={draft.configLogin?.ordinal || "admin"}
+                onChange={(e) => patch("configLogin.ordinal", e.target.value)}
+              />
+            </Field>
+            <Field label="Contraseña">
+              <input
+                style={inputStyle()}
+                type="text"
+                value={draft.configLogin?.password || ""}
+                onChange={(e) => patch("configLogin.password", e.target.value)}
+              />
+            </Field>
+            <Field label="Revisión (auto)">
+              <input style={inputStyle()} value={draft.configLogin?.revision || ""} readOnly />
+            </Field>
+            <div style={{ display: "flex", gap: 8, alignItems: "end" }}>
+              <button
+                type="button"
+                style={btnSecondary}
+                onClick={() => {
+                  const revision = `reset-${Date.now()}`;
+                  patch("configLogin", {
+                    ordinal: "admin",
+                    password: "123456",
+                    revision,
+                  });
+                }}
+              >
+                Resetear a factory (admin / 123456)
+              </button>
+              <button
+                type="button"
+                style={btnSecondary}
+                onClick={() => {
+                  patch("configLogin.revision", `rev-${Date.now()}`);
+                }}
+              >
+                Nueva revisión (forzar sync)
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

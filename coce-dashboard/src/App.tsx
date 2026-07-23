@@ -7,6 +7,7 @@ import { AlertsDesignPage } from './pages/AlertsDesignPage';
 import { AuditPage } from './pages/AuditPage';
 import { LoginPage } from './pages/LoginPage';
 import { MessagingDesignPage } from './pages/MessagingDesignPage';
+import { TechniciansPage } from './pages/TechniciansPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ReportingDesignPage } from './pages/ReportingDesignPage';
 import { RolesDesignPage } from './pages/RolesDesignPage';
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="control/:id" element={<DashboardSucursal />} />
           <Route path="updates" element={<UpdatesDesignPage />} />
           <Route path="mensajeria" element={<MessagingDesignPage />} />
+          <Route path="tecnicos" element={<TechniciansPage />} />
           <Route path="reporting" element={<ReportingDesignPage />} />
           <Route path="roles" element={<RolesDesignPage />} />
           <Route path="alertas" element={<AlertsDesignPage />} />

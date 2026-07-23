@@ -62,6 +62,18 @@ def ensure_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_coce_messages_created ON coce_messages(created_at);
             CREATE INDEX IF NOT EXISTS idx_coce_messages_branch ON coce_messages(branch_id);
             CREATE INDEX IF NOT EXISTS idx_coce_messages_status ON coce_messages(delivery_status);
+
+            CREATE TABLE IF NOT EXISTS technicians (
+                dni TEXT PRIMARY KEY,
+                nombre TEXT NOT NULL,
+                apellidos TEXT NOT NULL DEFAULT '',
+                empresa TEXT NOT NULL DEFAULT '',
+                valido_hasta TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_technicians_active ON technicians(active);
             """
         )
         cols = {

@@ -412,3 +412,51 @@ export async function fetchCoceMessages(params?: {
   const data = (await res.json()) as { messages?: CoceOutboundMessage[] };
   return data.messages ?? [];
 }
+
+export type CoceTechnician = {
+  dni: string;
+  nombre: string;
+  apellidos: string;
+  empresa: string;
+  valido_hasta?: string | null;
+  active: boolean;
+  updated_at?: string;
+};
+
+export async function fetchTechnicians(): Promise<CoceTechnician[]> {
+  const res = await apiFetch('/api/coce/technicians');
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { technicians?: CoceTechnician[] };
+  return data.technicians ?? [];
+}
+
+export async function importTechniciansCsv(file: File): Promise<{
+  technicians: CoceTechnician[];
+  sync: { delivered: number; offline: number };
+}> {
+  const base = getCoceApiBase();
+  if (!base) throw new Error('Define VITE_COCE_API_URL');
+  const token = getCoceToken();
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch(`${base}/api/coce/technicians/import`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as {
+    technicians: CoceTechnician[];
+    sync: { delivered: number; offline: number };
+  };
+}
+
+export async function syncTechniciansToBranches(): Promise<{
+  delivered: number;
+  offline: number;
+}> {
+  const res = await apiFetch('/api/coce/technicians/sync-branches', { method: 'POST' });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { sync?: { delivered: number; offline: number } };
+  return data.sync ?? { delivered: 0, offline: 0 };
+}

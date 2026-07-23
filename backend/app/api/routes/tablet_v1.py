@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, model_validator
 
@@ -13,10 +13,12 @@ from app.core.config import settings
 from app.db import coce_message_store
 from app.db import system_events_store as ses
 from app.db import tablet_users_store as tus
+from app.db import technicians_store
 from app.db.tablet_config_store import get_tablet_config_record
-from app.db.schedule_store import get_schedule_config, normalize_location, opening_hours_summary
+from app.db.schedule_store import get_schedule_config, normalize_location, opening_hours_summary, set_schedule_config
 from app.utils.rule_mode_colors import resolve_rule_color, rule_key_to_label
 from app.services import tablet_jwt
+from app.services.schedule_runner import notify_schedule_config_changed
 from app.services.tablet_password import hash_password, verify_password
 
 router = APIRouter(prefix="/v1", tags=["Tablet API v1"])
@@ -308,3 +310,44 @@ def list_coce_messages(
     limit: int = 100,
 ) -> dict:
     return {"messages": coce_message_store.list_messages(limit=limit)}
+
+
+@router.get("/schedules", summary="Horarios semanales (mismas franjas que el panel)")
+def get_schedules_v1(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    return get_schedule_config()
+
+
+@router.put("/schedules", summary="Actualizar horarios semanales desde tablet")
+def put_schedules_v1(
+    _user: Annotated[str, Depends(get_tablet_username)],
+    config: dict = Body(...),
+) -> dict:
+    set_schedule_config(config)
+    notify_schedule_config_changed()
+    return get_schedule_config()
+
+
+@router.get("/technicians", summary="Consulta técnicos habilitados (COCE)")
+def get_technicians(
+    _user: Annotated[str, Depends(get_tablet_username)],
+    dni: Optional[str] = None,
+) -> dict:
+    if dni and dni.strip():
+        tech = technicians_store.find_by_dni(dni)
+        if not tech:
+            return {"found": False, "reason": "not_found"}
+        if not tech.get("active", True):
+            return {"found": False, "reason": "inactive", "technician": tech}
+        valid_until = tech.get("valido_hasta")
+        if valid_until:
+            try:
+                # Accept YYYY-MM-DD or ISO
+                day = str(valid_until)[:10]
+                from datetime import date
+
+                if date.fromisoformat(day) < date.today():
+                    return {"found": False, "reason": "expired", "technician": tech}
+            except ValueError:
+                pass
+        return {"found": True, "technician": tech}
+    return {"technicians": technicians_store.list_all()}

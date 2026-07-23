@@ -12,6 +12,11 @@ from app.db import schedule_store
 log = logging.getLogger("schedule.runner")
 
 _wake_event: Optional[asyncio.Event] = None
+# Última franja resuelta por el motor. Solo se fuerza un cambio de modo cuando
+# esta franja cambia (inicio de tramo nuevo), no mientras el modo manual difiera
+# del horario vigente dentro de la misma franja.
+_last_resolved_target: Optional[str] = None
+_schedule_bootstrapped: bool = False
 
 
 def notify_schedule_config_changed() -> None:
@@ -157,6 +162,48 @@ def _apply_schedule_mode(rule_key: str) -> None:
     log.info("Horario automático: modo activado %s (antes %s)", rule_key, current)
 
 
+def _sync_schedule_target(target: Optional[str]) -> None:
+    """
+    Aplica el modo de horario solo al cambiar de franja.
+
+    - Cambio manual dentro de la franja actual: se respeta hasta la siguiente.
+    - Arranque del servicio: no fuerza el horario si ya hay un modo activo
+      (p. ej. override manual persistido); solo aplica si no hay modo.
+    """
+    global _last_resolved_target, _schedule_bootstrapped
+    from app.api.routes import panel
+
+    if not _schedule_bootstrapped:
+        _schedule_bootstrapped = True
+        _last_resolved_target = target
+        current = panel.api_v1_get_current_mode()
+        if target and not current:
+            _apply_schedule_mode(target)
+            log.info(
+                "Horario: arranque sin modo activo → aplicado %s",
+                target,
+            )
+        else:
+            log.info(
+                "Horario: arranque respetando modo actual=%s (franja=%s)",
+                current,
+                target,
+            )
+        return
+
+    if target == _last_resolved_target:
+        return
+
+    previous = _last_resolved_target
+    _last_resolved_target = target
+    if not target:
+        log.info("Horario: sin franja activa (antes %s); se mantiene el modo actual", previous)
+        return
+
+    log.info("Horario: cambio de franja %s → %s", previous, target)
+    _apply_schedule_mode(target)
+
+
 async def schedule_background_loop() -> None:
     global _wake_event
     _wake_event = asyncio.Event()
@@ -169,8 +216,11 @@ async def schedule_background_loop() -> None:
 
             if config.get("enabled"):
                 target = resolve_rule_key_at(now, config)
-                if target:
-                    await asyncio.to_thread(_apply_schedule_mode, target)
+                await asyncio.to_thread(_sync_schedule_target, target)
+            else:
+                # Con horarios desactivados no se fuerza modo; al reactivar se
+                # vuelve a evaluar solo si cambia la franja respecto a la última.
+                pass
 
             sleep_s = seconds_until_next_checkpoint(now, config)
             try:
