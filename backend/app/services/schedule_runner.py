@@ -17,9 +17,13 @@ _wake_event: Optional[asyncio.Event] = None
 # del horario vigente dentro de la misma franja.
 _last_resolved_target: Optional[str] = None
 _schedule_bootstrapped: bool = False
+# Tras guardar horarios, forzar aplicar la franja vigente aunque no “cambie”.
+_resync_requested: bool = False
 
 
 def notify_schedule_config_changed() -> None:
+    global _resync_requested
+    _resync_requested = True
     if _wake_event is not None:
         _wake_event.set()
 
@@ -36,24 +40,38 @@ def parse_hhmm(value: str) -> int:
     return hour * 60 + minute
 
 
-def _slot_matches_minute(minute: int, start: int, end: int) -> tuple[bool, int]:
-    """Devuelve (coincide, prioridad). Prioridad = minuto de inicio para desempatar solapes."""
+def _slot_duration_minutes(start: int, end: int) -> int:
+    if start < end:
+        return end - start
+    return (24 * 60 - start) + end
+
+
+def _slot_matches_minute(minute: int, start: int, end: int) -> tuple[bool, int, int]:
+    """
+    Devuelve (coincide, recency, duración).
+
+    recency = minuto de inicio del tramo en el eje del día actual.
+    En solapes gana la franja con mayor recency (la que empezó más tarde) y,
+    a igualdad, la de menor duración (más específica).
+    """
     if start < end:
         if start <= minute < end:
-            return True, start
-        return False, 0
+            return True, start, end - start
+        return False, 0, 0
+    # Tramo que cruza medianoche: en el día del start solo cuenta la parte nocturna.
     if minute >= start:
-        return True, start
-    return False, 0
+        return True, start, _slot_duration_minutes(start, end)
+    return False, 0, 0
 
 
-def _slot_matches_spill(minute: int, start: int, end: int) -> tuple[bool, int]:
+def _slot_matches_spill(minute: int, start: int, end: int) -> tuple[bool, int, int]:
     """Parte matutina de un tramo nocturno del día anterior."""
     if start < end:
-        return False, 0
+        return False, 0, 0
     if minute < end:
-        return True, start
-    return False, 0
+        # Empezó ayer → recency por debajo de cualquier franja de hoy.
+        return True, start - 24 * 60, _slot_duration_minutes(start, end)
+    return False, 0, 0
 
 
 def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
@@ -70,7 +88,8 @@ def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
     prev_key = WEEKDAY_KEYS[(weekday - 1) % 7]
     minute = dt.hour * 60 + dt.minute
 
-    candidates: list[tuple[int, str]] = []
+    # (recency, -duration, rule_key) — max() elige la más reciente y, si empatan, la más corta.
+    candidates: list[tuple[int, int, str]] = []
 
     for slot in days.get(day_key, []) or []:
         if not slot.get("active"):
@@ -80,11 +99,11 @@ def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
             end = parse_hhmm(slot.get("end", "00:00"))
         except ValueError:
             continue
-        ok, priority = _slot_matches_minute(minute, start, end)
+        ok, recency, duration = _slot_matches_minute(minute, start, end)
         if ok:
             rk = str(slot.get("rule_key") or "").strip()
             if rk:
-                candidates.append((priority, rk))
+                candidates.append((recency, -duration, rk))
 
     for slot in days.get(prev_key, []) or []:
         if not slot.get("active"):
@@ -94,15 +113,15 @@ def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
             end = parse_hhmm(slot.get("end", "00:00"))
         except ValueError:
             continue
-        ok, priority = _slot_matches_spill(minute, start, end)
+        ok, recency, duration = _slot_matches_spill(minute, start, end)
         if ok:
             rk = str(slot.get("rule_key") or "").strip()
             if rk:
-                candidates.append((priority, rk))
+                candidates.append((recency, -duration, rk))
 
     if not candidates:
         return None
-    return max(candidates, key=lambda item: item[0])[1]
+    return max(candidates)[2]
 
 
 def _datetime_at_minute(day: date, minute: int) -> datetime:
@@ -119,6 +138,8 @@ def collect_future_checkpoints(now: datetime, config: dict, *, horizon_days: int
         day = base + timedelta(days=offset)
         day_key = WEEKDAY_KEYS[day.weekday()]
         for slot in days.get(day_key, []) or []:
+            if slot.get("active") is False:
+                continue
             try:
                 start = parse_hhmm(slot.get("start", "00:00"))
                 end = parse_hhmm(slot.get("end", "00:00"))
@@ -167,27 +188,37 @@ def _sync_schedule_target(target: Optional[str]) -> None:
     Aplica el modo de horario solo al cambiar de franja.
 
     - Cambio manual dentro de la franja actual: se respeta hasta la siguiente.
-    - Arranque del servicio: no fuerza el horario si ya hay un modo activo
-      (p. ej. override manual persistido); solo aplica si no hay modo.
+    - Arranque / resync de config: alinea el modo con la franja vigente.
     """
-    global _last_resolved_target, _schedule_bootstrapped
+    global _last_resolved_target, _schedule_bootstrapped, _resync_requested
     from app.api.routes import panel
+
+    if _resync_requested:
+        _resync_requested = False
+        previous = _last_resolved_target
+        _last_resolved_target = target
+        if not target:
+            log.info(
+                "Horario: resync sin franja activa (antes %s); se mantiene el modo actual",
+                previous,
+            )
+            return
+        log.info("Horario: resync tras cambio de config %s → %s", previous, target)
+        _apply_schedule_mode(target)
+        return
 
     if not _schedule_bootstrapped:
         _schedule_bootstrapped = True
         _last_resolved_target = target
         current = panel.api_v1_get_current_mode()
-        if target and not current:
+        if target and current != target:
+            log.info("Horario: arranque sincronizando %s → %s", current, target)
             _apply_schedule_mode(target)
-            log.info(
-                "Horario: arranque sin modo activo → aplicado %s",
-                target,
-            )
         else:
             log.info(
-                "Horario: arranque respetando modo actual=%s (franja=%s)",
-                current,
+                "Horario: arranque en franja=%s (modo actual=%s)",
                 target,
+                current,
             )
         return
 
