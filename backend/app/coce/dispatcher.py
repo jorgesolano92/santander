@@ -1,4 +1,14 @@
-"""Mensajes COCE → sucursal (notificaciones operador / sync técnicos)."""
+"""Mensajes COCE → sucursal (relay exclusivo del backend del panel).
+
+Flujo:
+  COCE  --WS-->  backend panel (esta sucursal)
+                    ├─ persiste siempre en BD local
+                    ├─ si COCE_MESSAGE_SEND_WEB=true  → WS panel (/api/panel/ws/live)
+                    └─ si COCE_MESSAGE_SEND_TABLET=true → WS tablets (/api/v1/ws/calls)
+
+El COCE no habla con las tablets. Con SEND_WEB=false y SEND_TABLET=true
+el mensaje no se emite al dashboard web, pero sí a las tablets por el hub del panel.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -33,18 +43,30 @@ def _handle_coce_message_sync(message: dict[str, Any]) -> None:
         sent_at=str(sent_at) if sent_at else None,
         extra=payload,
     )
+
     delivered: list[str] = []
+    # Tablets: mismo hub WS que modos en vivo y llamadas (tablet_call_hub).
     if settings.coce_message_send_tablet:
+        n_tablets = tablet_call_hub.connected_client_count()
         tablet_call_hub.notify_coce_message(stored)
-        delivered.append("tablet")
+        delivered.append(f"tablet(ws={n_tablets})")
+        if n_tablets == 0:
+            log.warning(
+                "Mensaje COCE id=%s: SEND_TABLET=true pero 0 tablets en /api/v1/ws/calls",
+                message_id,
+            )
+    # Dashboard web: hub distinto (/api/panel/ws/live).
     if settings.coce_message_send_web:
         panel_live_hub.notify_coce_message(stored)
         delivered.append("web")
+
     log.info(
-        "Mensaje COCE recibido id=%s urgent=%s canales=%s",
+        "Mensaje COCE id=%s urgent=%s send_tablet=%s send_web=%s canales=%s",
         message_id,
         urgent,
-        delivered or ["ninguno"],
+        settings.coce_message_send_tablet,
+        settings.coce_message_send_web,
+        delivered or ["ninguno (ambos flags false)"],
     )
 
 

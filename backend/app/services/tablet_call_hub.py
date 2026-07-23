@@ -180,7 +180,12 @@ def notify_mode_queued(
     )
 
 
+def connected_client_count() -> int:
+    return len(_clients)
+
+
 def notify_coce_message(message: dict[str, Any]) -> None:
+    """Push a tablets por el mismo WS que modos/llamadas (no pasa por el browser del panel)."""
     publish_sync(
         {
             "type": "coce_notification",

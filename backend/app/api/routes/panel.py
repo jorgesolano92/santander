@@ -3218,6 +3218,9 @@ def root():
 
 @router.get("/coce-messages", summary="Historial mensajes COCE (panel web, solo lectura)")
 def list_coce_messages(limit: int = Query(100, ge=1, le=200)) -> dict:
+    # Si SEND_WEB=false, el mensaje no debe mostrarse en el dashboard (sí puede ir a tablets).
+    if not settings.coce_message_send_web:
+        return {"messages": [], "disabled": True}
     return {"messages": coce_message_store.list_messages(limit=limit)}
 
 
