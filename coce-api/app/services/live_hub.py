@@ -183,6 +183,26 @@ class LiveHub:
                     "currentMode": payload.get("current_mode"),
                     "active_toggle_rules": payload.get("active_toggle_rules") or [],
                 }
+            elif msg_type == "update_status":
+                # Persistencia de despliegue; se reenvía al dashboard en branch_update.message
+                try:
+                    from app.db import updates_store as updates_store
+
+                    rid = str(payload.get("release_id") or "")
+                    status = str(payload.get("status") or "")
+                    if rid and status:
+                        updates_store.update_deployment_status(
+                            release_id=rid,
+                            branch_id=installation_id,
+                            status=status,
+                            error=str(payload.get("error") or "") or None,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("update_status persist failed: %s", exc)
+                st.partial = {
+                    **(st.partial or {}),
+                    "lastUpdateStatus": payload,
+                }
 
             self._states[installation_id] = st
             event = self._branch_update_event(installation_id, st, msg_type, payload)

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.schema import ensure_schema
-from app.api.routes import auth, branches, branch_ops, audit, ws, messages, technicians
+from app.api.routes import auth, branches, branch_ops, audit, ws, messages, technicians, updates
 from app.services.live_hub import live_hub
 
 
@@ -49,6 +49,7 @@ app.include_router(branch_ops.router, prefix=prefix)
 app.include_router(audit.router, prefix=prefix)
 app.include_router(messages.router, prefix=prefix)
 app.include_router(technicians.router, prefix=prefix)
+app.include_router(updates.router, prefix=prefix)
 app.include_router(ws.router, prefix=prefix)
 
 

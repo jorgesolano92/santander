@@ -460,3 +460,110 @@ export async function syncTechniciansToBranches(): Promise<{
   const data = (await res.json()) as { sync?: { delivered: number; offline: number } };
   return data.sync ?? { delivered: 0, offline: 0 };
 }
+
+export type SoftwareRelease = {
+  id: string;
+  kind: 'panel' | 'tablet_apk';
+  version: string;
+  changelog: string;
+  sha256: string;
+  originalFilename: string;
+  source: string;
+  createdAt: string;
+  createdBy: string;
+  downloadPath: string;
+};
+
+export type SoftwareDeployment = {
+  id: string;
+  releaseId: string;
+  branchId: string;
+  branchNombre: string;
+  status: string;
+  error?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version?: string | null;
+  kind?: string | null;
+  delivered?: boolean;
+};
+
+export async function fetchSoftwareReleases(params?: {
+  kind?: 'panel' | 'tablet_apk';
+  limit?: number;
+}): Promise<SoftwareRelease[]> {
+  const q = new URLSearchParams();
+  if (params?.kind) q.set('kind', params.kind);
+  if (params?.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  const res = await apiFetch(`/api/coce/updates/releases${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { releases?: SoftwareRelease[] };
+  return data.releases ?? [];
+}
+
+export async function uploadSoftwareRelease(payload: {
+  kind: 'panel' | 'tablet_apk';
+  version: string;
+  changelog?: string;
+  file: File;
+}): Promise<SoftwareRelease> {
+  const base = getCoceApiBase();
+  if (!base) throw new Error('Define VITE_COCE_API_URL');
+  const token = getCoceToken();
+  const body = new FormData();
+  body.append('kind', payload.kind);
+  body.append('version', payload.version);
+  body.append('changelog', payload.changelog || '');
+  body.append('file', payload.file);
+  const res = await fetch(`${base}/api/coce/updates/releases`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body,
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { release?: SoftwareRelease };
+  if (!data.release) throw new Error('Respuesta sin release');
+  return data.release;
+}
+
+export async function publishPanelFromLocal(payload?: {
+  version?: string;
+  changelog?: string;
+}): Promise<SoftwareRelease> {
+  const res = await apiFetch('/api/coce/updates/releases/from-local', {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { release?: SoftwareRelease };
+  if (!data.release) throw new Error('Respuesta sin release');
+  return data.release;
+}
+
+export async function deploySoftwareRelease(payload: {
+  releaseId: string;
+  branchIds: string[];
+  sendToAll: boolean;
+}): Promise<{ release: SoftwareRelease; deployments: SoftwareDeployment[] }> {
+  const res = await apiFetch('/api/coce/updates/deploy', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as { release: SoftwareRelease; deployments: SoftwareDeployment[] };
+}
+
+export async function fetchSoftwareDeployments(params?: {
+  releaseId?: string;
+  limit?: number;
+}): Promise<SoftwareDeployment[]> {
+  const q = new URLSearchParams();
+  if (params?.releaseId) q.set('release_id', params.releaseId);
+  if (params?.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  const res = await apiFetch(`/api/coce/updates/deployments${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { deployments?: SoftwareDeployment[] };
+  return data.deployments ?? [];
+}

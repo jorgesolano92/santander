@@ -82,6 +82,44 @@ def _handle_technicians_sync_sync(message: dict[str, Any]) -> None:
     log.info("Técnicos sincronizados desde COCE: %s", count)
 
 
+def _handle_software_update_sync(message: dict[str, Any]) -> None:
+    from app.db import software_update_store as update_store
+
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    release_id = str(payload.get("release_id") or "").strip()
+    version = str(payload.get("version") or "").strip()
+    kind = str(payload.get("kind") or "").strip()
+    if not release_id or not version or kind not in ("panel", "tablet_apk"):
+        log.warning("software_update ignorado: %s", payload)
+        return
+    pending = {
+        "release_id": release_id,
+        "version": version,
+        "kind": kind,
+        "download_path": payload.get("download_path"),
+        "sha256": payload.get("sha256"),
+        "published_at": payload.get("published_at"),
+        "changelog": payload.get("changelog") or "",
+        "mandatory": bool(payload.get("mandatory")),
+        "deployment_id": payload.get("deployment_id"),
+    }
+    update_store.set_pending(pending)
+    panel_live_hub.publish_sync(
+        {
+            "type": "software_update_available",
+            "release_id": release_id,
+            "version": version,
+            "kind": kind,
+            "changelog": pending["changelog"],
+            "published_at": pending.get("published_at"),
+            "mandatory": pending["mandatory"],
+        }
+    )
+    log.info("software_update pendiente kind=%s version=%s", kind, version)
+
+
 async def handle_coce_message(message: dict[str, Any]) -> None:
     msg_type = message.get("type")
     if msg_type == "coce_message":
@@ -89,5 +127,8 @@ async def handle_coce_message(message: dict[str, Any]) -> None:
         return
     if msg_type == "technicians_sync":
         await asyncio.to_thread(_handle_technicians_sync_sync, message)
+        return
+    if msg_type == "software_update":
+        await asyncio.to_thread(_handle_software_update_sync, message)
         return
     log.debug("Mensaje COCE→sucursal no manejado: %s", msg_type)

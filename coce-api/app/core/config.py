@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # WebSocket ingest sucursal → COCE (API key por sucursal)
     branch_auth_required: bool = True
     branch_heartbeat_timeout_seconds: int = 120
+    # Checkout local del código de panel sucursal (backend/ + frontend/) para from-local
+    panel_source_dir: str = ""
+    updates_max_upload_mb: int = 256
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -3224,6 +3224,63 @@ def list_coce_messages(limit: int = Query(100, ge=1, le=200)) -> dict:
     return {"messages": coce_message_store.list_messages(limit=limit)}
 
 
+@router.get("/software-update", summary="Estado de actualización pendiente (COCE)")
+def get_software_update_state() -> dict:
+    from app.db import software_update_store as sus
+
+    return sus.get_state()
+
+
+@router.post("/software-update/apply", summary="Aplicar actualización de panel pendiente")
+def apply_software_update() -> dict:
+    from app.services import software_updater
+
+    try:
+        return software_updater.apply_panel_update()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/software-update/apk", summary="Descargar APK pendiente (para instalar en Akuvox)")
+def download_pending_apk():
+    from fastapi.responses import FileResponse
+    import tempfile
+    from pathlib import Path
+    from app.db import software_update_store as sus
+    from app.services import software_updater
+
+    state = sus.get_state()
+    pending = state.get("pending") or {}
+    if pending.get("kind") != "tablet_apk":
+        raise HTTPException(status_code=404, detail="No hay APK pendiente")
+    tmp = Path(tempfile.mkdtemp(prefix="apk-dl-"))
+    dest = tmp / f"tablet-{pending.get('version', 'update')}.apk"
+    try:
+        software_updater.download_apk_to_path(dest, pending)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(
+        dest,
+        media_type="application/vnd.android.package-archive",
+        filename=dest.name,
+    )
+
+
+@router.post("/software-update/dismiss", summary="Marcar aviso de update como visto")
+def dismiss_software_update() -> dict:
+    from app.db import software_update_store as sus
+
+    state = sus.get_state()
+    pending = state.get("pending") or {}
+    kind = pending.get("kind")
+    version = str(pending.get("version") or "")
+    if kind == "tablet_apk" and version:
+        sus.mark_apk_seen(version, str(pending.get("published_at") or "") or None)
+    else:
+        sus.clear_pending()
+    return {"ok": True}
+
+
 @router.get("/status")
 def get_status(
     run_auto_rules: bool = False,

@@ -74,6 +74,38 @@ def ensure_schema() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_technicians_active ON technicians(active);
+
+            CREATE TABLE IF NOT EXISTS software_releases (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                version TEXT NOT NULL,
+                changelog TEXT NOT NULL DEFAULT '',
+                sha256 TEXT NOT NULL,
+                storage_path TEXT NOT NULL,
+                original_filename TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'upload',
+                created_at TEXT NOT NULL,
+                created_by TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_software_releases_kind ON software_releases(kind);
+            CREATE INDEX IF NOT EXISTS idx_software_releases_created ON software_releases(created_at);
+
+            CREATE TABLE IF NOT EXISTS software_deployments (
+                id TEXT PRIMARY KEY,
+                release_id TEXT NOT NULL,
+                branch_id TEXT NOT NULL,
+                branch_nombre TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (release_id) REFERENCES software_releases(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_software_deployments_release ON software_deployments(release_id);
+            CREATE INDEX IF NOT EXISTS idx_software_deployments_branch ON software_deployments(branch_id);
+            CREATE INDEX IF NOT EXISTS idx_software_deployments_status ON software_deployments(status);
             """
         )
         cols = {

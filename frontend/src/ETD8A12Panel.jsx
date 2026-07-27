@@ -6,6 +6,7 @@ import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
 import { CoceMessageNotifications } from "./components/CoceMessageNotifications";
+import { SoftwareUpdateBanner } from "./components/SoftwareUpdateBanner";
 import {
   DEFAULT_MODE_COLORS,
   normalizeRuleColor,
@@ -2831,6 +2832,9 @@ export default function ETD8A12Panel() {
           if (data.type === "coce_notification") {
             setCoceMessageWsEvent({ ...data, _ts: Date.now() });
           }
+          if (data.type === "software_update_available") {
+            window.dispatchEvent(new CustomEvent("software_update_available", { detail: data }));
+          }
         } catch {
           /* ignore */
         }
@@ -3511,6 +3515,7 @@ export default function ETD8A12Panel() {
           <CoceMessageNotifications apiFetch={apiFetch} wsEvent={coceMessageWsEvent} />
         }
       />
+      <SoftwareUpdateBanner apiFetch={apiFetch} />
       <div style={{ padding: "30px 12px" }}>
         {tab === 0 && (
           <div
