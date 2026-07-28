@@ -133,7 +133,9 @@ export default function ZaguanEsp32Panel({
     for (let n = 1; n <= 4; n += 1) {
       const ch = target.channels?.[`p${n}`];
       if (ch?.resolved_host) {
-        hosts.add(`${ch.resolved_host}:${ch.resolved_port ?? target.port ?? 80}`);
+        hosts.add(
+          `${ch.resolved_host}:${ch.resolved_port ?? target.port ?? 80}`,
+        );
       }
     }
     return hosts.size > 1;
@@ -304,7 +306,13 @@ export default function ZaguanEsp32Panel({
   useEffect(() => {
     if (!active) return;
     refreshBackendEstado(true);
-  }, [active, modeRefreshKey, pendingModeRefreshKey, ledPushKey, refreshBackendEstado]);
+  }, [
+    active,
+    modeRefreshKey,
+    pendingModeRefreshKey,
+    ledPushKey,
+    refreshBackendEstado,
+  ]);
 
   useEffect(() => {
     if (!active) return;
@@ -519,10 +527,7 @@ export default function ZaguanEsp32Panel({
       configFlash: () => `POST /api/config/flash → p${canalCfg}`,
     };
     setBusy(true);
-    log(
-      "tx",
-      descripciones[metodo] ? descripciones[metodo](payload) : metodo,
-    );
+    log("tx", descripciones[metodo] ? descripciones[metodo](payload) : metodo);
     try {
       const res = await api[metodo](payload, canalCfg);
       log("rx", `OK — ${JSON.stringify(res).slice(0, 140)}`);
@@ -566,12 +571,11 @@ export default function ZaguanEsp32Panel({
         winhoseParpadeo,
       );
     }
-    const base =
-      c.estados.find((x) => x.estado === estado) || {
-        color: [0, 0, 0],
-        animacion: "fijo",
-        velocidad: 0,
-      };
+    const base = c.estados.find((x) => x.estado === estado) || {
+      color: [0, 0, 0],
+      animacion: "fijo",
+      velocidad: 0,
+    };
     return withWinhoseParpadeo(canal, estado, base, winhoseParpadeo);
   };
 
@@ -642,9 +646,7 @@ export default function ZaguanEsp32Panel({
         <form className="conn" onSubmit={conectar}>
           <span className={`dot ${onlineCount > 0 ? "dot-on" : "dot-off"}`} />
           <span className="conn-status">
-            {onlineCount > 0
-              ? `En línea (${onlineCount}/4)`
-              : "Sin conexión"}
+            {onlineCount > 0 ? `En línea (${onlineCount}/4)` : "Sin conexión"}
           </span>
           <input
             className="input input-ip mono"
@@ -655,7 +657,7 @@ export default function ZaguanEsp32Panel({
             placeholder="IP global"
           />
           <button type="submit" className="btn btn-sm">
-            Guardar red
+            Guardar configuración
           </button>
         </form>
         <div className="topbar-meta">
@@ -818,9 +820,7 @@ export default function ZaguanEsp32Panel({
                     <td>
                       <span
                         className={`dot ${channelOnline[n] ? "dot-on" : "dot-off"}`}
-                        title={
-                          channelOnline[n] ? "En línea" : "Sin respuesta"
-                        }
+                        title={channelOnline[n] ? "En línea" : "Sin respuesta"}
                       />
                     </td>
                   </tr>

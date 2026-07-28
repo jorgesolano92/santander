@@ -186,6 +186,30 @@ const TABS = [
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
 
+function histDateToFromIso(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function histDateToToIso(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T23:59:59.999`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function buildHistoricoQueryParams({ dateFrom, dateTo, typeFilter, limit = 500 }) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const fromIso = histDateToFromIso(dateFrom);
+  const toIso = histDateToToIso(dateTo);
+  if (fromIso) params.set("from_date", fromIso);
+  if (toIso) params.set("to_date", toIso);
+  if (typeFilter && typeFilter !== "ALL") params.set("type", typeFilter);
+  return params;
+}
+
 function normalizeHexColor(
   raw,
   fallback = DEFAULT_TEMPLATE_CONFIG.primaryColor,
@@ -2516,6 +2540,8 @@ export default function ETD8A12Panel() {
   const [uiLog, setUiLog] = useState([]);
   const [pending, setPending] = useState({});
   const [histFilter, setHistFilter] = useState("ALL");
+  const [histDateFrom, setHistDateFrom] = useState("");
+  const [histDateTo, setHistDateTo] = useState("");
   const [rulesJson, setRulesJson] = useState("");
   const [rulesMap, setRulesMap] = useState({});
   const [selectedMode, setSelectedMode] = useState(null);
@@ -3007,12 +3033,17 @@ export default function ETD8A12Panel() {
 
   const loadHistoricoEvents = useCallback(async () => {
     try {
-      const d = await apiFetch("/events?limit=500");
+      const params = buildHistoricoQueryParams({
+        dateFrom: histDateFrom,
+        dateTo: histDateTo,
+        typeFilter: histFilter,
+      });
+      const d = await apiFetch(`/events?${params}`);
       setEvents(d.events || []);
     } catch {
       // silent
     }
-  }, []);
+  }, [histDateFrom, histDateTo, histFilter]);
 
   useEffect(() => {
     if (tab !== HISTORICO_TAB_INDEX) return;
@@ -3431,7 +3462,13 @@ export default function ETD8A12Panel() {
   const exportHistoryCsv = async () => {
     try {
       const token = getPanelToken();
-      const res = await fetch("/api/events/export", {
+      const params = buildHistoricoQueryParams({
+        dateFrom: histDateFrom,
+        dateTo: histDateTo,
+        typeFilter: histFilter,
+        limit: 50000,
+      });
+      const res = await fetch(`/api/events/export?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
@@ -3447,7 +3484,9 @@ export default function ETD8A12Panel() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `eventos_${new Date().toISOString().slice(0, 10)}.csv`;
+      const fromPart = histDateFrom || "inicio";
+      const toPart = histDateTo || "fin";
+      a.download = `eventos_${fromPart}_${toPart}.csv`;
       a.click();
       URL.revokeObjectURL(url);
       addUI("OK", "CSV descargado");
@@ -3456,8 +3495,7 @@ export default function ETD8A12Panel() {
     }
   };
 
-  const filtered =
-    histFilter === "ALL" ? events : events.filter((e) => e.type === histFilter);
+  const filtered = events;
   // Histórico: más reciente arriba; al abrir la pestaña (carga única), scroll al inicio de la lista.
   useEffect(() => {
     if (tab !== HISTORICO_TAB_INDEX || filtered.length === 0) return;
@@ -4525,10 +4563,83 @@ export default function ETD8A12Panel() {
               style={{
                 marginBottom: 10,
                 display: "flex",
-                gap: 6,
-                alignItems: "center",
+                flexDirection: "column",
+                gap: 8,
               }}
             >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: 12,
+                    color: C.textSub,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  Desde
+                  <input
+                    type="date"
+                    value={histDateFrom}
+                    onChange={(e) => setHistDateFrom(e.target.value)}
+                    style={{
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      padding: "4px 8px",
+                      fontSize: 12,
+                    }}
+                  />
+                </label>
+                <label
+                  style={{
+                    fontSize: 12,
+                    color: C.textSub,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  Hasta
+                  <input
+                    type="date"
+                    value={histDateTo}
+                    onChange={(e) => setHistDateTo(e.target.value)}
+                    style={{
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      padding: "4px 8px",
+                      fontSize: 12,
+                    }}
+                  />
+                </label>
+                {(histDateFrom || histDateTo) && (
+                  <Btn
+                    small
+                    variant="ghost"
+                    onClick={() => {
+                      setHistDateFrom("");
+                      setHistDateTo("");
+                    }}
+                  >
+                    Limpiar fechas
+                  </Btn>
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
               {["ALL", "OK", "WARN", "ERR", "INFO"].map((t) => (
                 <button
                   key={t}
@@ -4550,6 +4661,7 @@ export default function ETD8A12Panel() {
                 <Btn small variant="danger" onClick={clearHistory}>
                   Borrar histórico
                 </Btn>
+              </div>
               </div>
             </div>
             <div

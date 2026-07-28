@@ -3720,11 +3720,18 @@ def read_outputs(board_id: int):
 
 
 @router.get("/events")
-def get_events(limit: int = 300, type_filter: Optional[str] = None):
+def get_events(
+    from_date: Optional[str] = Query(None, description="ISO 8601 fecha/hora inicial"),
+    to_date: Optional[str] = Query(None, description="ISO 8601 fecha/hora final"),
+    type_filter: Optional[str] = Query(None, alias="type"),
+    limit: int = Query(500, ge=1, le=2000),
+):
     sev = type_filter.strip().upper() if type_filter and type_filter.strip() else None
     total, rows = ses.list_events(
+        from_date=from_date,
+        to_date=to_date,
         severity_filter=sev,
-        limit=min(limit, 2000),
+        limit=limit,
         offset=0,
     )
     return {"total": total, "events": rows}
