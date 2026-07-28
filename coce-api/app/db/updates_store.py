@@ -273,6 +273,72 @@ def update_deployment_status(
     return _row_deployment(full) if full else None
 
 
+def delete_release(release_id: str) -> bool:
+    path = get_release_storage_path(release_id)
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM software_releases WHERE id = ?",
+            (release_id,),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "DELETE FROM software_deployments WHERE release_id = ?",
+            (release_id,),
+        )
+        conn.execute("DELETE FROM software_releases WHERE id = ?", (release_id,))
+        conn.commit()
+    if path and path.is_file():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return True
+
+
+def delete_all_releases() -> int:
+    with get_connection() as conn:
+        rows = conn.execute("SELECT id, storage_path FROM software_releases").fetchall()
+        count = len(rows)
+        if not count:
+            return 0
+        conn.execute("DELETE FROM software_deployments")
+        conn.execute("DELETE FROM software_releases")
+        conn.commit()
+    for row in rows:
+        path = releases_dir() / str(row["storage_path"])
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+    return count
+
+
+def delete_deployment(deployment_id: str) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM software_deployments WHERE id = ?",
+            (deployment_id,),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM software_deployments WHERE id = ?", (deployment_id,))
+        conn.commit()
+    return True
+
+
+def delete_all_deployments() -> int:
+    with get_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) AS c FROM software_deployments").fetchone()
+        count = int(row["c"]) if row else 0
+        if not count:
+            return 0
+        conn.execute("DELETE FROM software_deployments")
+        conn.commit()
+    return count
+
+
 def list_deployments(*, limit: int = 100, release_id: Optional[str] = None) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 500))
     with get_connection() as conn:

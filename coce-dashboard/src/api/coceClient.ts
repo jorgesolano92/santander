@@ -567,3 +567,32 @@ export async function fetchSoftwareDeployments(params?: {
   const data = (await res.json()) as { deployments?: SoftwareDeployment[] };
   return data.deployments ?? [];
 }
+
+export async function deleteSoftwareRelease(releaseId: string): Promise<void> {
+  const res = await apiFetch(`/api/coce/updates/releases/${encodeURIComponent(releaseId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function deleteAllSoftwareReleases(): Promise<number> {
+  const res = await apiFetch('/api/coce/updates/releases', { method: 'DELETE' });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { deleted?: number };
+  return data.deleted ?? 0;
+}
+
+export async function deleteSoftwareDeployment(deploymentId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/coce/updates/deployments/${encodeURIComponent(deploymentId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function deleteAllSoftwareDeployments(): Promise<number> {
+  const res = await apiFetch('/api/coce/updates/deployments', { method: 'DELETE' });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { deleted?: number };
+  return data.deleted ?? 0;
+}

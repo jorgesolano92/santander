@@ -1,5 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
+  deleteAllSoftwareDeployments,
+  deleteAllSoftwareReleases,
+  deleteSoftwareDeployment,
+  deleteSoftwareRelease,
   deploySoftwareRelease,
   fetchSoftwareDeployments,
   fetchSoftwareReleases,
@@ -128,6 +132,96 @@ export function UpdatesDesignPage() {
     );
   }
 
+  async function onDeleteRelease(release: SoftwareRelease) {
+    if (
+      !confirm(
+        `¿Eliminar el release [${release.kind}] ${release.version}? También se borrarán sus despliegues asociados.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      await deleteSoftwareRelease(release.id);
+      if (selectedReleaseId === release.id) {
+        setSelectedReleaseId('');
+      }
+      setInfo(`Release ${release.version} eliminado.`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeleteAllReleases() {
+    if (!releases.length) return;
+    if (
+      !confirm(
+        `¿Eliminar los ${releases.length} releases? Se borrarán también todos los despliegues asociados.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      const count = await deleteAllSoftwareReleases();
+      setSelectedReleaseId('');
+      setInfo(`${count} release(s) eliminado(s).`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeleteDeployment(deployment: SoftwareDeployment) {
+    if (
+      !confirm(
+        `¿Eliminar el despliegue de ${deployment.branchNombre || deployment.branchId} (${deployment.kind} ${deployment.version})?`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      await deleteSoftwareDeployment(deployment.id);
+      setInfo('Despliegue eliminado.');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeleteAllDeployments() {
+    if (!deployments.length) return;
+    if (!confirm(`¿Eliminar los ${deployments.length} registros de la cola de despliegues?`)) {
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      const count = await deleteAllSoftwareDeployments();
+      setInfo(`${count} despliegue(s) eliminado(s).`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="content-view">
       <div className="card">
@@ -246,7 +340,17 @@ export function UpdatesDesignPage() {
       </div>
 
       <div className="card">
-        <h2>Releases</h2>
+        <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <h2 style={{ margin: 0 }}>Releases</h2>
+          <button
+            className="btn btn-danger btn-sm"
+            type="button"
+            disabled={busy || releases.length === 0}
+            onClick={() => void onDeleteAllReleases()}
+          >
+            Eliminar todos
+          </button>
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -256,6 +360,7 @@ export function UpdatesDesignPage() {
                 <th>Origen</th>
                 <th>Fecha</th>
                 <th>Archivo</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -266,6 +371,16 @@ export function UpdatesDesignPage() {
                   <td>{r.source}</td>
                   <td>{new Date(r.createdAt).toLocaleString('es-ES')}</td>
                   <td>{r.originalFilename}</td>
+                  <td>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void onDeleteRelease(r)}
+                    >
+                      Eliminar
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -274,7 +389,17 @@ export function UpdatesDesignPage() {
       </div>
 
       <div className="card">
-        <h2>Cola de despliegues</h2>
+        <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <h2 style={{ margin: 0 }}>Cola de despliegues</h2>
+          <button
+            className="btn btn-danger btn-sm"
+            type="button"
+            disabled={busy || deployments.length === 0}
+            onClick={() => void onDeleteAllDeployments()}
+          >
+            Eliminar todos
+          </button>
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -283,6 +408,7 @@ export function UpdatesDesignPage() {
                 <th>Paquete</th>
                 <th>Estado</th>
                 <th>Actualizado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -294,6 +420,16 @@ export function UpdatesDesignPage() {
                   </td>
                   <td>{j.status}</td>
                   <td>{new Date(j.updatedAt).toLocaleString('es-ES')}</td>
+                  <td>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void onDeleteDeployment(j)}
+                    >
+                      Eliminar
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

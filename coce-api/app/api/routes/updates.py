@@ -249,6 +249,40 @@ async def deploy_release(
     return {"ok": True, "release": release, "deployments": results}
 
 
+@router.delete("/releases/{release_id}")
+def delete_release(
+    release_id: str,
+    request: Request,
+    user: Annotated[str, Depends(get_current_username)],
+) -> dict:
+    if not updates.delete_release(release_id):
+        raise HTTPException(status_code=404, detail="Release no encontrado")
+    audit.record_audit(
+        actor_username=user,
+        action="updates.release_delete",
+        success=True,
+        detail={"release_id": release_id},
+        ip_address=get_client_ip(request),
+    )
+    return {"ok": True, "deleted": release_id}
+
+
+@router.delete("/releases")
+def delete_all_releases(
+    request: Request,
+    user: Annotated[str, Depends(get_current_username)],
+) -> dict:
+    count = updates.delete_all_releases()
+    audit.record_audit(
+        actor_username=user,
+        action="updates.releases_delete_all",
+        success=True,
+        detail={"count": count},
+        ip_address=get_client_ip(request),
+    )
+    return {"ok": True, "deleted": count}
+
+
 @router.get("/deployments")
 def list_deployments(
     _user: Annotated[str, Depends(get_current_username)],
@@ -256,3 +290,37 @@ def list_deployments(
     limit: int = Query(100, ge=1, le=500),
 ) -> dict:
     return {"deployments": updates.list_deployments(limit=limit, release_id=release_id)}
+
+
+@router.delete("/deployments/{deployment_id}")
+def delete_deployment(
+    deployment_id: str,
+    request: Request,
+    user: Annotated[str, Depends(get_current_username)],
+) -> dict:
+    if not updates.delete_deployment(deployment_id):
+        raise HTTPException(status_code=404, detail="Despliegue no encontrado")
+    audit.record_audit(
+        actor_username=user,
+        action="updates.deployment_delete",
+        success=True,
+        detail={"deployment_id": deployment_id},
+        ip_address=get_client_ip(request),
+    )
+    return {"ok": True, "deleted": deployment_id}
+
+
+@router.delete("/deployments")
+def delete_all_deployments(
+    request: Request,
+    user: Annotated[str, Depends(get_current_username)],
+) -> dict:
+    count = updates.delete_all_deployments()
+    audit.record_audit(
+        actor_username=user,
+        action="updates.deployments_delete_all",
+        success=True,
+        detail={"count": count},
+        ip_address=get_client_ip(request),
+    )
+    return {"ok": True, "deleted": count}
