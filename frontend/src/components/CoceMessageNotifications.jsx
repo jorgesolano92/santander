@@ -1,5 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
-import { faBell, faTriangleExclamation, faXmark } from "@fortawesome/free-solid-svg-icons";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  faBell,
+  faEnvelope,
+  faTriangleExclamation,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 function formatWhen(iso) {
@@ -31,6 +36,7 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
   const [messages, setMessages] = useState([]);
   const [toast, setToast] = useState(null);
   const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
 
   const mergeMessage = useCallback((incoming) => {
     const msg = normalizeMessage(incoming);
@@ -82,59 +88,248 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
     return () => window.clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event) => {
+      if (rootRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
   const unread = messages.filter((m) => !m.seenAt).length;
 
-  function openHistory() {
-    setOpen(true);
-    setToast(null);
-    setMessages((prev) =>
-      prev.map((m) => (m.seenAt ? m : { ...m, seenAt: new Date().toISOString() })),
-    );
+  function togglePanel() {
+    setOpen((wasOpen) => {
+      const next = !wasOpen;
+      if (next) {
+        setToast(null);
+        setMessages((prev) =>
+          prev.map((m) => (m.seenAt ? m : { ...m, seenAt: new Date().toISOString() })),
+        );
+      }
+      return next;
+    });
   }
 
   return (
     <>
-      <button
-        type="button"
-        onClick={openHistory}
-        title="Mensajes COCE"
-        style={{
-          position: "relative",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          border: "1px solid rgba(255,255,255,0.35)",
-          background: "rgba(255,255,255,0.12)",
-          color: "#fff",
-          borderRadius: 8,
-          padding: "8px 12px",
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: 600,
-        }}
-      >
-        <FontAwesomeIcon icon={faBell} />
-        Mensajes COCE
-        {unread > 0 ? (
-          <span
+      <div ref={rootRef} style={{ position: "relative" }}>
+        <button
+          type="button"
+          onClick={togglePanel}
+          title="Mensajes COCE"
+          aria-expanded={open}
+          aria-haspopup="true"
+          style={{
+            position: "relative",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            border: "1px solid rgba(255,255,255,0.35)",
+            background: open ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.12)",
+            color: "#fff",
+            borderRadius: 8,
+            padding: "8px 12px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          <FontAwesomeIcon icon={faBell} />
+          Mensajes COCE
+          {unread > 0 ? (
+            <span
+              style={{
+                minWidth: 20,
+                height: 20,
+                borderRadius: 999,
+                background: "#fff",
+                color: "#B20710",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "0 6px",
+              }}
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
+          ) : null}
+        </button>
+
+        {open ? (
+          <div
+            role="dialog"
+            aria-label="Notificaciones COCE"
             style={{
-              minWidth: 20,
-              height: 20,
-              borderRadius: 999,
+              position: "absolute",
+              top: "calc(100% + 8px)",
+              right: 0,
+              width: 350,
+              height: 350,
+              zIndex: 2100,
               background: "#fff",
-              color: "#B20710",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 11,
-              fontWeight: 700,
-              padding: "0 6px",
+              color: "#0F172A",
+              borderRadius: 16,
+              border: "1px solid #E2E8F0",
+              boxShadow: "0 12px 32px rgba(15,23,42,0.18)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
             }}
+            onClick={(e) => e.stopPropagation()}
           >
-            {unread > 99 ? "99+" : unread}
-          </span>
+            <div
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: "12px 14px",
+                borderBottom: "1px solid #E2E8F0",
+                background: "#F8FAFC",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                <span
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    background: "#DBEAFE",
+                    color: "#1D4ED8",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <FontAwesomeIcon icon={faBell} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2 }}>
+                    Notificaciones
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748B" }}>Solo lectura</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                title="Cerrar"
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "#64748B",
+                  padding: 4,
+                }}
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                padding: 10,
+              }}
+            >
+              {messages.length === 0 ? (
+                <div
+                  style={{
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    color: "#64748B",
+                    textAlign: "center",
+                    padding: 16,
+                  }}
+                >
+                  <FontAwesomeIcon icon={faBell} style={{ fontSize: 28, opacity: 0.35 }} />
+                  <p style={{ margin: 0, fontSize: 13 }}>No hay mensajes recibidos.</p>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {messages.map((msg) => {
+                    const icon = msg.urgent ? faTriangleExclamation : faEnvelope;
+                    const iconBg = msg.urgent ? "#FEE2E2" : "#DBEAFE";
+                    const iconColor = msg.urgent ? "#B91C1C" : "#1D4ED8";
+                    return (
+                      <article
+                        key={msg.id}
+                        style={{
+                          border: msg.urgent ? "1px solid #FECACA" : "1px solid #E2E8F0",
+                          background: msg.urgent ? "#FEF2F2" : "#FFFFFF",
+                          borderRadius: 10,
+                          padding: 10,
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          <span
+                            style={{
+                              width: 30,
+                              height: 30,
+                              borderRadius: 8,
+                              background: iconBg,
+                              color: iconColor,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              marginTop: 1,
+                            }}
+                          >
+                            <FontAwesomeIcon icon={icon} />
+                          </span>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <strong
+                              style={{
+                                display: "block",
+                                fontSize: 13,
+                                color: msg.urgent ? "#991B1B" : "#0F172A",
+                                lineHeight: 1.3,
+                              }}
+                            >
+                              {msg.title}
+                            </strong>
+                            {msg.body ? (
+                              <p
+                                style={{
+                                  margin: "4px 0 0",
+                                  color: "#334155",
+                                  fontSize: 12,
+                                  lineHeight: 1.4,
+                                  whiteSpace: "pre-wrap",
+                                  wordBreak: "break-word",
+                                }}
+                              >
+                                {msg.body}
+                              </p>
+                            ) : null}
+                            <small style={{ color: "#64748B", fontSize: 10 }}>
+                              {formatWhen(msg.receivedAt)}
+                            </small>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         ) : null}
-      </button>
+      </div>
 
       {toast ? (
         <div
@@ -154,9 +349,23 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
           }}
         >
           <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            {toast.urgent ? (
-              <FontAwesomeIcon icon={faTriangleExclamation} style={{ color: "#B91C1C", marginTop: 2 }} />
-            ) : null}
+            <span
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                background: toast.urgent ? "#FEE2E2" : "#DBEAFE",
+                color: toast.urgent ? "#B91C1C" : "#1D4ED8",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <FontAwesomeIcon
+                icon={toast.urgent ? faTriangleExclamation : faEnvelope}
+              />
+            </span>
             <div style={{ flex: 1 }}>
               <strong style={{ color: toast.urgent ? "#991B1B" : "#0F172A", display: "block" }}>
                 {toast.title}
@@ -175,73 +384,6 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
             >
               <FontAwesomeIcon icon={faXmark} />
             </button>
-          </div>
-        </div>
-      ) : null}
-
-      {open ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15,23,42,0.45)",
-            zIndex: 2100,
-            display: "grid",
-            placeItems: "center",
-            padding: 20,
-          }}
-          onClick={() => setOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(720px, 100%)",
-              maxHeight: "85vh",
-              overflow: "auto",
-              background: "#fff",
-              borderRadius: 14,
-              padding: 18,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: 20 }}>Mensajes del COCE</h2>
-                <p style={{ margin: "4px 0 0", color: "#64748B", fontSize: 13 }}>
-                  Solo lectura · no se puede responder
-                </p>
-              </div>
-              <button type="button" onClick={() => setOpen(false)} style={{ border: "none", background: "transparent", cursor: "pointer" }}>
-                <FontAwesomeIcon icon={faXmark} size="lg" />
-              </button>
-            </div>
-            <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
-              {messages.length === 0 ? (
-                <p style={{ color: "#64748B", textAlign: "center", padding: "24px 0" }}>
-                  No hay mensajes recibidos.
-                </p>
-              ) : (
-                messages.map((msg) => (
-                  <article
-                    key={msg.id}
-                    style={{
-                      border: msg.urgent ? "1px solid #DC2626" : "1px solid #E2E8F0",
-                      background: msg.urgent ? "#FEF2F2" : "#F8FAFC",
-                      borderRadius: 10,
-                      padding: 12,
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {msg.urgent ? (
-                        <FontAwesomeIcon icon={faTriangleExclamation} style={{ color: "#B91C1C" }} />
-                      ) : null}
-                      <strong style={{ color: msg.urgent ? "#991B1B" : "#0F172A" }}>{msg.title}</strong>
-                    </div>
-                    <p style={{ margin: "8px 0 0", color: "#334155", whiteSpace: "pre-wrap" }}>{msg.body}</p>
-                    <small style={{ color: "#64748B" }}>{formatWhen(msg.receivedAt)}</small>
-                  </article>
-                ))
-              )}
-            </div>
           </div>
         </div>
       ) : null}

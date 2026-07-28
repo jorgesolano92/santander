@@ -52,7 +52,11 @@ export function TopNavbar({
         </nav>
       </div>
 
-      {rightSlot ? <div className="flex items-center gap-3">{rightSlot}</div> : null}
+      {rightSlot ? (
+        <div className="flex items-center gap-3" style={{ position: "relative", overflow: "visible" }}>
+          {rightSlot}
+        </div>
+      ) : null}
 
       {/* <div className="flex items-center gap-4 text-sm">
         <span className="flex items-center gap-2">
