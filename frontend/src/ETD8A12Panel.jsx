@@ -3,6 +3,7 @@ import { clearPanelToken, getPanelToken, getPanelWsLiveUrl } from "./panelAuth";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
+import { HomeZaguanSimulation } from "./components/zaguan/HomeZaguanSimulation";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
 import { CoceMessageNotifications } from "./components/CoceMessageNotifications";
@@ -120,7 +121,10 @@ function applyAutoRulesPanelFeedback(res, addUI, setActiveToggleRules) {
       const s = new Set(prev);
       for (const item of linkedOn) {
         if (!item.rule) continue;
-        if (item.executed && (item.toggle_active || item.toggle_action === "on")) {
+        if (
+          item.executed &&
+          (item.toggle_active || item.toggle_action === "on")
+        ) {
           s.add(item.rule);
         }
       }
@@ -200,7 +204,12 @@ function histDateToToIso(dateStr) {
   return d.toISOString();
 }
 
-function buildHistoricoQueryParams({ dateFrom, dateTo, typeFilter, limit = 500 }) {
+function buildHistoricoQueryParams({
+  dateFrom,
+  dateTo,
+  typeFilter,
+  limit = 500,
+}) {
   const params = new URLSearchParams({ limit: String(limit) });
   const fromIso = histDateToFromIso(dateFrom);
   const toIso = histDateToToIso(dateTo);
@@ -1415,12 +1424,20 @@ function RulesFormAssistant({
             Vínculos (activar IN o reglas adicionales a la vez)
           </span>
         </div>
-        <p style={{ fontSize: 11, color: C.textSub, lineHeight: 1.5, margin: "0 0 12px" }}>
-          <strong>IN vinculados</strong> (<code>also_triggers</code>): al ejecutar esta
-          regla, los pulsadores indicados quedan activos junto con el disparador principal
-          (p. ej. IN6 placa 2 + IN6 placa 3 en emergencia).{" "}
-          <strong>Reglas vinculadas</strong> (<code>also_execute_rules</code>): ejecuta
-          otra actuación completa en el mismo momento.
+        <p
+          style={{
+            fontSize: 11,
+            color: C.textSub,
+            lineHeight: 1.5,
+            margin: "0 0 12px",
+          }}
+        >
+          <strong>IN vinculados</strong> (<code>also_triggers</code>): al
+          ejecutar esta regla, los pulsadores indicados quedan activos junto con
+          el disparador principal (p. ej. IN6 placa 2 + IN6 placa 3 en
+          emergencia). <strong>Reglas vinculadas</strong> (
+          <code>also_execute_rules</code>): ejecuta otra actuación completa en
+          el mismo momento.
         </p>
         <div style={{ ...assistLbl, marginBottom: 6 }}>IN vinculados</div>
         <div style={{ marginBottom: 10, minHeight: 28 }}>
@@ -1449,8 +1466,7 @@ function RulesFormAssistant({
           <option value="">Añadir IN vinculado…</option>
           {ins
             .filter(
-              (o) =>
-                o.code !== wfTrigger && !wfAlsoTriggers.includes(o.code),
+              (o) => o.code !== wfTrigger && !wfAlsoTriggers.includes(o.code),
             )
             .map((o) => (
               <option key={o.code} value={o.code}>
@@ -1484,10 +1500,7 @@ function RulesFormAssistant({
         >
           <option value="">Añadir regla vinculada…</option>
           {ruleKeys
-            .filter(
-              (k) =>
-                k !== slugPreview && !wfAlsoExecuteRules.includes(k),
-            )
+            .filter((k) => k !== slugPreview && !wfAlsoExecuteRules.includes(k))
             .map((k) => (
               <option key={k} value={k}>
                 {k.replace(/_/g, " ")}
@@ -2859,7 +2872,9 @@ export default function ETD8A12Panel() {
             setCoceMessageWsEvent({ ...data, _ts: Date.now() });
           }
           if (data.type === "software_update_available") {
-            window.dispatchEvent(new CustomEvent("software_update_available", { detail: data }));
+            window.dispatchEvent(
+              new CustomEvent("software_update_available", { detail: data }),
+            );
           }
         } catch {
           /* ignore */
@@ -2946,7 +2961,10 @@ export default function ETD8A12Panel() {
             applyAutoRulesPanelFeedback(result, () => {}, setActiveToggleRules);
           } else if (result?.executed) {
             setPendingManualEnclavamientoMode(null);
-            if (pending.startsWith("horario_") || pending === "senal_de_incendio_activada")
+            if (
+              pending.startsWith("horario_") ||
+              pending === "senal_de_incendio_activada"
+            )
               setSelectedMode(pending);
           }
           const d = await apiFetch("/status?refresh_hardware=false", {
@@ -3550,7 +3568,10 @@ export default function ETD8A12Panel() {
         primaryColor={activeTemplateColors.primary}
         primaryDarkColor={activeTemplateColors.primaryDark}
         rightSlot={
-          <CoceMessageNotifications apiFetch={apiFetch} wsEvent={coceMessageWsEvent} />
+          <CoceMessageNotifications
+            apiFetch={apiFetch}
+            wsEvent={coceMessageWsEvent}
+          />
         }
       />
       <SoftwareUpdateBanner apiFetch={apiFetch} />
@@ -4140,141 +4161,176 @@ export default function ETD8A12Panel() {
                 })}
               </Card>
             </div>
-            <Card style={{ padding: 15, overflow: "hidden" }}>
+            <Card
+              style={{
+                padding: 15,
+                overflow: "auto",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
               <SecLabel>Actividad</SecLabel>
               <div
-                ref={logScrollRef}
-                style={{ height: 520, overflowY: "auto", padding: 10 }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  minHeight: 640,
+                }}
               >
-                {!serverOnline && (
-                  <div style={{ color: C.red }}>API offline en `{API}`</div>
-                )}
-                {uiLog.map((e, i) => {
-                  const styleByType = {
-                    INFO: {
-                      icon: faCircleInfo,
-                      iconColor: "#2563EB",
-                      badgeBg: "#DBEAFE",
-                      badgeColor: "#1D4ED8",
-                    },
-                    OK: {
-                      icon: faCircleCheck,
-                      iconColor: "#16A34A",
-                      badgeBg: "#DCFCE7",
-                      badgeColor: "#15803D",
-                    },
-                    WARN: {
-                      icon: faTriangleExclamation,
-                      iconColor: "#D97706",
-                      badgeBg: "#FEF3C7",
-                      badgeColor: "#B45309",
-                    },
-                    ERR: {
-                      icon: faCircleXmark,
-                      iconColor: "#DC2626",
-                      badgeBg: "#FEE2E2",
-                      badgeColor: "#B91C1C",
-                    },
-                  };
-                  const styleCfg = styleByType[e.type] || {
-                    icon: faPenToSquare,
-                    iconColor: C.textSub,
-                    badgeBg: C.surfaceAlt,
-                    badgeColor: C.textSub,
-                  };
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "30px 1fr",
-                        columnGap: 10,
-                        paddingBottom: i === uiLog.length - 1 ? 0 : 12,
-                      }}
-                    >
+                <div
+                  ref={logScrollRef}
+                  style={{
+                    flex: "0 0 auto",
+                    height: 500,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    padding: "0 4px 8px",
+                  }}
+                >
+                  {!serverOnline && (
+                    <div style={{ color: C.red }}>API offline en `{API}`</div>
+                  )}
+                  {uiLog.map((e, i) => {
+                    const styleByType = {
+                      INFO: {
+                        icon: faCircleInfo,
+                        iconColor: "#2563EB",
+                        badgeBg: "#DBEAFE",
+                        badgeColor: "#1D4ED8",
+                      },
+                      OK: {
+                        icon: faCircleCheck,
+                        iconColor: "#16A34A",
+                        badgeBg: "#DCFCE7",
+                        badgeColor: "#15803D",
+                      },
+                      WARN: {
+                        icon: faTriangleExclamation,
+                        iconColor: "#D97706",
+                        badgeBg: "#FEF3C7",
+                        badgeColor: "#B45309",
+                      },
+                      ERR: {
+                        icon: faCircleXmark,
+                        iconColor: "#DC2626",
+                        badgeBg: "#FEE2E2",
+                        badgeColor: "#B91C1C",
+                      },
+                    };
+                    const styleCfg = styleByType[e.type] || {
+                      icon: faPenToSquare,
+                      iconColor: C.textSub,
+                      badgeBg: C.surfaceAlt,
+                      badgeColor: C.textSub,
+                    };
+                    return (
                       <div
+                        key={i}
                         style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "center",
+                          display: "grid",
+                          gridTemplateColumns: "30px 1fr",
+                          columnGap: 10,
+                          paddingBottom: i === uiLog.length - 1 ? 0 : 12,
                         }}
                       >
-                        <span
-                          style={{
-                            width: 26,
-                            height: 26,
-                            borderRadius: "50%",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            background: styleCfg.badgeBg,
-                            color: styleCfg.iconColor,
-                          }}
-                        >
-                          <FontAwesomeIcon icon={styleCfg.icon} />
-                        </span>
-                        {i !== uiLog.length - 1 && (
-                          <span
-                            style={{
-                              width: 2,
-                              flex: 1,
-                              minHeight: 20,
-                              marginTop: 4,
-                              background: C.border,
-                              borderRadius: 2,
-                            }}
-                          />
-                        )}
-                      </div>
-
-                      <div style={{ paddingTop: 1 }}>
                         <div
                           style={{
-                            fontSize: 14,
-                            fontWeight: 700,
-                            color: C.textMid,
-                            lineHeight: 1.25,
-                          }}
-                        >
-                          {e.msg}
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 2,
-                            fontSize: 11,
-                            color: C.textSub,
-                          }}
-                        >
-                          Panel ETD8A12
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 2,
-                            fontSize: 11,
-                            color: C.muted,
                             display: "flex",
+                            flexDirection: "column",
                             alignItems: "center",
-                            gap: 6,
                           }}
                         >
-                          <span>{e.ts}</span>
                           <span
                             style={{
-                              fontSize: 10,
-                              fontWeight: 700,
-                              borderRadius: 999,
-                              padding: "1px 7px",
+                              width: 26,
+                              height: 26,
+                              borderRadius: "50%",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
                               background: styleCfg.badgeBg,
-                              color: styleCfg.badgeColor,
+                              color: styleCfg.iconColor,
                             }}
                           >
-                            {e.type}
+                            <FontAwesomeIcon icon={styleCfg.icon} />
                           </span>
+                          {i !== uiLog.length - 1 && (
+                            <span
+                              style={{
+                                width: 2,
+                                flex: 1,
+                                minHeight: 20,
+                                marginTop: 4,
+                                background: C.border,
+                                borderRadius: 2,
+                              }}
+                            />
+                          )}
+                        </div>
+
+                        <div style={{ paddingTop: 1 }}>
+                          <div
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: C.textMid,
+                              lineHeight: 1.25,
+                            }}
+                          >
+                            {e.msg}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 2,
+                              fontSize: 11,
+                              color: C.textSub,
+                            }}
+                          >
+                            Panel ETD8A12
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 2,
+                              fontSize: 11,
+                              color: C.muted,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            <span>{e.ts}</span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                borderRadius: 999,
+                                padding: "1px 7px",
+                                background: styleCfg.badgeBg,
+                                color: styleCfg.badgeColor,
+                              }}
+                            >
+                              {e.type}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                <div
+                  style={{
+                    flex: "1 1 auto",
+                    minHeight: 400,
+                    overflowY: "auto",
+                    borderTop: `1px solid ${C.border}`,
+                    paddingTop: 10,
+                    paddingRight: 4,
+                    paddingBottom: 8,
+                  }}
+                >
+                  <HomeZaguanSimulation onSimulatePulse={simulateZaguanPulse} />
+                </div>
               </div>
             </Card>
           </div>
@@ -4640,28 +4696,28 @@ export default function ETD8A12Panel() {
                   flexWrap: "wrap",
                 }}
               >
-              {["ALL", "OK", "WARN", "ERR", "INFO"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setHistFilter(t)}
-                  style={{
-                    border: `1px solid ${C.border}`,
-                    borderRadius: 16,
-                    padding: "4px 8px",
-                    background: histFilter === t ? C.surfaceAlt : C.white,
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
-              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                <Btn small variant="ghost" onClick={exportHistoryCsv}>
-                  Exportar CSV
-                </Btn>
-                <Btn small variant="danger" onClick={clearHistory}>
-                  Borrar histórico
-                </Btn>
-              </div>
+                {["ALL", "OK", "WARN", "ERR", "INFO"].map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setHistFilter(t)}
+                    style={{
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 16,
+                      padding: "4px 8px",
+                      background: histFilter === t ? C.surfaceAlt : C.white,
+                    }}
+                  >
+                    {t}
+                  </button>
+                ))}
+                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <Btn small variant="ghost" onClick={exportHistoryCsv}>
+                    Exportar CSV
+                  </Btn>
+                  <Btn small variant="danger" onClick={clearHistory}>
+                    Borrar histórico
+                  </Btn>
+                </div>
               </div>
             </div>
             <div

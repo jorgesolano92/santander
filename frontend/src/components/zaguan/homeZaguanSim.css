@@ -1,0 +1,50 @@
+/* Simulación orquestador embebida en columna Actividad (página principal) */
+.home-zaguan-sim.zaguan-esp32-app {
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  padding: 0;
+}
+
+.home-zaguan-sim .sim-section.panel {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
+.home-zaguan-sim .panel-head {
+  margin-bottom: 6px;
+}
+
+.home-zaguan-sim .panel-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.home-zaguan-sim .sim-block {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.home-zaguan-sim .sim-block-title,
+.home-zaguan-sim .sim-block-desc {
+  display: none;
+}
+
+.home-zaguan-sim .sim-card {
+  padding: 8px;
+  gap: 6px;
+}
+
+.home-zaguan-sim .sim-card-meta {
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.home-zaguan-sim .sim-grid-pulse {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
