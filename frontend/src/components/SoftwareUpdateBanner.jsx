@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { getPanelToken } from "../panelAuth";
 
 /**
  * Banner de actualización remota COCE (panel PC o APK Akuvox).
@@ -8,6 +7,7 @@ export function SoftwareUpdateBanner({ apiFetch }) {
   const [pending, setPending] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [info, setInfo] = useState(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -39,24 +39,23 @@ export function SoftwareUpdateBanner({ apiFetch }) {
   const onApply = async () => {
     setBusy(true);
     setError(null);
+    setInfo(null);
     try {
       if (isApk) {
-        const token = getPanelToken();
-        const res = await fetch(`/api/panel/software-update/apk`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || res.statusText || "Error descarga");
+        const filename = `tablet-${pending.version}.apk`;
+        const link = document.createElement("a");
+        link.href = `/api/panel/software-update/apk`;
+        link.download = filename;
+        link.rel = "noopener";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setInfo("Descarga iniciada. Revisa la barra de descargas del navegador.");
+        try {
+          await apiFetch("/software-update/dismiss", { method: "POST" });
+        } catch {
+          /* La descarga ya está en curso; no bloquear la UI si falla el dismiss. */
         }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `tablet-${pending.version}.apk`;
-        a.click();
-        URL.revokeObjectURL(url);
-        await apiFetch("/software-update/dismiss", { method: "POST" });
         setPending(null);
       } else {
         await apiFetch("/software-update/apply", { method: "POST" });
@@ -98,6 +97,7 @@ export function SoftwareUpdateBanner({ apiFetch }) {
       {pending.changelog ? (
         <span style={{ opacity: 0.85, fontSize: 13 }}>{pending.changelog}</span>
       ) : null}
+      {info ? <span style={{ opacity: 0.85, fontSize: 13 }}>{info}</span> : null}
       {error ? <span style={{ color: "#fecaca", fontSize: 13 }}>{error}</span> : null}
       <button
         type="button"

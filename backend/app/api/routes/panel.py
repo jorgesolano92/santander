@@ -3243,9 +3243,9 @@ def apply_software_update() -> dict:
 
 @router.get("/software-update/apk", summary="Descargar APK pendiente (para instalar en Akuvox)")
 def download_pending_apk():
-    from fastapi.responses import FileResponse
-    import tempfile
-    from pathlib import Path
+    from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
+
     from app.db import software_update_store as sus
     from app.services import software_updater
 
@@ -3253,16 +3253,19 @@ def download_pending_apk():
     pending = state.get("pending") or {}
     if pending.get("kind") != "tablet_apk":
         raise HTTPException(status_code=404, detail="No hay APK pendiente")
-    tmp = Path(tempfile.mkdtemp(prefix="apk-dl-"))
-    dest = tmp / f"tablet-{pending.get('version', 'update')}.apk"
+    version = str(pending.get("version") or "update")
+    filename = f"tablet-{version}.apk"
     try:
-        software_updater.download_apk_to_path(dest, pending)
+        stream = software_updater.stream_apk_download(pending)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return FileResponse(
-        dest,
+    return StreamingResponse(
+        stream,
         media_type="application/vnd.android.package-archive",
-        filename=dest.name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{quote(filename)}"',
+            "Cache-Control": "no-store",
+        },
     )
 
 

@@ -21,6 +21,8 @@ log = logging.getLogger("software.updater")
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
 _REPO_ROOT = _BACKEND_ROOT.parent
 
+_CHUNK_SIZE = 256 * 1024
+
 _EXCLUDE_DIR_NAMES = {
     "data",
     "node_modules",
@@ -87,19 +89,85 @@ def download_artifact(pending: dict[str, Any], dest: Path) -> Path:
         },
         method="GET",
     )
+    hasher = hashlib.sha256()
+    expected = str(pending.get("sha256") or "").strip().lower()
     try:
-        with urlrequest.urlopen(req, timeout=120) as resp:
-            dest.write_bytes(resp.read())
+        with urlrequest.urlopen(req, timeout=600) as resp:
+            with dest.open("wb") as out:
+                while True:
+                    chunk = resp.read(_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+                    out.write(chunk)
     except urlerror.HTTPError as exc:
         raise RuntimeError(f"Descarga COCE falló HTTP {exc.code}") from exc
     except urlerror.URLError as exc:
         raise RuntimeError(f"Descarga COCE falló: {exc.reason}") from exc
-    expected = str(pending.get("sha256") or "").strip().lower()
     if expected:
-        h = hashlib.sha256(dest.read_bytes()).hexdigest()
-        if h != expected:
-            raise RuntimeError(f"SHA256 no coincide (esperado {expected}, got {h})")
+        digest = hasher.hexdigest()
+        if digest != expected:
+            raise RuntimeError(f"SHA256 no coincide (esperado {expected}, got {digest})")
     return dest
+
+
+def iter_artifact_chunks(
+    pending: dict[str, Any],
+    *,
+    chunk_size: int = _CHUNK_SIZE,
+):
+    """Transmite el artefacto del COCE en trozos (sin cargarlo entero en RAM)."""
+    base = coce_http_base()
+    if not base:
+        raise RuntimeError("COCE_WS_URL no configurada; no se puede descargar el artefacto")
+    path = str(pending.get("download_path") or "")
+    if not path.startswith("/"):
+        path = "/" + path
+    url = f"{base}{path}"
+    req = urlrequest.Request(
+        url,
+        headers={
+            "X-Coce-Ingest-Token": settings.coce_ingest_token or "",
+            "X-Coce-Installation-Id": settings.coce_installation_id or "",
+        },
+        method="GET",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=600) as resp:
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+    except urlerror.HTTPError as exc:
+        raise RuntimeError(f"Descarga COCE falló HTTP {exc.code}") from exc
+    except urlerror.URLError as exc:
+        raise RuntimeError(f"Descarga COCE falló: {exc.reason}") from exc
+
+
+def stream_apk_download(pending: dict[str, Any]):
+    """Generador para StreamingResponse al descargar APK en el navegador."""
+    release_id = str(pending.get("release_id") or "")
+    version = str(pending.get("version") or "")
+    expected = str(pending.get("sha256") or "").strip().lower()
+    _report(release_id, "downloading", version)
+    hasher = hashlib.sha256()
+    try:
+        for chunk in iter_artifact_chunks(pending):
+            hasher.update(chunk)
+            yield chunk
+        if expected:
+            digest = hasher.hexdigest()
+            if digest != expected:
+                msg = f"SHA256 no coincide (esperado {expected}, got {digest})"
+                _report(release_id, "failed", version, msg)
+                raise RuntimeError(msg)
+        store.mark_apk_seen(version, str(pending.get("published_at") or "") or None)
+        _report(release_id, "success", version)
+    except Exception as exc:
+        if "SHA256 no coincide" not in str(exc):
+            _report(release_id, "failed", version, str(exc))
+        raise
 
 
 def apply_panel_update(pending: Optional[dict[str, Any]] = None) -> dict[str, Any]:
