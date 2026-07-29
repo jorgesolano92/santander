@@ -183,6 +183,24 @@
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim);
 }
 
+.panel-planta {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+.panel-planta .panel-head {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  min-height: 48px;
+  align-items: flex-start;
+}
+.panel-planta .zaguan-diagram {
+  flex: 1 1 auto;
+  height: 260px;
+  min-height: 260px;
+  max-height: 260px;
+}
+
 .modo-actual {
   display: flex;
   flex-direction: column;
@@ -191,6 +209,7 @@
   min-width: 0;
   max-width: min(360px, 48vw);
   text-align: right;
+  min-height: 42px;
 }
 .modo-actual-label {
   font-size: 10px;
@@ -210,6 +229,7 @@
 }
 .modo-actual-value.is-empty { color: var(--text-dim); font-weight: 500; }
 .modo-actual-pending {
+  min-height: 16px;
   font-size: 11px;
   color: var(--c-abriendo);
   white-space: nowrap;

@@ -17,14 +17,7 @@ import {
   OtaPanel,
   EventLog,
 } from "./ZaguanConfigPanels";
-import {
-  useTweaks,
-  TweaksPanel,
-  TweakSection,
-  TweakRadio,
-  TweakToggle,
-  TweakSlider,
-} from "./ZaguanTweaksPanel";
+import { useTweaks } from "./ZaguanTweaksPanel";
 import { ZaguanSimulationSection } from "./ZaguanSimulationSection";
 import "./zaguanEsp32.css";
 
@@ -52,8 +45,7 @@ export default function ZaguanEsp32Panel({
   onSimulatePulse,
   onEmulateLlaveEchada,
 }) {
-  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [t] = useTweaks(TWEAK_DEFAULTS);
 
   const [target, setTarget] = useState({
     host: "",
@@ -657,7 +649,7 @@ export default function ZaguanEsp32Panel({
             placeholder="IP global"
           />
           <button type="submit" className="btn btn-sm">
-            Guardar configuración
+            Guardar
           </button>
         </form>
         <div className="topbar-meta">
@@ -675,20 +667,12 @@ export default function ZaguanEsp32Panel({
           >
             LEDs
           </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
-            onClick={() => setTweaksOpen(true)}
-            title="Apariencia y sondeo"
-          >
-            Tweaks
-          </button>
         </div>
       </header>
 
       <main className="layout">
         <section className="col-main">
-          <div className="panel">
+          <div className="panel panel-planta">
             <div className="panel-head">
               <h2 className="panel-title">Acceso — vista en planta</h2>
               <div className="modo-actual">
@@ -895,31 +879,6 @@ export default function ZaguanEsp32Panel({
           </div>
         </aside>
       </main>
-
-      <TweaksPanel open={tweaksOpen} onClose={() => setTweaksOpen(false)}>
-        <TweakSection label="Apariencia" />
-        <TweakRadio
-          label="Densidad"
-          value={t.densidad}
-          options={["compacta", "normal"]}
-          onChange={(v) => setTweak("densidad", v)}
-        />
-        <TweakToggle
-          label="Halo en LEDs"
-          value={t.halo}
-          onChange={(v) => setTweak("halo", v)}
-        />
-        <TweakSection label="Sondeo" />
-        <TweakSlider
-          label="Intervalo de ping"
-          value={t.intervaloPing}
-          min={3}
-          max={60}
-          step={1}
-          unit="s"
-          onChange={(v) => setTweak("intervaloPing", v)}
-        />
-      </TweaksPanel>
     </div>
   );
 }

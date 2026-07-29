@@ -179,13 +179,13 @@ function normalizeSlaveId(raw, fallback = 1) {
 }
 const TABS = [
   "Panel",
-  "Placas I/O",
+  "Dispositivos",
   "Histórico",
-  "Configuración Modos",
+  "Modos",
   "Definición placas",
-  "Configuración pulsadores",
-  "Configuración template",
-  "Configuración tablet",
+  "Pulsadores",
+  "Template",
+  "Tablets",
   "Horarios",
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
