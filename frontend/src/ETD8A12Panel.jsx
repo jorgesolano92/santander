@@ -6,6 +6,7 @@ import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import { HomeZaguanSimulation } from "./components/zaguan/HomeZaguanSimulation";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
+import DevicesAffiliatedPanel from "./components/DevicesAffiliatedPanel";
 import { CoceMessageNotifications } from "./components/CoceMessageNotifications";
 import { SoftwareUpdateBanner } from "./components/SoftwareUpdateBanner";
 import {
@@ -182,7 +183,7 @@ const TABS = [
   "Dispositivos",
   "Histórico",
   "Modos",
-  "Definición placas",
+  "Placas I/O",
   "Pulsadores",
   "Template",
   "Tablets",
@@ -1772,7 +1773,7 @@ function RulesFormAssistant({
         </Btn>
         {!ins.length && (
           <span style={{ fontSize: 12, color: C.amber, fontWeight: 600 }}>
-            Define placas e IN en «Definición placas» para ver opciones.
+            Define placas e IN en «Placas I/O» para ver opciones.
           </span>
         )}
       </div>
@@ -1872,8 +1873,29 @@ function ModuleChannelRow({
       });
       addUI(
         "OK",
-        pulse_limit ? `Límite: ${pulse_limit}` : "Sin límite de pulsaciones",
+        pulse_limit ? `Límite: ${pulse_limit}` : "Sin límite de acciones",
       );
+      await onRefresh();
+    } catch (e) {
+      addUI("ERR", e.message);
+    }
+  };
+
+  const clearPulseLimit = async () => {
+    if (channel.pulse_limit == null && pulseLimitDraft.trim() === "") {
+      addUI("INFO", "No hay límite que quitar");
+      return;
+    }
+    if (!window.confirm("¿Quitar el límite de acciones de este canal?")) {
+      return;
+    }
+    try {
+      await apiFetch(`/modules/${mod.id}/channels/${channel.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ pulse_limit: null }),
+      });
+      setPulseLimitDraft("");
+      addUI("OK", "Límite de acciones quitado");
       await onRefresh();
     } catch (e) {
       addUI("ERR", e.message);
@@ -1883,7 +1905,7 @@ function ModuleChannelRow({
   const resetPulseCount = async () => {
     if (
       !window.confirm(
-        `¿Reiniciar el contador de pulsaciones de IN${index + 1}? (tras mantenimiento o cambio de sensor)`,
+        `¿Reiniciar el contador de acciones de IN${index + 1}? (tras mantenimiento o cambio de sensor)`,
       )
     ) {
       return;
@@ -1970,9 +1992,9 @@ function ModuleChannelRow({
                   border: `1px solid ${pulseStyle.border}`,
                   whiteSpace: "nowrap",
                 }}
-                title="Pulsaciones físicas (OFF→ON). No cuenta override."
+                title="Acciones físicas (OFF→ON). No cuenta override."
               >
-                Pulsaciones: {pulseInfo.text}
+                Acciones: {pulseInfo.text}
               </span>
               {pulseInfo.pct != null ? (
                 <div
@@ -2007,7 +2029,7 @@ function ModuleChannelRow({
                 value={pulseLimitDraft}
                 onChange={(e) => setPulseLimitDraft(e.target.value)}
                 placeholder="Límite (opc.)"
-                title="Pulsaciones máximas antes de mantenimiento (opcional)"
+                title="Acciones máximas antes de mantenimiento (opcional)"
                 style={{
                   width: 88,
                   padding: "4px 6px",
@@ -2021,6 +2043,13 @@ function ModuleChannelRow({
               />
               <Btn small onClick={savePulseLimit}>
                 Guardar límite
+              </Btn>
+              <Btn
+                small
+                onClick={clearPulseLimit}
+                disabled={channel.pulse_limit == null && pulseLimitDraft.trim() === ""}
+              >
+                Quitar límite
               </Btn>
               <Btn small onClick={resetPulseCount}>
                 Reiniciar contador
@@ -2392,7 +2421,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       </div>
       <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>
         Códigos reglas: IN_{String(mod.id).padStart(2, "0")}_&lt;índice&gt; ·
-        Pulsaciones = activaciones físicas OFF→ON (no cuenta override)
+        Acciones = activaciones físicas OFF→ON (no cuenta override)
       </div>
       <table
         style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}
@@ -3223,7 +3252,7 @@ export default function ETD8A12Panel() {
       try {
         const mod = moduleList.find((x) => x.id === id);
         const bc = boardConfigs[id] || {};
-        // Preferir datos de moduleList (p. ej. tras guardar en «Definición placas») sobre boardConfigs del último poll.
+        // Preferir datos de moduleList (p. ej. tras guardar en «Placas I/O») sobre boardConfigs del último poll.
         const body = {
           host: mod?.host ?? bc.host ?? "",
           port: Number(mod?.port ?? bc.port ?? 502),
@@ -4337,6 +4366,60 @@ export default function ETD8A12Panel() {
         )}
 
         {tab === 1 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div
+            style={{
+              background: C.white,
+              border: `1px solid ${C.border}`,
+              borderRadius: 20,
+              padding: 18,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 14,
+                paddingBottom: 12,
+                borderBottom: `1px solid ${C.border}`,
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  display: "grid",
+                  placeItems: "center",
+                  background: `linear-gradient(135deg, color-mix(in srgb, var(--template-primary) 18%, white), color-mix(in srgb, var(--template-primary) 8%, white))`,
+                  color: C.red,
+                  border: `1px solid color-mix(in srgb, var(--template-primary) 25%, white)`,
+                }}
+              >
+                <FontAwesomeIcon icon={faCubes} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    letterSpacing: 1.2,
+                    textTransform: "uppercase",
+                    background: `linear-gradient(90deg, ${C.red} 0%, ${C.redDark} 100%)`,
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                  }}
+                >
+                  Placas del sistema
+                </div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                  Módulos ETD8A12 conectados y estado de entradas/salidas
+                </div>
+              </div>
+            </div>
           <div
             style={{
               display: "grid",
@@ -4601,6 +4684,12 @@ export default function ETD8A12Panel() {
                 </Card>
               );
             })}
+          </div>
+          </div>
+          <DevicesAffiliatedPanel
+            apiFetchZaguan={apiFetchZaguan}
+            active={tab === 1}
+          />
           </div>
         )}
 
