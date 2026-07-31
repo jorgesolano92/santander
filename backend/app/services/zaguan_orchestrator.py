@@ -151,6 +151,8 @@ DOOR_LOCK_OUTPUTS: dict[PuertaId, tuple[str, ...]] = {
 DOOR_BOARD_ID: dict[PuertaId, int] = {"p1": 2, "p2": 3}
 # panel_rules interfono exterior/interior: pulse_seconds = 2
 DOOR_INTERFONO_PULSE_SECONDS = 2.0
+# Tras sensor "cerrada": espera antes de reactivar bulones (evita pinzar la hoja).
+DOOR_LOCK_RESTORE_DELAY_S = 2.0
 # Manual/carga tablet: fallback LED reposo más corto que el pulso genérico (5 s).
 TABLET_LED_REPOSO_AFTER_S = DOOR_INTERFONO_PULSE_SECONDS + 2.0
 
@@ -231,11 +233,13 @@ _p3_intermittent: bool = False
 _p3_intermittent_task: Optional[asyncio.Task] = None
 # Carga cajero: p1/p3 disparan llamada a consola; apertura de P1 tras confirmación.
 _carga_p1_call_pending: bool = False
-# Manual/carga/extendido: bulones (OUT_x_01/02) activos por el modo; se sueltan al abrir y se restauran al cerrar.
+# Manual/carga/extendido: bulones (OUT_x_01/02) activos por el modo; se sueltan al abrir
+# y se restauran al cerrar con el mismo retardo que en modo cerrado.
 TABLET_LOCK_RELEASE_MODES = frozenset(
     {"horario_manual", "horario_carga_cajero", "horario_extendido"}
 )
 _locks_to_restore: dict[PuertaId, list[str]] = {"p1": [], "p2": []}
+_lock_restore_tasks: dict[PuertaId, Optional[ScheduledTask]] = {"p1": None, "p2": None}
 
 
 def get_led_states() -> dict[str, EstadoLed]:
@@ -1055,6 +1059,7 @@ def _finalize_tablet_door_open(door: PuertaId, *, source: str) -> None:
 
 def _release_locks_before_open(door: PuertaId) -> tuple[dict[str, bool], list[str]]:
     """Lee bulones OUT_x_01/02; solo apaga los que están ON y marca cuáles restaurar al cerrar."""
+    _cancel_lock_restore(door)
     _refresh_board_for_door(door)
     locks_before: dict[str, bool] = {}
     released: list[str] = []
@@ -1069,6 +1074,16 @@ def _release_locks_before_open(door: PuertaId) -> tuple[dict[str, bool], list[st
     return locks_before, released
 
 
+def _cancel_lock_restore(door: PuertaId) -> None:
+    _cancel_scheduled(_lock_restore_tasks.get(door))
+    _lock_restore_tasks[door] = None
+
+
+def _cancel_all_lock_restores() -> None:
+    for door in ("p1", "p2"):
+        _cancel_lock_restore(door)
+
+
 def _restore_locks_after_close(door: PuertaId) -> None:
     """Vuelve a activar los bulones que se soltaron para abrir desde tablet."""
     pending = _locks_to_restore.get(door) or []
@@ -1078,6 +1093,42 @@ def _restore_locks_after_close(door: PuertaId) -> None:
         _set_output_direct(lock_code, True)
         log.info("Bulones ON tras cierre %s: %s", door, lock_code)
     _locks_to_restore[door] = []
+
+
+async def _delayed_restore_locks(door: PuertaId, delay_s: float) -> None:
+    """Espera delay_s tras cierre confirmado y luego activa bulones."""
+    try:
+        await asyncio.sleep(delay_s)
+        if _current_mode not in (
+            "horario_cerrado",
+            *TABLET_LOCK_RELEASE_MODES,
+        ):
+            return
+        if not (_locks_to_restore.get(door) or []):
+            return
+        await asyncio.to_thread(_restore_locks_after_close, door)
+    except asyncio.CancelledError:
+        return
+    except Exception as e:  # noqa: BLE001
+        log.warning("Error restaurando bulones %s tras retardo: %s", door, e)
+    finally:
+        if _lock_restore_tasks.get(door) is not None:
+            _lock_restore_tasks[door] = None
+
+
+def _schedule_lock_restore_after_close(door: PuertaId) -> None:
+    """Programa restauración de bulones con retardo tras cierre (cerrado / manual / carga / extendido)."""
+    if not (_locks_to_restore.get(door) or []):
+        return
+    _cancel_lock_restore(door)
+    log.info(
+        "Bulones %s: restauración en %.1fs tras cierre",
+        door,
+        DOOR_LOCK_RESTORE_DELAY_S,
+    )
+    _lock_restore_tasks[door] = _schedule_coro(
+        _delayed_restore_locks(door, DOOR_LOCK_RESTORE_DELAY_S)
+    )
 
 
 def _door_pulse_with_locks_sync(door: PuertaId, *, restore_locks: bool) -> None:
@@ -1367,6 +1418,7 @@ def on_mode_changed(mode: Optional[str]) -> None:
     _reset_winhose_state()
     _reset_extendido_state()
     _reset_carga_state()
+    _cancel_all_lock_restores()
     _locks_to_restore["p1"] = []
     _locks_to_restore["p2"] = []
 
@@ -1549,7 +1601,7 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
         _release_autoservicio_door(door)
         _strict_interlock_post_close(door)
         if _current_mode == "horario_cerrado":
-            _restore_locks_after_close(door)
+            _schedule_lock_restore_after_close(door)
         _record(
             "zaguan_door_closed",
             f"Puerta {door} cerrada — LED actualizado ({source})",
@@ -1577,7 +1629,7 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
             priority_door=door,
         )
     if _current_mode in TABLET_LOCK_RELEASE_MODES:
-        _restore_locks_after_close(door)
+        _schedule_lock_restore_after_close(door)
     _record(
         "zaguan_door_closed",
         f"Puerta {door} cerrada — LED actualizado ({source})",
