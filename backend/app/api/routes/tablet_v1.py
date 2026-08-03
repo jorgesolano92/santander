@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, model_validator
 
@@ -149,7 +149,7 @@ def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username
     summary="Comprobar si este Android ID está autorizado en la sucursal",
 )
 def check_authorized_tablet(
-    android_id: Annotated[str, Query(min_length=1, max_length=128)],
+    android_id: str = Query(..., min_length=1, max_length=128),
 ) -> dict:
     """Público (bajo /api/v1): la tablet lo consulta al arrancar sin JWT."""
     return ats.check_authorization(android_id)
