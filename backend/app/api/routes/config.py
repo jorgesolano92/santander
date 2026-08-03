@@ -1,12 +1,32 @@
 """GET/PUT /api/config/* — horarios, festivos, tiempos, boards (IPs ETD8A12)."""
+from __future__ import annotations
+
+from typing import Optional
+
 from fastapi import APIRouter, Query, Body, HTTPException
+from pydantic import BaseModel, Field
 from app.hardware.modbus_client import get_boards_config_placeholder, test_board_ports
 from app.db.template_store import get_template_config, set_template_config
 from app.db.tablet_config_store import get_tablet_config_record, set_tablet_config
 from app.db.schedule_store import get_schedule_config, set_schedule_config
+from app.db import authorized_tablets_store as ats
 from app.services.schedule_runner import notify_schedule_config_changed
 
 router = APIRouter(prefix="/config")
+
+
+class AuthorizedTabletCreate(BaseModel):
+    android_id: str = Field(min_length=1, max_length=128)
+    label: str = Field(default="", max_length=120)
+
+
+class AuthorizedTabletUpdate(BaseModel):
+    label: Optional[str] = Field(default=None, max_length=120)
+    enabled: Optional[bool] = None
+
+
+class AuthorizedTabletsSettingsBody(BaseModel):
+    enforcement_enabled: bool
 
 
 @router.get("/template", summary="Obtener configuración de la plantilla")
@@ -29,6 +49,43 @@ def get_tablet():
 def put_tablet(config: dict = Body(...)):
     result = set_tablet_config(config)
     return {**result, "config": config}
+
+
+@router.get("/authorized-tablets", summary="Listar tablets autorizadas (Android ID)")
+def list_authorized_tablets():
+    return {
+        "settings": ats.get_settings(),
+        "items": ats.list_tablets(),
+    }
+
+
+@router.put("/authorized-tablets/settings", summary="Activar/desactivar exigencia de autorización")
+def put_authorized_tablets_settings(body: AuthorizedTabletsSettingsBody):
+    return ats.set_enforcement_enabled(body.enforcement_enabled)
+
+
+@router.post("/authorized-tablets", summary="Autorizar una tablet por Android ID")
+def create_authorized_tablet(body: AuthorizedTabletCreate):
+    try:
+        item = ats.add_tablet(body.android_id, body.label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "item": item}
+
+
+@router.put("/authorized-tablets/{tablet_id}", summary="Actualizar tablet autorizada")
+def update_authorized_tablet(tablet_id: int, body: AuthorizedTabletUpdate):
+    item = ats.update_tablet(tablet_id, label=body.label, enabled=body.enabled)
+    if not item:
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    return {"ok": True, "item": item}
+
+
+@router.delete("/authorized-tablets/{tablet_id}", summary="Eliminar tablet autorizada")
+def delete_authorized_tablet(tablet_id: int):
+    if not ats.delete_tablet(tablet_id):
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    return {"ok": True}
 
 
 @router.get("/schedules", summary="Configuración de horarios semanales")

@@ -15,6 +15,7 @@ from app.db import system_events_store as ses
 from app.db import tablet_users_store as tus
 from app.db import technicians_store
 from app.db.tablet_config_store import get_tablet_config_record
+from app.db import authorized_tablets_store as ats
 from app.db.schedule_store import get_schedule_config, normalize_location, opening_hours_summary, set_schedule_config
 from app.utils.rule_mode_colors import resolve_rule_color, rule_key_to_label
 from app.services import tablet_jwt
@@ -141,6 +142,17 @@ def get_tablet_config(_user: Annotated[str, Depends(get_tablet_username)]) -> di
 def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
     rec = get_tablet_config_record()
     return {"revision": rec.get("revision"), "updated_at": rec.get("updated_at")}
+
+
+@router.get(
+    "/authorized-tablets/check",
+    summary="Comprobar si este Android ID está autorizado en la sucursal",
+)
+def check_authorized_tablet(
+    android_id: Annotated[str, Query(min_length=1, max_length=128)],
+) -> dict:
+    """Público (bajo /api/v1): la tablet lo consulta al arrancar sin JWT."""
+    return ats.check_authorization(android_id)
 
 
 @router.get("/branch/location", summary="Ubicación y modo actual (COCE / mapa)")

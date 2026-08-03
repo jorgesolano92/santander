@@ -2,6 +2,7 @@
  * Configuración por defecto de tablets en el panel web (espejo del backend).
  */
 import { useEffect, useState } from "react";
+import AuthorizedTabletsSection from "./AuthorizedTabletsSection";
 
 export const DEFAULT_TABLET_PANEL_CONFIG = {
   doors: [
@@ -141,6 +142,7 @@ const SUB_TABS = [
   { id: "llamadas", label: "Llamadas tablet" },
   { id: "oficina", label: "Tipo oficina" },
   { id: "acceso", label: "Acceso config" },
+  { id: "autorizadas", label: "Tablets autorizadas" },
 ];
 
 function deepClone(obj) {
@@ -606,6 +608,10 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
               </button>
             </div>
           </div>
+        )}
+
+        {subTab === "autorizadas" && (
+          <AuthorizedTabletsSection apiFetch={apiFetch} onNotify={onNotify} />
         )}
       </div>
     </div>
