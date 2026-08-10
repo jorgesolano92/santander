@@ -12,7 +12,8 @@ def ensure_schema() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'operador'
             );
 
             CREATE TABLE IF NOT EXISTS branches (
@@ -56,7 +57,9 @@ def ensure_schema() -> None:
                 branch_id TEXT NOT NULL,
                 branch_nombre TEXT NOT NULL,
                 delivery_status TEXT NOT NULL DEFAULT 'pending',
-                delivered_at TEXT
+                delivered_at TEXT,
+                read_at TEXT,
+                read_by TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_coce_messages_created ON coce_messages(created_at);
@@ -106,6 +109,22 @@ def ensure_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_software_deployments_release ON software_deployments(release_id);
             CREATE INDEX IF NOT EXISTS idx_software_deployments_branch ON software_deployments(branch_id);
             CREATE INDEX IF NOT EXISTS idx_software_deployments_status ON software_deployments(status);
+
+            CREATE TABLE IF NOT EXISTS coce_alerts (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                resolved_at TEXT,
+                branch_id TEXT NOT NULL,
+                branch_nombre TEXT NOT NULL DEFAULT '',
+                alert_type TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                message TEXT NOT NULL DEFAULT '',
+                detail_json TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_coce_alerts_created ON coce_alerts(created_at);
+            CREATE INDEX IF NOT EXISTS idx_coce_alerts_active ON coce_alerts(active);
+            CREATE INDEX IF NOT EXISTS idx_coce_alerts_branch ON coce_alerts(branch_id);
             """
         )
         cols = {
@@ -116,4 +135,22 @@ def ensure_schema() -> None:
             conn.execute(
                 "ALTER TABLE branches ADD COLUMN ingest_token_enc TEXT"
             )
+        msg_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(coce_messages)").fetchall()
+        }
+        if "read_at" not in msg_cols:
+            conn.execute("ALTER TABLE coce_messages ADD COLUMN read_at TEXT")
+        if "read_by" not in msg_cols:
+            conn.execute("ALTER TABLE coce_messages ADD COLUMN read_by TEXT")
+        user_cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(coce_users)").fetchall()
+        }
+        if "role" not in user_cols:
+            conn.execute(
+                "ALTER TABLE coce_users ADD COLUMN role TEXT NOT NULL DEFAULT 'operador'"
+            )
+            # Usuarios previos tenían acceso total → admin.
+            conn.execute("UPDATE coce_users SET role = 'admin'")
         conn.commit()

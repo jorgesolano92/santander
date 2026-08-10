@@ -165,6 +165,19 @@ class LiveHub:
                 else:
                     alerts.pop(alert_type, None)
                 st.partial = {**(st.partial or {}), "alerts": alerts}
+                try:
+                    from app.db import alerts_store as alerts_store
+
+                    alerts_store.record_alert_event(
+                        branch_id=installation_id,
+                        branch_nombre=st.nombre or nombre or installation_id,
+                        alert_type=alert_type,
+                        active=bool(payload.get("active")),
+                        message=str(payload.get("message") or ""),
+                        detail=payload,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("branch_alert persist failed: %s", exc)
             elif msg_type == "toggle_rules_changed":
                 st.partial = {
                     **(st.partial or {}),
@@ -202,6 +215,27 @@ class LiveHub:
                 st.partial = {
                     **(st.partial or {}),
                     "lastUpdateStatus": payload,
+                }
+            elif msg_type == "message_ack":
+                try:
+                    from app.db import messages_store as messages_store
+
+                    mid = str(payload.get("id") or payload.get("message_id") or "")
+                    if mid:
+                        messages_store.mark_read(
+                            mid,
+                            read_by=str(
+                                payload.get("read_by")
+                                or payload.get("channel")
+                                or "branch"
+                            ),
+                            read_at=str(payload.get("read_at") or "") or None,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("message_ack persist failed: %s", exc)
+                st.partial = {
+                    **(st.partial or {}),
+                    "lastMessageAck": payload,
                 }
 
             self._states[installation_id] = st

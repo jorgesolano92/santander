@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_client_ip, get_current_username
+from app.api.deps import CurrentUser, get_client_ip, get_current_username, require_admin
 from app.core.config import settings
 from app.db import audit_store as audit
 from app.db import branches_store as branches
@@ -68,7 +68,7 @@ def list_releases(
 @router.post("/releases")
 async def upload_release(
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
     kind: Annotated[KindLiteral, Form()],
     version: Annotated[str, Form()],
     file: UploadFile = File(...),
@@ -100,13 +100,13 @@ async def upload_release(
         kind=kind,
         version=version,
         changelog=changelog or "",
-        created_by=user,
+        created_by=user.username,
         source="upload",
         original_filename=filename,
         file_bytes=raw,
     )
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.release_upload",
         success=True,
         detail={"release_id": release["id"], "kind": kind, "version": version},
@@ -119,7 +119,7 @@ async def upload_release(
 def publish_from_local(
     body: FromLocalBody,
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict:
     source = updates.panel_source_dir()
     if source is None:
@@ -137,7 +137,7 @@ def publish_from_local(
             kind="panel",
             version=version,
             changelog=body.changelog or "",
-            created_by=user,
+            created_by=user.username,
             source="local",
             source_file=zip_path,
             original_filename=zip_path.name,
@@ -149,7 +149,7 @@ def publish_from_local(
         except OSError:
             pass
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.release_from_local",
         success=True,
         detail={"release_id": release["id"], "version": version, "source_dir": str(source)},
@@ -188,7 +188,7 @@ def download_artifact(
 async def deploy_release(
     body: DeployBody,
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict:
     release = updates.get_release(body.releaseId)
     if not release:
@@ -235,7 +235,7 @@ async def deploy_release(
         results.append({**dep, "status": status, "delivered": delivered})
 
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.deploy",
         success=True,
         detail={
@@ -253,12 +253,12 @@ async def deploy_release(
 def delete_release(
     release_id: str,
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict:
     if not updates.delete_release(release_id):
         raise HTTPException(status_code=404, detail="Release no encontrado")
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.release_delete",
         success=True,
         detail={"release_id": release_id},
@@ -270,11 +270,11 @@ def delete_release(
 @router.delete("/releases")
 def delete_all_releases(
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict:
     count = updates.delete_all_releases()
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.releases_delete_all",
         success=True,
         detail={"count": count},
@@ -296,12 +296,12 @@ def list_deployments(
 def delete_deployment(
     deployment_id: str,
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict:
     if not updates.delete_deployment(deployment_id):
         raise HTTPException(status_code=404, detail="Despliegue no encontrado")
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.deployment_delete",
         success=True,
         detail={"deployment_id": deployment_id},
@@ -313,11 +313,11 @@ def delete_deployment(
 @router.delete("/deployments")
 def delete_all_deployments(
     request: Request,
-    user: Annotated[str, Depends(get_current_username)],
+    user: Annotated[CurrentUser, Depends(require_admin)],
 ) -> dict:
     count = updates.delete_all_deployments()
     audit.record_audit(
-        actor_username=user,
+        actor_username=user.username,
         action="updates.deployments_delete_all",
         success=True,
         detail={"count": count},

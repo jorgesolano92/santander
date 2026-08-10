@@ -105,9 +105,21 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
       const next = !wasOpen;
       if (next) {
         setToast(null);
+        const now = new Date().toISOString();
+        const unreadIds = [];
         setMessages((prev) =>
-          prev.map((m) => (m.seenAt ? m : { ...m, seenAt: new Date().toISOString() })),
+          prev.map((m) => {
+            if (m.seenAt) return m;
+            unreadIds.push(m.id);
+            return { ...m, seenAt: now };
+          }),
         );
+        if (unreadIds.length && typeof apiFetch === "function") {
+          void apiFetch("/coce-messages/ack", {
+            method: "POST",
+            body: JSON.stringify({ message_ids: unreadIds, channel: "web" }),
+          }).catch(() => {});
+        }
       }
       return next;
     });

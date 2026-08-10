@@ -101,11 +101,67 @@ export async function fetchCoceSetupStatus(): Promise<CoceSetupStatus> {
   return (await res.json()) as CoceSetupStatus;
 }
 
-export async function coceMe(): Promise<{ username: string }> {
+export type CoceRole = 'admin' | 'operador';
+
+export type CoceUser = {
+  id: number;
+  username: string;
+  role: CoceRole;
+  createdAt?: string;
+};
+
+export async function coceMe(): Promise<CoceUser> {
   const res = await apiFetch('/api/coce/auth/me');
   if (res.status === 401) throw new Error('SESSION_EXPIRED');
   if (!res.ok) throw new Error(await readError(res));
-  return (await res.json()) as { username: string };
+  const data = (await res.json()) as {
+    id?: number | null;
+    username: string;
+    role?: string;
+  };
+  const role: CoceRole = data.role === 'admin' ? 'admin' : 'operador';
+  return {
+    id: Number(data.id ?? 0),
+    username: data.username,
+    role,
+  };
+}
+
+export async function listCoceUsers(): Promise<CoceUser[]> {
+  const res = await apiFetch('/api/coce/users');
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { users?: CoceUser[] };
+  return data.users ?? [];
+}
+
+export async function createCoceUser(payload: {
+  username: string;
+  password: string;
+  role: CoceRole;
+}): Promise<CoceUser> {
+  const res = await apiFetch('/api/coce/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as CoceUser;
+}
+
+export async function updateCoceUser(
+  id: number,
+  payload: { role?: CoceRole; password?: string },
+): Promise<CoceUser> {
+  const res = await apiFetch(`/api/coce/users/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as CoceUser;
+}
+
+export async function deleteCoceUser(id: number): Promise<void> {
+  const res = await apiFetch(`/api/coce/users/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export type BranchApi = {
@@ -279,6 +335,64 @@ export async function fetchBranchPanelStatus(
   return data;
 }
 
+export type BranchPanelStats = {
+  branchId?: string;
+  branchNombre?: string;
+  current_mode?: string | null;
+  pending_mode?: string | null;
+  pulse_total: number;
+  channels: Array<{
+    module_id?: number;
+    module_name?: string;
+    channel_id?: number;
+    io_code?: string;
+    label?: string;
+    pulse_count: number;
+    pulse_limit?: number | null;
+  }>;
+  events: Record<string, number>;
+  kpis: {
+    pulse_total: number;
+    door_openings: number;
+    mode_activations: number;
+    mode_blocked: number;
+    door_closed_cycles: number;
+    incidents: number;
+    queued_modes: number;
+  };
+  timestamp?: string;
+};
+
+export async function fetchBranchPanelStats(
+  branchId: string,
+  params?: { from?: string; to?: string },
+): Promise<BranchPanelStats> {
+  const q = new URLSearchParams();
+  if (params?.from) q.set('from', params.from);
+  if (params?.to) q.set('to', params.to);
+  const qs = q.toString();
+  const res = await apiFetch(
+    `/api/coce/branches/${encodeURIComponent(branchId)}/panel-stats${qs ? `?${qs}` : ''}`,
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as BranchPanelStats;
+}
+
+export async function downloadBranchPanelStatsCsv(
+  branchId: string,
+  params?: { from?: string; to?: string },
+): Promise<Blob> {
+  const q = new URLSearchParams();
+  q.set('export', 'csv');
+  if (params?.from) q.set('from', params.from);
+  if (params?.to) q.set('to', params.to);
+  const res = await apiFetch(
+    `/api/coce/branches/${encodeURIComponent(branchId)}/panel-stats?${q.toString()}`,
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return res.blob();
+}
+
 export async function panelConnectBoard(branchId: string, boardId: number): Promise<void> {
   const res = await apiFetch(`/api/coce/branches/${branchId}/panel/boards/${boardId}/connect`, {
     method: 'POST',
@@ -371,8 +485,10 @@ export type CoceOutboundMessage = {
   urgent: boolean;
   branchId: string;
   branchNombre: string;
-  deliveryStatus: 'pending' | 'delivered' | 'offline';
+  deliveryStatus: 'pending' | 'delivered' | 'offline' | 'read';
   deliveredAt?: string | null;
+  readAt?: string | null;
+  readBy?: string | null;
 };
 
 export async function sendCoceMessage(payload: {
@@ -396,7 +512,7 @@ export async function fetchCoceMessages(params?: {
   offset?: number;
   branchId?: string;
   urgent?: boolean;
-  deliveryStatus?: 'pending' | 'delivered' | 'offline';
+  deliveryStatus?: 'pending' | 'delivered' | 'offline' | 'read';
   q?: string;
 }): Promise<CoceOutboundMessage[]> {
   const q = new URLSearchParams();
@@ -411,6 +527,41 @@ export async function fetchCoceMessages(params?: {
   if (!res.ok) throw new Error(await readError(res));
   const data = (await res.json()) as { messages?: CoceOutboundMessage[] };
   return data.messages ?? [];
+}
+
+export async function deleteCoceMessage(messageId: string): Promise<void> {
+  const res = await apiFetch(`/api/coce/messages/${encodeURIComponent(messageId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export type CoceAlert = {
+  id: string;
+  createdAt: string;
+  resolvedAt?: string | null;
+  branchId: string;
+  branchNombre: string;
+  alertType: string;
+  active: boolean;
+  message: string;
+  detail?: string;
+};
+
+export async function fetchCoceAlerts(params?: {
+  limit?: number;
+  active?: boolean;
+  branchId?: string;
+}): Promise<CoceAlert[]> {
+  const q = new URLSearchParams();
+  if (params?.limit) q.set('limit', String(params.limit));
+  if (params?.active !== undefined) q.set('active', params.active ? 'true' : 'false');
+  if (params?.branchId) q.set('branch_id', params.branchId);
+  const qs = q.toString();
+  const res = await apiFetch(`/api/coce/alerts${qs ? `?${qs}` : ''}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as { alerts?: CoceAlert[] };
+  return data.alerts ?? [];
 }
 
 export type CoceTechnician = {

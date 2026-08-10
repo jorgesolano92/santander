@@ -153,6 +153,11 @@ DOOR_BOARD_ID: dict[PuertaId, int] = {"p1": 2, "p2": 3}
 DOOR_INTERFONO_PULSE_SECONDS = 2.0
 # Tras sensor "cerrada": espera antes de reactivar bulones (evita pinzar la hoja).
 DOOR_LOCK_RESTORE_DELAY_S = 2.0
+# Al entrar a oficina cerrada: espera tras cierre confirmado antes de echar bulones.
+CLOSED_MODE_BOLT_SETTLE_S = 5.0
+# Timeout máximo esperando que las puertas cierren al forzar horario_cerrado.
+CLOSED_MODE_DOOR_CLOSE_TIMEOUT_S = 45.0
+CLOSED_MODE_DOOR_POLL_S = 0.4
 # Manual/carga tablet: fallback LED reposo más corto que el pulso genérico (5 s).
 TABLET_LED_REPOSO_AFTER_S = DOOR_INTERFONO_PULSE_SECONDS + 2.0
 
@@ -184,6 +189,9 @@ _current_mode: Optional[str] = None
 _door_was_open: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _pending_abriendo: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _abriendo_since: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
+# Tiempo continuo con sensor abierto (alerta door_held → COCE).
+_door_open_since: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
+_door_held_alert_active: dict[PuertaId, bool] = {"p1": False, "p2": False}
 # Manual/carga: el inductivo debe marcar apertura antes de aceptar flanco de cierre.
 _saw_open_during_pending: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _led_state_lock = threading.RLock()
@@ -989,6 +997,100 @@ def on_tablet_hold_output_released(door: PuertaId) -> None:
         _on_door_closed(door, source="tablet_hold_off")
 
 
+def prepare_closed_mode_transition(
+    *,
+    bolt_settle_s: Optional[float] = None,
+    timeout_s: Optional[float] = None,
+) -> dict[str, Any]:
+    """
+    Fuerza cierre de P1/P2, espera sensores de puerta cerrada, settle de bulones y los activa.
+    Usado al entrar a horario_cerrado para no encolar el modo con puertas abiertas.
+    """
+    settle = float(bolt_settle_s if bolt_settle_s is not None else CLOSED_MODE_BOLT_SETTLE_S)
+    timeout = float(timeout_s if timeout_s is not None else CLOSED_MODE_DOOR_CLOSE_TIMEOUT_S)
+    try:
+        from app.core.config import settings
+
+        settle = float(getattr(settings, "panel_temp_deactivate_restore_delay_seconds", settle) or settle)
+    except Exception:  # noqa: BLE001
+        pass
+
+    open_before: dict[str, bool] = {}
+    for door in ("p1", "p2"):
+        try:
+            _refresh_board_for_door(door)
+        except Exception:  # noqa: BLE001
+            pass
+        is_open = _door_is_open(door)
+        open_before[door] = is_open
+        # Asegurar que la salida de apertura no quede forzada ON (hold tablet / pulso).
+        try:
+            _set_output_direct(DOOR_OPEN_OUTPUT[door], False)
+        except Exception as e:  # noqa: BLE001
+            log.warning("No se pudo apagar salida apertura %s: %s", door, e)
+
+    deadline = time.monotonic() + max(1.0, timeout)
+    still_open: list[str] = []
+    while time.monotonic() < deadline:
+        still_open = []
+        for door in ("p1", "p2"):
+            try:
+                _refresh_board_for_door(door)
+            except Exception:  # noqa: BLE001
+                pass
+            if _door_is_open(door):
+                still_open.append(door)
+        if not still_open:
+            break
+        time.sleep(CLOSED_MODE_DOOR_POLL_S)
+
+    if still_open:
+        log.warning(
+            "Transición a cerrado: timeout esperando cierre de %s (antes=%s)",
+            still_open,
+            open_before,
+        )
+        return {
+            "ok": False,
+            "timed_out": True,
+            "doors_still_open": still_open,
+            "open_before": open_before,
+            "bolt_settle_s": settle,
+            "reason": f"Puertas aún abiertas tras {timeout:.0f}s: {', '.join(still_open)}",
+        }
+
+    if settle > 0:
+        log.info("Transición a cerrado: settle bulones %.1fs", settle)
+        time.sleep(settle)
+
+    bolts_on: list[str] = []
+    for door in ("p1", "p2"):
+        for lock_code in DOOR_LOCK_OUTPUTS[door]:
+            try:
+                _set_output_direct(lock_code, True)
+                bolts_on.append(lock_code)
+            except Exception as e:  # noqa: BLE001
+                log.warning("No se pudo activar bulón %s: %s", lock_code, e)
+        _locks_to_restore[door] = []
+        _pending_abriendo[door] = False
+        _door_was_open[door] = False
+
+    log.info(
+        "Transición a cerrado lista (open_before=%s, bulones=%s)",
+        open_before,
+        bolts_on,
+    )
+    return {
+        "ok": True,
+        "timed_out": False,
+        "doors_still_open": [],
+        "open_before": open_before,
+        "bolts_on": bolts_on,
+        "bolt_settle_s": settle,
+        "closing_doors": any(open_before.values()),
+    }
+
+
 def _sync_current_mode_from_panel() -> None:
     """Alinea modo orquestador con el panel antes de apertura tablet."""
     mode = _read_panel_mode()
@@ -1638,6 +1740,57 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
     log.info("Puerta %s → LED reposo (%s)", door, source)
 
 
+def _emit_door_held_alert(door: PuertaId, *, active: bool, held_s: float = 0.0) -> None:
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event(
+            "branch_alert",
+            {
+                "alert_type": f"door_held_{door}",
+                "active": active,
+                "door": door,
+                "held_seconds": round(held_s, 1),
+                "message": (
+                    f"Puerta {door.upper()} abierta más de lo esperado ({held_s:.0f}s)."
+                    if active
+                    else f"Puerta {door.upper()} cerrada; alerta liberada."
+                ),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        log.debug("door_held alert emit failed: %s", e)
+
+
+def _track_door_held_alerts(door: PuertaId, *, is_open: bool, now: float) -> None:
+    threshold = float(CLOSED_MODE_BOLT_SETTLE_S)
+    try:
+        from app.core.config import settings
+
+        threshold = float(getattr(settings, "door_held_alert_seconds", 90) or 90)
+    except Exception:  # noqa: BLE001
+        threshold = 90.0
+    threshold = max(15.0, threshold)
+
+    if is_open:
+        if _door_open_since[door] <= 0:
+            _door_open_since[door] = now
+        held = now - _door_open_since[door]
+        if held >= threshold and not _door_held_alert_active[door]:
+            _door_held_alert_active[door] = True
+            _emit_door_held_alert(door, active=True, held_s=held)
+            _record(
+                "door_held",
+                f"Puerta {door} abierta {held:.0f}s",
+                {"door": door, "held_seconds": held},
+            )
+    else:
+        _door_open_since[door] = 0.0
+        if _door_held_alert_active[door]:
+            _door_held_alert_active[door] = False
+            _emit_door_held_alert(door, active=False)
+
+
 def poll_door_sensors() -> None:
     if not ORCHESTRATOR_ENABLED or _current_mode not in SUPPORTED_MODES:
         return
@@ -1687,6 +1840,7 @@ def poll_door_sensors() -> None:
             # Fallback automático/esclusa: inductivo no marcó apertura; puerta ya cerrada.
             _on_door_closed(door, source="post_pulse")
         _door_was_open[door] = is_open
+        _track_door_held_alerts(door, is_open=is_open, now=now)
 
     if _current_mode in INTERLOCK_MODES:
         _sync_interlock_leds()

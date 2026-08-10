@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_client_ip, get_current_username
@@ -125,6 +126,64 @@ async def panel_status(
         audit.record_audit(
             actor_username=user,
             action="branch.panel_status",
+            branch_id=branch_id,
+            branch_nombre=branch["nombre"],
+            success=False,
+            detail={"error": str(e)},
+            ip_address=get_client_ip(request),
+        )
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/{branch_id}/panel-stats")
+async def panel_stats(
+    branch_id: str,
+    request: Request,
+    from_ts: Optional[str] = Query(default=None, alias="from"),
+    to_ts: Optional[str] = Query(default=None, alias="to"),
+    export: Optional[str] = Query(default=None),
+    user: str = Depends(get_current_username),
+) -> Any:
+    """Resumen operativo de la sucursal (pulsaciones + eventos)."""
+    branch = _branch_or_404(branch_id)
+    params: dict[str, Any] = {}
+    if from_ts:
+        params["from"] = from_ts
+    if to_ts:
+        params["to"] = to_ts
+    if export:
+        params["export"] = export
+    try:
+        data = await branch_proxy.panel_api_request(
+            branch,
+            "GET",
+            "/api/panel/stats",
+            params=params or None,
+            as_text=bool(export and str(export).lower() == "csv"),
+        )
+        audit.record_audit(
+            actor_username=user,
+            action="branch.panel_stats",
+            branch_id=branch_id,
+            branch_nombre=branch["nombre"],
+            success=True,
+            ip_address=get_client_ip(request),
+        )
+        if export and str(export).lower() == "csv":
+            return PlainTextResponse(
+                str(data or ""),
+                media_type="text/csv; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'attachment; filename="stats-{branch_id}.csv"'
+                },
+            )
+        if isinstance(data, dict):
+            return {"branchId": branch_id, "branchNombre": branch["nombre"], **data}
+        return data
+    except Exception as e:
+        audit.record_audit(
+            actor_username=user,
+            action="branch.panel_stats",
             branch_id=branch_id,
             branch_nombre=branch["nombre"],
             success=False,

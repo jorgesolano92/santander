@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.db import audit_store as audit
 from app.db import users_store as users
-from app.api.deps import get_client_ip, get_current_username
+from app.api.deps import CurrentUser, get_client_ip, get_current_user, get_current_username
 from app.services import jwt_service
 from app.services.password import hash_password, verify_password
 
@@ -53,16 +53,18 @@ def register(
     _register_allowed(x_coce_setup_token)
     if users.get_user_by_username(body.username):
         raise HTTPException(status_code=409, detail="El usuario ya existe")
-    uid = users.create_user(body.username, hash_password(body.password))
+    # Primer usuario = admin; siguientes vía setup token = operador.
+    role = "admin" if users.count_users() == 0 else "operador"
+    uid = users.create_user(body.username, hash_password(body.password), role=role)
     uname = body.username.strip()
     audit.record_audit(
         actor_username=uname,
         action="auth.register",
         success=True,
-        detail={"user_id": uid},
+        detail={"user_id": uid, "role": role},
         ip_address=get_client_ip(request),
     )
-    return {"ok": True, "id": uid, "username": uname}
+    return {"ok": True, "id": uid, "username": uname, "role": role}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -78,11 +80,13 @@ def login(body: AuthBody, request: Request) -> TokenResponse:
         )
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
     uname = row[1]
-    tok = jwt_service.create_access_token(uname, {"uid": row[0]})
+    role = row[3]
+    tok = jwt_service.create_access_token(uname, {"uid": row[0], "role": role})
     audit.record_audit(
         actor_username=uname,
         action="auth.login",
         success=True,
+        detail={"role": role},
         ip_address=get_client_ip(request),
     )
     return TokenResponse(access_token=tok)
@@ -102,5 +106,5 @@ def setup_status() -> dict:
 
 
 @router.get("/me")
-def me(current_user: str = Depends(get_current_username)) -> dict:
-    return {"username": current_user}
+def me(user: Annotated[CurrentUser, Depends(get_current_user)]) -> dict:
+    return {"id": user.uid, "username": user.username, "role": user.role}

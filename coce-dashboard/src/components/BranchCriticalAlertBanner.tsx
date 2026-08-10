@@ -31,16 +31,20 @@ export function BranchCriticalAlertBanner({
   );
   if (!hasActiveBranchAlert(alerts)) return null;
 
-  const items = [alerts.fire, alerts.emergency].filter(
+  const items = Object.values(alerts).filter(
     (a): a is NonNullable<typeof a> => Boolean(a?.active),
   );
 
   return (
     <section className="coce-critical-alerts" role="alert" aria-live="assertive">
-      {items.map((alert) => (
+      {items.map((alert) => {
+        const kind = String(alert.alert_type || 'unknown').startsWith('door_held')
+          ? 'door_held'
+          : String(alert.alert_type || 'unknown');
+        return (
         <div
-          key={alert.alert_type}
-          className={`coce-critical-alert coce-critical-alert--${alert.alert_type}`}
+          key={String(alert.alert_type)}
+          className={`coce-critical-alert coce-critical-alert--${kind}`}
         >
           <div className="coce-critical-alert-inner">
             <strong>{alertTitle(alert)}</strong>
@@ -53,7 +57,8 @@ export function BranchCriticalAlertBanner({
             ) : null}
           </div>
         </div>
-      ))}
+        );
+      })}
     </section>
   );
 }

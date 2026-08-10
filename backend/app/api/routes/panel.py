@@ -15,7 +15,7 @@ from app.db import system_events_store as ses
 from app.db import coce_message_store
 from app.db.session import get_connection
 from app.core.config import settings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pymodbus.client import ModbusSerialClient, ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
@@ -787,10 +787,23 @@ def _load_persisted_panel_state() -> None:
 _load_persisted_panel_state()
 
 
-def add_event(level: str, message: str, board_id: int = 0) -> None:
+def add_event(
+    level: str,
+    message: str,
+    board_id: int = 0,
+    *,
+    event_type: str = "general",
+    payload: Optional[dict] = None,
+) -> None:
     """Registra evento en SQLite (actor desde contexto panel/tablet o system)."""
     try:
-        ses.record_event(level, message, board_id=board_id)
+        ses.record_event(
+            level,
+            message,
+            board_id=board_id,
+            event_type=event_type,
+            payload=payload,
+        )
     except Exception:  # noqa: BLE001
         # No bloquear operación crítica si falla el log
         pass
@@ -1138,7 +1151,13 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
             io_state[board_id]["error"] = str(e)
             _reset_read_io_fail_streak(board_id)
             if not soft_ok and was_connected:
-                add_event("WARN", f"Lectura Modbus: placa {board_id} marcada desconectada tras {streak} fallo(s): {e}", board_id)
+                add_event(
+                    "WARN",
+                    f"Lectura Modbus: placa {board_id} marcada desconectada tras {streak} fallo(s): {e}",
+                    board_id,
+                    event_type="modbus_error",
+                    payload={"board_id": board_id, "error": str(e), "streak": streak},
+                )
 
 
 def _write_output(board_id: int, channel: int, state: bool) -> None:
@@ -2501,6 +2520,13 @@ def _evaluate_trigger_rule(
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": current_mode})
         _zaguan_mode_changed(current_mode)
+        add_event(
+            "OK",
+            f"Modo → {rule_key}",
+            1,
+            event_type="mode_change",
+            payload={"rule_key": rule_key, "current_mode": current_mode},
+        )
     _persist_overrides_to_db()
 
     origin_tag = f"enclavamiento:{rule_key}"
@@ -2637,7 +2663,13 @@ def _deactivate_rule_on_fall(
             apply_outputs_to_hardware=apply_outputs_to_hardware,
         )
 
-    add_event("INFO", f"Modo desactivado por trigger OFF: {rule_key}", 1)
+    add_event(
+        "INFO",
+        f"Modo desactivado por trigger OFF: {rule_key}",
+        1,
+        event_type="mode_change",
+        payload={"rule_key": rule_key, "current_mode": current_mode, "action": "deactivate"},
+    )
     return True
 
 
@@ -2953,8 +2985,56 @@ def _execute_rule_forced(
         return {"executed": False, "reason": "Regla deshabilitada", "rule": rule_key}
 
     # Incluso en ejecución forzada, respetar bloqueos por entradas activas (IN según panel_rules_triggers_use_physical_inputs).
+    # Excepción: horario_cerrado fuerza cierre de puertas + settle de bulones (no encola).
     blocked_active_codes = _blocked_active_codes_for_rule(rule)
-    if blocked_active_codes:
+    closed_transition: Optional[dict] = None
+    if blocked_active_codes and rule_key == "horario_cerrado":
+        add_event(
+            "WARN",
+            f"{rule_key} con bloqueos {', '.join(blocked_active_codes)}; forzando cierre de puertas",
+            1,
+        )
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            closed_transition = zo.prepare_closed_mode_transition()
+        except Exception as e:  # noqa: BLE001
+            closed_transition = {
+                "ok": False,
+                "timed_out": False,
+                "reason": str(e),
+            }
+        if not closed_transition.get("ok"):
+            reason = str(
+                closed_transition.get("reason")
+                or "No se pudieron cerrar las puertas para oficina cerrada"
+            )
+            add_event("ERR", f"{rule_key} transición a cerrado fallida: {reason}", 1)
+            return {
+                "executed": False,
+                "queued": False,
+                "rule": rule_key,
+                "reason": reason,
+                "blocked_inputs": blocked_active_codes,
+                "closing_doors": True,
+                "closed_transition": closed_transition,
+            }
+        blocked_active_codes = _blocked_active_codes_for_rule(rule)
+        if blocked_active_codes:
+            reason = (
+                f"Tras forzar cierre, siguen activos: {', '.join(blocked_active_codes)}"
+            )
+            add_event("ERR", f"{rule_key} {reason}", 1)
+            return {
+                "executed": False,
+                "queued": False,
+                "rule": rule_key,
+                "reason": reason,
+                "blocked_inputs": blocked_active_codes,
+                "closing_doors": True,
+                "closed_transition": closed_transition,
+            }
+    elif blocked_active_codes:
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
         if _rule_eligible_for_manual_queue(rule_key, rule):
             _set_pending_manual_enclavamiento(rule_key, blocked_active_codes)
@@ -3047,6 +3127,10 @@ def _execute_rule_forced(
             )
         result["rule"] = rule_key
         result["trigger"] = rule.get("trigger")
+        if closed_transition is not None:
+            result["closing_doors"] = bool(closed_transition.get("closing_doors"))
+            result["closed_transition"] = closed_transition
+            result["bolt_settle_s"] = closed_transition.get("bolt_settle_s")
         return result
 
     trigger_code = rule.get("trigger") or "IN_01_01"
@@ -3084,6 +3168,13 @@ def _execute_rule_forced(
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": current_mode})
         _zaguan_mode_changed(current_mode)
+        add_event(
+            "OK",
+            f"Modo → {rule_key}",
+            1,
+            event_type="mode_change",
+            payload={"rule_key": rule_key, "current_mode": current_mode},
+        )
     _persist_overrides_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
@@ -3107,6 +3198,10 @@ def _execute_rule_forced(
         "mode": current_mode,
         **linked_extra,
     }
+    if closed_transition is not None:
+        out["closing_doors"] = bool(closed_transition.get("closing_doors"))
+        out["closed_transition"] = closed_transition
+        out["bolt_settle_s"] = closed_transition.get("bolt_settle_s")
     _zaguan_rule_executed(rule_key, out)
     return out
 
@@ -3222,6 +3317,153 @@ def list_coce_messages(limit: int = Query(100, ge=1, le=200)) -> dict:
     if not settings.coce_message_send_web:
         return {"messages": [], "disabled": True}
     return {"messages": coce_message_store.list_messages(limit=limit)}
+
+
+@router.get("/stats", summary="Resumen operativo (pulsaciones + eventos tipados)")
+def get_panel_stats(
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    export: Optional[str] = Query(None, description="csv para exportar detalle de eventos"),
+):
+    modules = pms.get_full_config_for_api()
+    channels: List[dict] = []
+    pulse_total = 0
+    for mod in modules:
+        for ch in mod.get("inputs") or []:
+            pc = int(ch.get("pulse_count") or 0)
+            pulse_total += pc
+            channels.append(
+                {
+                    "module_id": mod.get("id"),
+                    "module_name": mod.get("name"),
+                    "channel_id": ch.get("id"),
+                    "io_code": ch.get("io_code"),
+                    "label": ch.get("label") or ch.get("name"),
+                    "pulse_count": pc,
+                    "pulse_limit": ch.get("pulse_limit"),
+                }
+            )
+
+    def _count(event_type: str) -> int:
+        total, _ = ses.list_events(
+            from_date=from_date,
+            to_date=to_date,
+            event_type_filter=event_type,
+            limit=1,
+            offset=0,
+        )
+        return int(total)
+
+    def _sev(severity: str) -> int:
+        total, _ = ses.list_events(
+            from_date=from_date,
+            to_date=to_date,
+            severity_filter=severity,
+            limit=1,
+            offset=0,
+        )
+        return int(total)
+
+    events_summary = {
+        "mode_change": _count("mode_change"),
+        "mode_set_blocked": _count("mode_set_blocked"),
+        "door_open": _count("door_open"),
+        "door_open_blocked": _count("door_open_blocked"),
+        "zaguan_door_closed": _count("zaguan_door_closed"),
+        "zaguan_pulsacion": _count("zaguan_pulsacion"),
+        "zaguan_pulsacion_rejected": _count("zaguan_pulsacion_rejected"),
+        "modbus_error": _count("modbus_error"),
+        "warn": _sev("WARN"),
+        "err": _sev("ERR"),
+    }
+
+    pending_mode = pending_manual_enclavamiento_mode
+
+    payload = {
+        "current_mode": current_mode,
+        "pending_mode": pending_mode,
+        "from": from_date,
+        "to": to_date,
+        "pulse_total": pulse_total,
+        "channels": channels,
+        "events": events_summary,
+        "kpis": {
+            "pulse_total": pulse_total,
+            "door_openings": events_summary["door_open"],
+            "mode_activations": events_summary["mode_change"],
+            "mode_blocked": events_summary["mode_set_blocked"],
+            "door_closed_cycles": events_summary["zaguan_door_closed"],
+            "incidents": events_summary["modbus_error"]
+            + events_summary["warn"]
+            + events_summary["err"],
+            "queued_modes": 1 if pending_mode else 0,
+        },
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    if (export or "").lower() == "csv":
+        from fastapi.responses import PlainTextResponse
+
+        csv_body = ses.export_csv(
+            from_date=from_date,
+            to_date=to_date,
+            limit=50_000,
+        )
+        # Prefijo con resumen de pulsaciones
+        pulse_lines = ["io_code,label,module,pulse_count"]
+        for ch in channels:
+            pulse_lines.append(
+                f"{ch.get('io_code') or ''},"
+                f"\"{str(ch.get('label') or '').replace(chr(34), '')}\","
+                f"\"{str(ch.get('module_name') or '').replace(chr(34), '')}\","
+                f"{ch.get('pulse_count') or 0}"
+            )
+        text = (
+            "# pulses\n"
+            + "\n".join(pulse_lines)
+            + "\n# events\n"
+            + csv_body
+        )
+        return PlainTextResponse(
+            text,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="panel-stats.csv"'
+            },
+        )
+    return payload
+
+
+class CoceMessageAckBody(BaseModel):
+    message_ids: List[str] = Field(default_factory=list)
+    channel: str = "web"
+
+
+@router.post("/coce-messages/ack", summary="Confirmar lectura de mensajes COCE")
+def ack_coce_messages(body: CoceMessageAckBody) -> dict:
+    ids = [str(i).strip() for i in (body.message_ids or []) if str(i).strip()]
+    if not ids:
+        return {"ok": True, "acked": []}
+    newly = coce_message_store.mark_seen(ids)
+    channel = (body.channel or "web").strip() or "web"
+    now = datetime.now().astimezone().isoformat()
+    for mid in newly:
+        try:
+            from app.coce.notify import emit_coce_event
+
+            emit_coce_event(
+                "message_ack",
+                {
+                    "id": mid,
+                    "message_id": mid,
+                    "read_by": channel,
+                    "read_at": now,
+                    "channel": channel,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "acked": newly}
 
 
 @router.get("/software-update", summary="Estado de actualización pendiente (COCE)")
@@ -4182,7 +4424,13 @@ def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": None})
         _zaguan_mode_changed(None)
-    add_event("INFO", f"Modo desactivado vía API tablet: {rule_key}", 1)
+    add_event(
+        "INFO",
+        f"Modo desactivado vía API tablet: {rule_key}",
+        1,
+        event_type="mode_change",
+        payload={"rule_key": rule_key, "current_mode": current_mode, "action": "deactivate"},
+    )
 
     if rule:
 

@@ -118,6 +118,8 @@ class Settings(BaseSettings):
     # Mensajes COCE → sucursal: canales de entrega (persistencia siempre en BD local).
     coce_message_send_tablet: bool = True
     coce_message_send_web: bool = True
+    # Alerta COCE si sensor de puerta abierta supera este umbral (segundos).
+    door_held_alert_seconds: int = 90
 
     # Llamada P1 → tablets (WebSocket)
     tablet_call_enabled: bool = True

@@ -1,6 +1,7 @@
 """API v1 para tablet / integraciones: modos del panel, JWT y usuarios."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
@@ -300,9 +301,17 @@ def set_mode(
                         "message": f"No se pudo activar el modo {rk}",
                         "reason": reason,
                         "blocked_inputs": blocked_inputs,
+                        "closing_doors": bool(result.get("closing_doors")),
+                        "closed_transition": result.get("closed_transition"),
                     },
                 )
-            return {"ok": True, "action": "set_rule", "result": result}
+            return {
+                "ok": True,
+                "action": "set_rule",
+                "result": result,
+                "closing_doors": bool(result.get("closing_doors")),
+                "bolt_settle_s": result.get("bolt_settle_s"),
+            }
         deactivated = panel.api_v1_deactivate_rule_for_tablet(rk)
         return {"ok": True, "action": "set_rule", "active": False, **deactivated}
     code = body.code.strip()  # type: ignore[union-attr]
@@ -322,6 +331,41 @@ def list_coce_messages(
     limit: int = 100,
 ) -> dict:
     return {"messages": coce_message_store.list_messages(limit=limit)}
+
+
+class CoceMessageAckBody(BaseModel):
+    message_ids: list[str] = Field(default_factory=list)
+    channel: str = "tablet"
+
+
+@router.post("/coce-messages/ack", summary="Confirmar lectura de mensajes COCE")
+def ack_coce_messages(
+    body: CoceMessageAckBody,
+    _user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    ids = [str(i).strip() for i in (body.message_ids or []) if str(i).strip()]
+    if not ids:
+        return {"ok": True, "acked": []}
+    newly = coce_message_store.mark_seen(ids)
+    channel = (body.channel or "tablet").strip() or "tablet"
+    now = datetime.now().astimezone().isoformat()
+    for mid in newly:
+        try:
+            from app.coce.notify import emit_coce_event
+
+            emit_coce_event(
+                "message_ack",
+                {
+                    "id": mid,
+                    "message_id": mid,
+                    "read_by": channel,
+                    "read_at": now,
+                    "channel": channel,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "acked": newly}
 
 
 @router.get("/schedules", summary="Horarios semanales (mismas franjas que el panel)")

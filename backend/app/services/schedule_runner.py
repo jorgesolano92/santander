@@ -180,6 +180,12 @@ def _apply_schedule_mode(rule_key: str) -> None:
     if result.get("executed") is False:
         log.warning("Horario: no se pudo activar %s: %s", rule_key, result.get("reason"))
         return
+    if result.get("closing_doors"):
+        log.info(
+            "Horario automático: %s tras cierre de puertas (settle=%s)",
+            rule_key,
+            result.get("bolt_settle_s"),
+        )
     log.info("Horario automático: modo activado %s (antes %s)", rule_key, current)
 
 

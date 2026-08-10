@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import {
+  deleteCoceMessage,
   fetchCoceMessages,
   listBranches,
   sendCoceMessage,
   type CoceOutboundMessage,
+  type CoceUser,
 } from '../api/coceClient';
 import type { Sucursal } from '../types';
 
@@ -20,13 +23,23 @@ function formatWhen(iso: string): string {
   });
 }
 
-function deliveryLabel(status: string): string {
-  if (status === 'delivered') return 'Entregado';
-  if (status === 'offline') return 'Sucursal desconectada';
-  return 'Pendiente';
+function statusLabel(m: CoceOutboundMessage): string {
+  if (m.readAt) return 'Leído';
+  if (m.deliveryStatus === 'delivered') return 'Entregado';
+  if (m.deliveryStatus === 'offline') return 'Sucursal desconectada';
+  return 'Enviado';
+}
+
+function statusBadgeClass(m: CoceOutboundMessage): string {
+  if (m.readAt) return 'badge badge-ok';
+  if (m.deliveryStatus === 'delivered') return 'badge badge-ok';
+  if (m.deliveryStatus === 'offline') return 'badge badge-warn';
+  return 'badge badge-off';
 }
 
 export function MessagingDesignPage() {
+  const { user: me } = useOutletContext<{ user: CoceUser | null }>();
+  const canDelete = me?.role === 'admin';
   const [branches, setBranches] = useState<Sucursal[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sendToAll, setSendToAll] = useState(false);
@@ -41,6 +54,7 @@ export function MessagingDesignPage() {
   const [filterUrgent, setFilterUrgent] = useState<'all' | 'yes' | 'no'>('all');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterQ, setFilterQ] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     void listBranches()
@@ -128,13 +142,31 @@ export function MessagingDesignPage() {
     }
   }
 
+  async function handleDelete(m: CoceOutboundMessage) {
+    const ok = window.confirm(
+      `¿Borrar el mensaje «${m.title}» enviado a ${m.branchNombre}?`,
+    );
+    if (!ok) return;
+    setDeletingId(m.id);
+    setError(null);
+    try {
+      await deleteCoceMessage(m.id);
+      await refreshHistory();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="content-view messaging-page">
       <div className="card">
         <h2>Mensajería avanzada</h2>
         <p className="muted">
           Envía avisos del COCE a las sucursales. Llegan en tiempo real a la tablet como
-          notificación emergente y quedan en el historial (solo lectura).
+          notificación emergente y quedan en el historial. El estado pasa a «Leído» cuando
+          se abre en panel o tablet.
         </p>
         {error ? <div className="alert alert-error">{error}</div> : null}
         <div className="messaging-compose-grid">
@@ -281,8 +313,9 @@ export function MessagingDesignPage() {
           >
             <option value="">Estado: todos</option>
             <option value="delivered">Entregado</option>
+            <option value="read">Leído</option>
             <option value="offline">Desconectada</option>
-            <option value="pending">Pendiente</option>
+            <option value="pending">Enviado</option>
           </select>
         </div>
         <div className="table-wrap">
@@ -295,6 +328,7 @@ export function MessagingDesignPage() {
                 <th>Urgente</th>
                 <th>Estado</th>
                 <th>Operador</th>
+                {canDelete ? <th></th> : null}
               </tr>
             </thead>
             <tbody>
@@ -309,24 +343,35 @@ export function MessagingDesignPage() {
                   </td>
                   <td>{m.urgent ? <span className="badge badge-danger">Sí</span> : 'No'}</td>
                   <td>
-                    <span
-                      className={
-                        m.deliveryStatus === 'delivered'
-                          ? 'badge badge-ok'
-                          : m.deliveryStatus === 'offline'
-                            ? 'badge badge-warn'
-                            : 'badge badge-off'
-                      }
-                    >
-                      {deliveryLabel(m.deliveryStatus)}
-                    </span>
+                    <span className={statusBadgeClass(m)}>{statusLabel(m)}</span>
+                    {m.readAt ? (
+                      <>
+                        <br />
+                        <small className="text-muted">
+                          {formatWhen(m.readAt)}
+                          {m.readBy ? ` · ${m.readBy}` : ''}
+                        </small>
+                      </>
+                    ) : null}
                   </td>
                   <td>{m.actorUsername}</td>
+                  {canDelete ? (
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={deletingId === m.id}
+                        onClick={() => void handleDelete(m)}
+                      >
+                        {deletingId === m.id ? '…' : 'Borrar'}
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
               {!messages.length && !loadingHistory ? (
                 <tr>
-                  <td colSpan={6} className="text-muted">
+                  <td colSpan={canDelete ? 7 : 6} className="text-muted">
                     No hay mensajes enviados con estos filtros.
                   </td>
                 </tr>

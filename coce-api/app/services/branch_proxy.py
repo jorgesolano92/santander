@@ -274,6 +274,7 @@ async def panel_api_request(
     *,
     json_body: Any = None,
     params: Optional[dict[str, Any]] = None,
+    as_text: bool = False,
 ) -> Any:
     """Petición autenticada al panel de la sucursal (`/api/panel/*`)."""
     user, password = _require_panel_credentials(branch)
@@ -294,7 +295,12 @@ async def panel_api_request(
     if res.status_code >= 400:
         raise RuntimeError(await _read_error(res))
     if res.status_code == 204 or not res.content:
-        return {}
+        return "" if as_text else {}
+    if as_text:
+        return res.text
+    ctype = (res.headers.get("content-type") or "").lower()
+    if "text/csv" in ctype or "text/plain" in ctype:
+        return res.text
     return res.json()
 
 

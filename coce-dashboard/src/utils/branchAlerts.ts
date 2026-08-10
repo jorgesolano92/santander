@@ -1,4 +1,4 @@
-export type BranchAlertType = 'fire' | 'emergency';
+export type BranchAlertType = 'fire' | 'emergency' | 'door_held' | string;
 
 export type BranchAlert = {
   alert_type: BranchAlertType;
@@ -7,9 +7,11 @@ export type BranchAlert = {
   message?: string;
   current_mode?: string | null;
   active_toggle_rules?: string[];
+  door?: string;
+  held_seconds?: number;
 };
 
-export type BranchAlertsMap = Partial<Record<BranchAlertType, BranchAlert>>;
+export type BranchAlertsMap = Partial<Record<string, BranchAlert>>;
 
 export function parseBranchAlerts(raw: unknown): BranchAlertsMap {
   if (!raw || typeof raw !== 'object') return {};
@@ -17,8 +19,8 @@ export function parseBranchAlerts(raw: unknown): BranchAlertsMap {
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!value || typeof value !== 'object') continue;
     const v = value as BranchAlert;
-    if (v.active && (key === 'fire' || key === 'emergency')) {
-      out[key] = v;
+    if (v.active) {
+      out[key] = { ...v, alert_type: (v.alert_type || key) as BranchAlertType };
     }
   }
   return out;
@@ -66,7 +68,11 @@ export function deriveAlertsFromBranchState(
 }
 
 export function hasActiveBranchAlert(alerts: BranchAlertsMap): boolean {
-  return Boolean(alerts.fire?.active || alerts.emergency?.active);
+  return Object.values(alerts).some((a) => Boolean(a?.active));
+}
+
+export function listActiveAlerts(alerts: BranchAlertsMap): BranchAlert[] {
+  return Object.values(alerts).filter((a): a is BranchAlert => Boolean(a?.active));
 }
 
 export function isPanelModeActiveNow(
@@ -79,6 +85,12 @@ export function isPanelModeActiveNow(
 }
 
 export function alertTitle(alert: BranchAlert): string {
-  if (alert.alert_type === 'fire') return 'Alarma de incendio';
-  return 'Emergencia en sucursal';
+  const t = String(alert.alert_type || '');
+  if (t === 'fire') return 'Alarma de incendio';
+  if (t === 'emergency') return 'Emergencia en sucursal';
+  if (t.startsWith('door_held')) {
+    const door = alert.door || t.replace('door_held_', '').toUpperCase();
+    return `Puerta abierta (${door})`;
+  }
+  return t || 'Alerta';
 }
