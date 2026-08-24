@@ -968,6 +968,37 @@ def _set_output_direct(out_code: str, on: bool) -> None:
     panel._write_output(board_id, channel, on)  # noqa: SLF001
 
 
+def _notify_panel_outputs_written(out_codes: list[str], *, on: bool) -> None:
+    """
+    Empuja el estado al WS del panel/COCE.
+
+    `_write_output` actualiza io_state en RAM; el siguiente poll Modbus no ve
+    delta y el dashboard no refresca hasta recargar.
+    """
+    codes = [c for c in (out_codes or []) if c]
+    if not codes:
+        return
+    try:
+        panel = _import_panel()
+        for code in codes:
+            try:
+                board_id, channel = panel._parse_out_code(code)  # noqa: SLF001
+            except Exception:  # noqa: BLE001
+                continue
+            panel._coce_notify(  # noqa: SLF001
+                "output_changed",
+                {
+                    "board_id": board_id,
+                    "channel": channel,
+                    "state": on,
+                    "code": code,
+                },
+            )
+        panel._publish_panel_status_debounced(force=True)  # noqa: SLF001
+    except Exception as e:  # noqa: BLE001
+        log.debug("No se pudo notificar salidas por WS: %s", e)
+
+
 def _door_for_open_output(code: str) -> Optional[PuertaId]:
     for door, out_code in DOOR_OPEN_OUTPUT.items():
         if out_code == code:
@@ -1080,6 +1111,8 @@ def prepare_closed_mode_transition(
         open_before,
         bolts_on,
     )
+    if bolts_on:
+        _notify_panel_outputs_written(bolts_on, on=True)
     return {
         "ok": True,
         "timed_out": False,
@@ -1238,6 +1271,7 @@ def _restore_locks_after_close(door: PuertaId) -> None:
         _set_output_direct(lock_code, True)
         log.info("Bulones ON tras cierre %s: %s", door, lock_code)
     _locks_to_restore[door] = []
+    _notify_panel_outputs_written(pending, on=True)
 
 
 async def _delayed_restore_locks(door: PuertaId, delay_s: float) -> None:
