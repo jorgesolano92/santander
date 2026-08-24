@@ -152,7 +152,7 @@ DOOR_BOARD_ID: dict[PuertaId, int] = {"p1": 2, "p2": 3}
 # panel_rules interfono exterior/interior: pulse_seconds = 2
 DOOR_INTERFONO_PULSE_SECONDS = 2.0
 # Tras sensor "cerrada": espera antes de reactivar bulones (evita pinzar la hoja).
-DOOR_LOCK_RESTORE_DELAY_S = 2.0
+DOOR_LOCK_RESTORE_DELAY_S = 4.0
 # Al entrar a oficina cerrada: espera tras cierre confirmado antes de echar bulones.
 CLOSED_MODE_BOLT_SETTLE_S = 5.0
 # Timeout máximo esperando que las puertas cierren al forzar horario_cerrado.
@@ -1186,11 +1186,54 @@ def _cancel_all_lock_restores() -> None:
         _cancel_lock_restore(door)
 
 
+def _door_for_lock_output(out_code: str) -> Optional[PuertaId]:
+    code = (out_code or "").strip().upper()
+    for door, locks in DOOR_LOCK_OUTPUTS.items():
+        if code in locks:
+            return door
+    return None
+
+
+def is_door_lock_output(out_code: str) -> bool:
+    return _door_for_lock_output(out_code) is not None
+
+
+def _lock_restore_delay_s() -> float:
+    """Retardo tras IN4 OFF antes de echar bulones (más largo en oficina cerrada)."""
+    delay = float(DOOR_LOCK_RESTORE_DELAY_S)
+    if _current_mode == "horario_cerrado":
+        delay = max(delay, float(CLOSED_MODE_BOLT_SETTLE_S))
+        try:
+            from app.core.config import settings
+
+            cfg = float(
+                getattr(settings, "panel_temp_deactivate_restore_delay_seconds", 0) or 0
+            )
+            if cfg > 0:
+                delay = max(delay, cfg)
+        except Exception:  # noqa: BLE001
+            pass
+    return max(0.0, delay)
+
+
 def _restore_locks_after_close(door: PuertaId) -> None:
     """Vuelve a activar los bulones que se soltaron para abrir desde tablet."""
     pending = _locks_to_restore.get(door) or []
     if not pending:
         return
+    # Seguridad: no echar bulones si el sensor sigue marcando abierta.
+    try:
+        _refresh_board_for_door(door)
+        if _door_is_open(door):
+            log.info(
+                "Bulones %s: IN4 aún activo; se reagenda restauración (%s)",
+                door,
+                pending,
+            )
+            _door_was_open[door] = True
+            return
+    except Exception as e:  # noqa: BLE001
+        log.debug("No se pudo verificar sensor antes de bulones %s: %s", door, e)
     for lock_code in pending:
         _set_output_direct(lock_code, True)
         log.info("Bulones ON tras cierre %s: %s", door, lock_code)
@@ -1205,8 +1248,19 @@ async def _delayed_restore_locks(door: PuertaId, delay_s: float) -> None:
             "horario_cerrado",
             *TABLET_LOCK_RELEASE_MODES,
         ):
+            # Fuera de modos con cierres activos: no forzar bulones ON.
+            _locks_to_restore[door] = []
             return
         if not (_locks_to_restore.get(door) or []):
+            return
+        # Si la puerta se reabrió durante el settle, no echar bulones; esperar nuevo cierre.
+        still_open = await asyncio.to_thread(_door_is_open, door)
+        if still_open:
+            log.info(
+                "Bulones %s: puerta reabierta durante settle; se espera nuevo cierre",
+                door,
+            )
+            _door_was_open[door] = True
             return
         await asyncio.to_thread(_restore_locks_after_close, door)
     except asyncio.CancelledError:
@@ -1223,14 +1277,58 @@ def _schedule_lock_restore_after_close(door: PuertaId) -> None:
     if not (_locks_to_restore.get(door) or []):
         return
     _cancel_lock_restore(door)
+    delay = _lock_restore_delay_s()
     log.info(
-        "Bulones %s: restauración en %.1fs tras cierre",
+        "Bulones %s: restauración en %.1fs tras cierre (modo=%s)",
         door,
-        DOOR_LOCK_RESTORE_DELAY_S,
+        delay,
+        _current_mode,
     )
-    _lock_restore_tasks[door] = _schedule_coro(
-        _delayed_restore_locks(door, DOOR_LOCK_RESTORE_DELAY_S)
-    )
+    _lock_restore_tasks[door] = _schedule_coro(_delayed_restore_locks(door, delay))
+
+
+def defer_lock_outputs_until_door_settled(out_codes: list[str]) -> list[str]:
+    """
+    No echa bulones (OUT_x_01/02) mientras IN4 marque puerta abierta.
+    Cuando el sensor se apague, espera settle y entonces restaura.
+    Devuelve los códigos de bulón que se diferieron.
+    """
+    deferred: list[str] = []
+    by_door: dict[PuertaId, list[str]] = {"p1": [], "p2": []}
+    for raw in out_codes:
+        code = (raw or "").strip().upper()
+        door = _door_for_lock_output(code)
+        if not door:
+            continue
+        by_door[door].append(code)
+        deferred.append(code)
+
+    for door, codes in by_door.items():
+        if not codes:
+            continue
+        _cancel_lock_restore(door)
+        merged = list(dict.fromkeys((_locks_to_restore.get(door) or []) + codes))
+        _locks_to_restore[door] = merged
+        try:
+            _refresh_board_for_door(door)
+        except Exception:  # noqa: BLE001
+            pass
+        if _door_is_open(door):
+            # Asegurar flanco de cierre en el poll de sensores.
+            _door_was_open[door] = True
+            log.info(
+                "Bulones %s diferidos hasta IN4 OFF + settle: %s",
+                door,
+                codes,
+            )
+        else:
+            log.info(
+                "Bulones %s: puerta ya cerrada; settle antes de ON: %s",
+                door,
+                codes,
+            )
+            _schedule_lock_restore_after_close(door)
+    return deferred
 
 
 def _door_pulse_with_locks_sync(door: PuertaId, *, restore_locks: bool) -> None:
@@ -1694,15 +1792,23 @@ def _strict_interlock_post_close(door: PuertaId) -> None:
 
 
 def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
+    pending_locks = bool(_locks_to_restore.get(door))
     if _current_mode in STRICT_INTERLOCK_MODES:
-        if not (
-            _door_interlock_active.get(door)
-            or _pending_abriendo.get(door)
-        ):
+        has_maneuver = bool(
+            _door_interlock_active.get(door) or _pending_abriendo.get(door)
+        )
+        if not has_maneuver and not pending_locks:
             return
-        _release_autoservicio_door(door)
-        _strict_interlock_post_close(door)
-        if _current_mode == "horario_cerrado":
+        if has_maneuver:
+            _release_autoservicio_door(door)
+            _strict_interlock_post_close(door)
+        elif pending_locks and _current_mode == "horario_cerrado":
+            # Emergencia/OFF con bulones diferidos: volver LEDs a reposo cerrado.
+            try:
+                _cerrado_reposo()
+            except Exception:  # noqa: BLE001
+                pass
+        if _current_mode == "horario_cerrado" and (has_maneuver or pending_locks):
             _schedule_lock_restore_after_close(door)
         _record(
             "zaguan_door_closed",
@@ -1713,6 +1819,10 @@ def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
         return
 
     if not _pending_abriendo.get(door):
+        # Bulones diferidos (p. ej. tras soltar emergencia) sin maniobra LED pendiente.
+        if pending_locks and _current_mode in TABLET_LOCK_RELEASE_MODES:
+            _schedule_lock_restore_after_close(door)
+            log.info("Puerta %s cerrada — bulones diferidos programados (%s)", door, source)
         return
     _pending_abriendo[door] = False
     _abriendo_since[door] = 0.0

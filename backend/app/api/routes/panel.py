@@ -672,7 +672,16 @@ def _reapply_operational_mode_outputs(rule_key: str) -> None:
     if not rule:
         return
     origin = f"restore_after_emergency:{rule_key}"
+    lock_codes: List[str] = []
     for do_code in rule.get("activate_outputs", []):
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            if zo.is_door_lock_output(str(do_code)):
+                lock_codes.append(str(do_code))
+                continue
+        except Exception:  # noqa: BLE001
+            pass
         board_id, channel = _parse_out_code(do_code)
         _apply_output_for_rule(
             board_id,
@@ -682,6 +691,27 @@ def _reapply_operational_mode_outputs(rule_key: str) -> None:
             origin=origin,
             apply_outputs_to_hardware=True,
         )
+    if lock_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            zo.defer_lock_outputs_until_door_settled(lock_codes)
+            add_event(
+                "INFO",
+                f"Bulones diferidos hasta cierre de puerta (+ settle): {', '.join(lock_codes)}",
+                1,
+            )
+        except Exception:  # noqa: BLE001
+            for do_code in lock_codes:
+                board_id, channel = _parse_out_code(do_code)
+                _apply_output_for_rule(
+                    board_id,
+                    channel,
+                    True,
+                    out_code=do_code,
+                    origin=origin,
+                    apply_outputs_to_hardware=True,
+                )
     _apply_deactivate_outputs(
         rule, True, rule_key=rule_key, origin=origin
     )
@@ -1501,8 +1531,19 @@ def _restore_temp_deactivate_outputs(
             ).isoformat()
             return []
     restored: List[str] = []
+    lock_codes: List[str] = []
     for do_code, was_on in snap.items():
         if not was_on:
+            continue
+        is_lock = False
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            is_lock = zo.is_door_lock_output(str(do_code))
+        except Exception:  # noqa: BLE001
+            is_lock = False
+        if is_lock:
+            lock_codes.append(str(do_code))
             continue
         board_id, channel = _parse_out_code(do_code)
         _apply_output_for_rule(
@@ -1514,6 +1555,29 @@ def _restore_temp_deactivate_outputs(
             apply_outputs_to_hardware=apply_outputs_to_hardware,
         )
         restored.append(do_code)
+    if lock_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            deferred = zo.defer_lock_outputs_until_door_settled(lock_codes)
+            restored.extend(deferred)
+            add_event(
+                "INFO",
+                f"Bulones diferidos hasta IN4 OFF + settle: {', '.join(deferred)}",
+                1,
+            )
+        except Exception:  # noqa: BLE001
+            for do_code in lock_codes:
+                board_id, channel = _parse_out_code(do_code)
+                _apply_output_for_rule(
+                    board_id,
+                    channel,
+                    True,
+                    out_code=do_code,
+                    origin=origin,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                )
+                restored.append(do_code)
     _clear_temp_deactivate_snapshot(rule_key)
     _cancel_pending_temp_deactivate_restore(rule_key)
     if restored:
@@ -1987,14 +2051,31 @@ def _restore_snapshotted_deactivate_outputs(
     apply_outputs_to_hardware: bool,
     origin: str,
 ) -> List[str]:
-    """Solo vuelve a ON las salidas que estaban ON en el snapshot (interruptor OFF)."""
+    """
+    Solo vuelve a ON las salidas que estaban ON en el snapshot (interruptor OFF).
+
+    Los bulones (OUT_x_01/02) no se echan al instante: se diferirán hasta que el
+    sensor de puerta (IN4) marque cerrada y pase el settle, para no pinzar la hoja
+    al salir de emergencia en oficina cerrada / modos con cierres activos.
+    """
     runtime = _default_rule_runtime(rule_key)
     snap: Dict[str, bool] = dict(runtime.get("temp_deact_snapshot") or {})
     if not snap:
         return []
     restored: List[str] = []
+    lock_codes: List[str] = []
     for do_code, was_on in snap.items():
         if not was_on:
+            continue
+        is_lock = False
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            is_lock = zo.is_door_lock_output(str(do_code))
+        except Exception:  # noqa: BLE001
+            is_lock = False
+        if is_lock:
+            lock_codes.append(str(do_code))
             continue
         b, ch = _parse_out_code(do_code)
         _apply_output_for_rule(
@@ -2006,6 +2087,30 @@ def _restore_snapshotted_deactivate_outputs(
             apply_outputs_to_hardware=apply_outputs_to_hardware,
         )
         restored.append(do_code)
+    if lock_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            deferred = zo.defer_lock_outputs_until_door_settled(lock_codes)
+            restored.extend(deferred)
+            add_event(
+                "INFO",
+                f"Bulones diferidos hasta IN4 OFF + settle ({rule_key}): {', '.join(deferred)}",
+                1,
+            )
+        except Exception:  # noqa: BLE001
+            # Fallback: usar el mismo retardo configurable que la desactivación temporal.
+            for do_code in lock_codes:
+                b, ch = _parse_out_code(do_code)
+                _apply_output_for_rule(
+                    b,
+                    ch,
+                    True,
+                    out_code=do_code,
+                    origin=origin,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                )
+                restored.append(do_code)
     _clear_temp_deactivate_snapshot(rule_key)
     _cancel_pending_temp_deactivate_restore(rule_key)
     if restored:
@@ -2014,6 +2119,7 @@ def _restore_snapshotted_deactivate_outputs(
             f"Restauradas salidas (estaban ON antes de {rule_key}): {', '.join(restored)}",
             1,
         )
+        _publish_panel_status_debounced(force=True)
     return restored
 
 
