@@ -103,10 +103,11 @@ INITIAL_LED_BY_MODE: dict[str, dict[PulsadorId, EstadoLed]] = {
         "p4": "libre",
     },
     "horario_cerrado": {
+        # Reposo cerrado: exteriores apagado, interiores libre.
         "p1": "apagado",
         "p2": "apagado",
-        "p3": "apagado",
-        "p4": "apagado",
+        "p3": "libre",
+        "p4": "libre",
     },
 }
 
@@ -688,7 +689,7 @@ def _autoservicio_reposo() -> None:
 
 
 def _cerrado_reposo() -> None:
-    """Cerrado reposo: 4× apagado (SAIMA / cliente). WinHose y maniobras usan otros estados."""
+    """Cerrado reposo: exteriores apagado, interiores libre. WinHose y maniobras usan otros estados."""
     _stop_all_winhose_intermittent()
     _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_cerrado"]))
 
