@@ -21,11 +21,18 @@ async def ws_tablet_calls(
 ) -> None:
     jwt_token = token or websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not jwt_token:
+        log.warning("Tablet WS rechazado: falta token (cliente=%s)", websocket.client)
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     try:
         username = tablet_jwt.decode_access_token_username(jwt_token)
-    except ValueError:
+    except ValueError as e:
+        # Cerrar sin accept() → uvicorn registra "403 Forbidden" en el handshake.
+        log.warning(
+            "Tablet WS rechazado: JWT inválido/caducado (%s) cliente=%s",
+            e,
+            websocket.client,
+        )
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

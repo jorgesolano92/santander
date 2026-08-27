@@ -32,7 +32,8 @@ class Settings(BaseSettings):
 
     # API tablet v1 (JWT)
     tablet_jwt_secret: str = "cambiar-en-produccion-usar-env"
-    tablet_jwt_expire_minutes: int = 60  # 7 días
+    # 10080 = 7 días (si queda en 60, el WS /api/v1/ws/calls empieza a fallar con 403 al caducar)
+    tablet_jwt_expire_minutes: int = 10080
     # Si está vacío: solo se permite el primer registro sin cabecera; más usuarios requieren definir token.
     # Si tiene valor: todo registro requiere cabecera X-Tablet-Setup-Token coincidente.
     tablet_setup_token: Optional[str] = None
@@ -127,6 +128,17 @@ class Settings(BaseSettings):
     # rule_key del panel (coma-separados): horario_manual, horario_carga_cajero, …
     tablet_call_modes: str = "horario_manual,horario_carga_cajero,horario_extendido"
     tablet_call_pulsadores: str = "p1"
+
+    # Panphone / CSIP custom1 (placa remota ↔ este FastAPI)
+    # Base URL de la placa, p. ej. https://192.168.150.50:8090/api/custom1
+    csip_enabled: bool = False
+    csip_base_url: str = ""
+    csip_api_token: Optional[str] = None
+    csip_timeout_s: float = 5.0
+    # Si se define, los webhooks /api/csip/notify* exigen Bearer o X-API-Key.
+    csip_webhook_token: Optional[str] = None
+    # Reenviar pulsaciones CSIP al orquestador zaguán (misma lógica que ESP32).
+    csip_forward_pulsacion_to_zaguan: bool = False
 
     @model_validator(mode="after")
     def normalize_api_prefix(self) -> "Settings":

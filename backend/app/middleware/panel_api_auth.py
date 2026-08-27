@@ -33,6 +33,11 @@ def _is_public_api_path(path: str) -> bool:
         return True
     if path.startswith(f"{base}/zaguan/"):
         return True
+    # Webhooks CSIP (placa → app) y health del módulo; el resto /csip/* exige JWT panel.
+    if path == f"{base}/csip/health":
+        return True
+    if path == f"{base}/csip/notify" or path.startswith(f"{base}/csip/notify/"):
+        return True
     return False
 
 

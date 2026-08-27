@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
 from app.api.routes import health, status, modes, events, config, panel, panel_ws, tablet_v1, tablet_ws, auth_panel, coce_status
+from app.csip.routes import router as csip_router
 from app.coce.client import start_coce_client_task
 from app.services import panel_live_hub, tablet_call_hub
 from app.db import system_events_store as ses
@@ -177,6 +178,8 @@ app.include_router(panel_ws.router, prefix=f"{settings.api_prefix}/panel", tags=
 app.include_router(auth_panel.router, prefix=settings.api_prefix)
 app.include_router(tablet_v1.router, prefix=settings.api_prefix)
 app.include_router(tablet_ws.router, prefix=f"{settings.api_prefix}/v1")
+# Panphone / CSIP custom1 (módulo aparte, mismo prefijo /api)
+app.include_router(csip_router, prefix=settings.api_prefix)
 # Endpoints para integración ESP32 zaguán (sin prefijo /api, compat firmware)
 app.include_router(zaguan_esp32_router)
 
