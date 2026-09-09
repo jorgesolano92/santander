@@ -153,9 +153,9 @@ DOOR_BOARD_ID: dict[PuertaId, int] = {"p1": 2, "p2": 3}
 # panel_rules interfono exterior/interior: pulse_seconds = 2
 DOOR_INTERFONO_PULSE_SECONDS = 2.0
 # Tras sensor "cerrada": espera antes de reactivar bulones (evita pinzar la hoja).
-DOOR_LOCK_RESTORE_DELAY_S = 4.0
+DOOR_LOCK_RESTORE_DELAY_S = 2.0
 # Al entrar a oficina cerrada: espera tras cierre confirmado antes de echar bulones.
-CLOSED_MODE_BOLT_SETTLE_S = 5.0
+CLOSED_MODE_BOLT_SETTLE_S = 2.0
 # Timeout máximo esperando que las puertas cierren al forzar horario_cerrado.
 CLOSED_MODE_DOOR_CLOSE_TIMEOUT_S = 45.0
 CLOSED_MODE_DOOR_POLL_S = 0.4
@@ -264,6 +264,9 @@ def set_led_state_from_console(canal: str, estado: EstadoLed) -> None:
         _led_states[ch] = estado
         _sync_led_memory()
     _publish_zaguan_led_state()
+    # La placa Panphone no recibe el push ESP32; reenviar p1/p2 por CSIP.
+    if ch in ("p1", "p2"):
+        _schedule_csip_led_push({ch: estado})
 
 
 def get_autoservicio_status() -> dict[str, Any]:
@@ -358,6 +361,35 @@ def _schedule_led_device_push(
     _schedule_coro(_worker())
 
 
+def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
+    """Empuja p1/p2 a Panphone vía CSIP led_control. Best-effort, no bloquea."""
+    csip_states = {ch: est for ch, est in states.items() if ch in ("p1", "p2")}
+    if not csip_states:
+        return
+
+    async def _worker() -> None:
+        def _run() -> None:
+            try:
+                from app.csip import client as csip_client
+                from app.csip.schemas import LedControlRequest
+            except Exception as e:  # noqa: BLE001
+                log.debug("CSIP led import: %s", e)
+                return
+            if not csip_client.is_configured():
+                return
+            for ch, est in csip_states.items():
+                try:
+                    csip_client.led_control(LedControlRequest(led=ch, estado=est))
+                    log.info("CSIP led_control %s -> %s OK", ch, est)
+                except Exception as e:  # noqa: BLE001
+                    # Panphone a veces responde "could not persist" aunque el LED cambie.
+                    log.warning("CSIP led_control %s -> %s: %s", ch, est, e)
+
+        await asyncio.to_thread(_run)
+
+    _schedule_coro(_worker())
+
+
 def _apply_led_channels(channels: tuple[PulsadorId, ...], estado: EstadoLed) -> None:
     payload = {ch: estado for ch in channels}
     with _led_state_lock:
@@ -366,6 +398,7 @@ def _apply_led_channels(channels: tuple[PulsadorId, ...], estado: EstadoLed) -> 
         _sync_led_memory()
     _publish_zaguan_led_state()
     _schedule_led_device_push(payload, push_order=channels)
+    _schedule_csip_led_push(payload)
 
 
 def _led_states_match(target: dict[PulsadorId, EstadoLed]) -> bool:
@@ -414,6 +447,7 @@ def _apply_led_map(
         _sync_led_memory()
     _publish_zaguan_led_state()
     _schedule_led_device_push(states, push_order=push_order)
+    _schedule_csip_led_push(states)
 
 
 def _sync_led_memory() -> None:
@@ -2089,6 +2123,8 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             _start_extendido_p2_call()
         if force_carga_tablet_call:
             _start_carga_p1_call(pulsador)
+        # Llamada en curso: LED ocupado en ESP32 + Panphone (p1/p2).
+        _apply_led_channels(DOOR_TO_LED_CHANNELS[door], "ocupado")
         _record(
             "zaguan_tablet_call",
             f"Llamada tablet {pulsador} → {door}",
@@ -2125,6 +2161,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             pulsador=pulsador,
             mode=panel_mode or _current_mode or "",
         )
+        _apply_led_channels(DOOR_TO_LED_CHANNELS[door], "ocupado")
         _record(
             "zaguan_tablet_call",
             f"Llamada tablet {pulsador} → {door}",
