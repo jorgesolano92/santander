@@ -361,8 +361,27 @@ def _schedule_led_device_push(
     _schedule_coro(_worker())
 
 
+def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
+    """
+    Comando compacto CSIP (cmd) con animación/color.
+    Formato OpenAPI: 'LED:ACCION' o 'LED:ACCION:VALOR'
+    (ej. p1:green, p1:rainbow, p1:efectovuelta:red).
+    """
+    if est == "libre":
+        if _should_libre_parpadeo_winhose(ch):
+            return f"{ch}:efectovuelta:green"
+        return f"{ch}:green"
+    if est == "ocupado":
+        return f"{ch}:efectovuelta:red"
+    if est == "abriendo":
+        return f"{ch}:rainbow"
+    if est == "apagado":
+        return f"{ch}:off"
+    return f"{ch}:{est}"
+
+
 def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
-    """Empuja p1/p2 a Panphone vía CSIP led_control. Best-effort, no bloquea."""
+    """Empuja p1/p2 a Panphone vía CSIP led_control (estado + animación). Best-effort."""
     csip_states = {ch: est for ch, est in states.items() if ch in ("p1", "p2")}
     if not csip_states:
         return
@@ -378,12 +397,18 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
             if not csip_client.is_configured():
                 return
             for ch, est in csip_states.items():
+                cmd = _csip_led_cmd_for_estado(ch, est)
                 try:
-                    csip_client.led_control(LedControlRequest(led=ch, estado=est))
-                    log.info("CSIP led_control %s -> %s OK", ch, est)
+                    # Animación/color por cmd + estado lógico (API Custom1).
+                    csip_client.led_control(
+                        LedControlRequest(cmd=cmd, led=ch, estado=est)
+                    )
+                    log.info("CSIP led_control %s cmd=%s estado=%s OK", ch, cmd, est)
                 except Exception as e:  # noqa: BLE001
                     # Panphone a veces responde "could not persist" aunque el LED cambie.
-                    log.warning("CSIP led_control %s -> %s: %s", ch, est, e)
+                    log.warning(
+                        "CSIP led_control %s cmd=%s estado=%s: %s", ch, cmd, est, e
+                    )
 
         await asyncio.to_thread(_run)
 
