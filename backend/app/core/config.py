@@ -139,6 +139,8 @@ class Settings(BaseSettings):
     csip_webhook_token: Optional[str] = None
     # Reenviar pulsaciones CSIP al orquestador zaguán (misma lógica que ESP32).
     csip_forward_pulsacion_to_zaguan: bool = False
+    # Brillo LED Panphone en led_control (escala CSIP 1–9). None = no enviar el campo.
+    csip_led_brightness: Optional[int] = 7
 
     @model_validator(mode="after")
     def normalize_api_prefix(self) -> "Settings":

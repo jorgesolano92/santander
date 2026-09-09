@@ -381,7 +381,7 @@ def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
 
 
 def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
-    """Empuja p1/p2 a Panphone vía CSIP led_control (estado + animación). Best-effort."""
+    """Empuja p1/p2 a Panphone vía CSIP led_control (cmd + estado + brillo). Best-effort."""
     csip_states = {ch: est for ch, est in states.items() if ch in ("p1", "p2")}
     if not csip_states:
         return
@@ -389,6 +389,7 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
     async def _worker() -> None:
         def _run() -> None:
             try:
+                from app.core.config import settings
                 from app.csip import client as csip_client
                 from app.csip.schemas import LedControlRequest
             except Exception as e:  # noqa: BLE001
@@ -396,18 +397,37 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
                 return
             if not csip_client.is_configured():
                 return
+            brightness = settings.csip_led_brightness
+            if brightness is not None:
+                brightness = max(1, min(9, int(brightness)))
             for ch, est in csip_states.items():
                 cmd = _csip_led_cmd_for_estado(ch, est)
                 try:
-                    # Animación/color por cmd + estado lógico (API Custom1).
+                    # cmd (animación/color) + estado lógico + brightness (1–9).
                     csip_client.led_control(
-                        LedControlRequest(cmd=cmd, led=ch, estado=est)
+                        LedControlRequest(
+                            cmd=cmd,
+                            led=ch,
+                            estado=est,
+                            brightness=brightness,
+                        )
                     )
-                    log.info("CSIP led_control %s cmd=%s estado=%s OK", ch, cmd, est)
+                    log.info(
+                        "CSIP led_control %s cmd=%s estado=%s brightness=%s OK",
+                        ch,
+                        cmd,
+                        est,
+                        brightness,
+                    )
                 except Exception as e:  # noqa: BLE001
                     # Panphone a veces responde "could not persist" aunque el LED cambie.
                     log.warning(
-                        "CSIP led_control %s cmd=%s estado=%s: %s", ch, cmd, est, e
+                        "CSIP led_control %s cmd=%s estado=%s brightness=%s: %s",
+                        ch,
+                        cmd,
+                        est,
+                        brightness,
+                        e,
                     )
 
         await asyncio.to_thread(_run)
