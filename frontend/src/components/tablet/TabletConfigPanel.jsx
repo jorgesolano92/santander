@@ -35,6 +35,8 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         csipApiUseHttps: false,
         csipApiKey: "",
         csipBearerToken: "",
+        sipSignaling: "pbx",
+        sipP2pPeerIp: "",
         csipCallTargetType: "default",
         csipCallTarget: "",
         csipCallUser: "",
@@ -83,6 +85,8 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         csipApiUseHttps: false,
         csipApiKey: "",
         csipBearerToken: "",
+        sipSignaling: "pbx",
+        sipP2pPeerIp: "",
         csipCallTargetType: "default",
         csipCallTarget: "",
         csipCallUser: "",
@@ -441,6 +445,16 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
               </Field>
               {(intercom.intercomMode || "bridge") === "sip" && (
                 <>
+                  <Field label="Señalización SIP">
+                    <select
+                      style={inputStyle()}
+                      value={intercom.sipSignaling || "pbx"}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipSignaling", e.target.value)}
+                    >
+                      <option value="pbx">PBX (centralita)</option>
+                      <option value="p2p">P2P / IP (sin centralita)</option>
+                    </select>
+                  </Field>
                   <div style={{ gridColumn: "1 / -1", marginTop: 8, fontWeight: 600, color: "#334155" }}>
                     API CSIP / Panphone
                   </div>
@@ -485,6 +499,33 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       <option value="p2">p2</option>
                     </select>
                   </Field>
+                  {(intercom.sipSignaling || "pbx") === "p2p" ? (
+                    <>
+                      <div style={{ gridColumn: "1 / -1", marginTop: 8, fontWeight: 600, color: "#334155" }}>
+                        Destino P2P (call_start IP)
+                      </div>
+                      <Field label="IP peer SIP">
+                        <input
+                          style={inputStyle()}
+                          value={intercom.sipP2pPeerIp || intercom.csipCallTarget || ""}
+                          onChange={(e) => {
+                            patchDoorIntercom(doorIndex, "sipP2pPeerIp", e.target.value);
+                            patchDoorIntercom(doorIndex, "csipCallTargetType", "ip");
+                            patchDoorIntercom(doorIndex, "csipCallTarget", e.target.value);
+                          }}
+                          placeholder="192.168.1.155"
+                        />
+                      </Field>
+                      <Field label="Usuario peer (opcional)">
+                        <input
+                          style={inputStyle()}
+                          value={intercom.csipCallUser || ""}
+                          onChange={(e) => patchDoorIntercom(doorIndex, "csipCallUser", e.target.value)}
+                        />
+                      </Field>
+                    </>
+                  ) : (
+                    <>
                   <Field label="call_start target_type">
                     <select
                       style={inputStyle()}
@@ -564,6 +605,8 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       placeholder="sip:panphone@pbx.local"
                     />
                   </Field>
+                    </>
+                  )}
                 </>
               )}
               <Field label="Usuario ONVIF">
