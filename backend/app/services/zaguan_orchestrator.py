@@ -381,7 +381,7 @@ def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
 
 
 def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
-    """Empuja p1/p2 a Panphone vía CSIP led_control (cmd + estado + brillo). Best-effort."""
+    """Empuja p1/p2 a Panphone vía CSIP led_control (cmd + brightness). Best-effort."""
     csip_states = {ch: est for ch, est in states.items() if ch in ("p1", "p2")}
     if not csip_states:
         return
@@ -403,30 +403,23 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
             for ch, est in csip_states.items():
                 cmd = _csip_led_cmd_for_estado(ch, est)
                 try:
-                    # cmd (animación/color) + estado lógico + brightness (1–9).
+                    # Formato placa / tester CSIP: solo cmd + brightness.
                     csip_client.led_control(
-                        LedControlRequest(
-                            cmd=cmd,
-                            led=ch,
-                            estado=est,
-                            brightness=brightness,
-                        )
+                        LedControlRequest(cmd=cmd, brightness=brightness)
                     )
                     log.info(
-                        "CSIP led_control %s cmd=%s estado=%s brightness=%s OK",
-                        ch,
+                        "CSIP led_control cmd=%s brightness=%s (estado lógico %s) OK",
                         cmd,
-                        est,
                         brightness,
+                        est,
                     )
                 except Exception as e:  # noqa: BLE001
                     # Panphone a veces responde "could not persist" aunque el LED cambie.
                     log.warning(
-                        "CSIP led_control %s cmd=%s estado=%s brightness=%s: %s",
-                        ch,
+                        "CSIP led_control cmd=%s brightness=%s (estado lógico %s): %s",
                         cmd,
-                        est,
                         brightness,
+                        est,
                         e,
                     )
 
