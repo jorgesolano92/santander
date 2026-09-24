@@ -365,7 +365,7 @@ def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
     """
     Comando compacto CSIP (cmd) con animación/color.
     Formato OpenAPI: 'LED:ACCION' o 'LED:ACCION:VALOR'
-    (ej. p1:green, p1:rainbow, p1:efectovuelta:red).
+    (ej. p1:green, p1:cometa:yellow, p1:efectovuelta:red).
     """
     if est == "libre":
         if _should_libre_parpadeo_winhose(ch):
@@ -374,7 +374,7 @@ def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
     if est == "ocupado":
         return f"{ch}:efectovuelta:red"
     if est == "abriendo":
-        return f"{ch}:rainbow"
+        return f"{ch}:cometa:yellow"
     if est == "apagado":
         return f"{ch}:off"
     return f"{ch}:{est}"
