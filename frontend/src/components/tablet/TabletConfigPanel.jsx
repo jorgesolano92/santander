@@ -451,7 +451,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       value={intercom.sipSignaling || "pbx"}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipSignaling", e.target.value)}
                     >
-                      <option value="pbx">PBX (centralita)</option>
+                      <option value="pbx">PBX / Asterisk (recomendado)</option>
                       <option value="p2p">P2P / IP (sin centralita)</option>
                     </select>
                   </Field>
@@ -557,14 +557,14 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                     </>
                   )}
                   <div style={{ gridColumn: "1 / -1", marginTop: 8, fontWeight: 600, color: "#334155" }}>
-                    Cuenta SIP tablet (opcional — audio PBX)
+                    Cuenta SIP tablet (Asterisk / PBX)
                   </div>
                   <Field label="SIP URI">
                     <input
                       style={inputStyle()}
                       value={intercom.sipUri || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipUri", e.target.value)}
-                      placeholder="sip:201@pbx.local"
+                      placeholder="sip:201@192.168.1.50"
                     />
                   </Field>
                   <Field label="SIP usuario">
@@ -572,6 +572,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipUsername || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipUsername", e.target.value)}
+                      placeholder="201"
                     />
                   </Field>
                   <Field label="SIP contraseña">
@@ -587,14 +588,15 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipDomain || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipDomain", e.target.value)}
+                      placeholder="192.168.1.50"
                     />
                   </Field>
-                  <Field label="WS SIP (host:puerto)">
+                  <Field label="WS SIP (Asterisk, ej. :8088/ws)">
                     <input
                       style={inputStyle()}
                       value={intercom.sipServer || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipServer", e.target.value)}
-                      placeholder="pbx.local:5066"
+                      placeholder="192.168.1.50:8088/ws"
                     />
                   </Field>
                   <Field label="Destino llamada SIP">
@@ -602,7 +604,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipCallDestination || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipCallDestination", e.target.value)}
-                      placeholder="sip:panphone@pbx.local"
+                      placeholder="sip:100@192.168.1.50"
                     />
                   </Field>
                     </>
