@@ -25,6 +25,21 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         voiceChannel: -1,
         intercomMode: "bridge",
         bridgeUrl: "ws://192.168.1.155:8765",
+        sipUri: "",
+        sipUsername: "",
+        sipPassword: "",
+        sipDomain: "",
+        sipServer: "",
+        sipCallDestination: "",
+        csipApiHost: "192.168.1.70:8090",
+        csipApiUseHttps: false,
+        csipApiKey: "",
+        csipBearerToken: "",
+        csipCallTargetType: "default",
+        csipCallTarget: "",
+        csipCallUser: "",
+        csipCallRecording: false,
+        csipButtonId: "p1",
         videoProfile: "MainStream",
         snapshotPath: "ISAPI/Streaming/channels/101/picture",
         doorControlUsername: "Scati2023",
@@ -58,6 +73,21 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         voiceChannel: -1,
         intercomMode: "bridge",
         bridgeUrl: "ws://192.168.1.155:8765",
+        sipUri: "",
+        sipUsername: "",
+        sipPassword: "",
+        sipDomain: "",
+        sipServer: "",
+        sipCallDestination: "",
+        csipApiHost: "192.168.1.70:8090",
+        csipApiUseHttps: false,
+        csipApiKey: "",
+        csipBearerToken: "",
+        csipCallTargetType: "default",
+        csipCallTarget: "",
+        csipCallUser: "",
+        csipCallRecording: false,
+        csipButtonId: "p2",
         videoProfile: "MainStream",
         doorControlUsername: "Scati2023",
         doorControlPassword: "Scati2023",
@@ -404,11 +434,138 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
               </Field>
               <Field label="Modo intercom">
                 <select style={inputStyle()} value={intercom.intercomMode || "bridge"} onChange={(e) => patchDoorIntercom(doorIndex, "intercomMode", e.target.value)}>
-                  <option value="bridge">bridge</option>
-                  <option value="sdk">sdk</option>
-                  <option value="sip">sip</option>
+                  <option value="bridge">bridge (puente PC)</option>
+                  <option value="sdk">sdk (nativo Android)</option>
+                  <option value="sip">sip / Panphone (CSIP)</option>
                 </select>
               </Field>
+              {(intercom.intercomMode || "bridge") === "sip" && (
+                <>
+                  <div style={{ gridColumn: "1 / -1", marginTop: 8, fontWeight: 600, color: "#334155" }}>
+                    API CSIP / Panphone
+                  </div>
+                  <Field label="Host CSIP (host:puerto)">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.csipApiHost || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "csipApiHost", e.target.value)}
+                      placeholder="192.168.1.70:8090"
+                    />
+                  </Field>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 20 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!intercom.csipApiUseHttps}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "csipApiUseHttps", e.target.checked)}
+                    />
+                    <span>HTTPS CSIP</span>
+                  </label>
+                  <Field label="API Key CSIP">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.csipApiKey || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "csipApiKey", e.target.value)}
+                      placeholder="token placa"
+                    />
+                  </Field>
+                  <Field label="Bearer CSIP (opcional)">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.csipBearerToken || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "csipBearerToken", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Canal / botón CSIP">
+                    <select
+                      style={inputStyle()}
+                      value={intercom.csipButtonId || (doorIndex === 1 ? "p2" : "p1")}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "csipButtonId", e.target.value)}
+                    >
+                      <option value="p1">p1</option>
+                      <option value="p2">p2</option>
+                    </select>
+                  </Field>
+                  <Field label="call_start target_type">
+                    <select
+                      style={inputStyle()}
+                      value={intercom.csipCallTargetType || "default"}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "csipCallTargetType", e.target.value)}
+                    >
+                      <option value="default">default</option>
+                      <option value="number">number</option>
+                      <option value="ip">ip</option>
+                    </select>
+                  </Field>
+                  {(intercom.csipCallTargetType === "number" || intercom.csipCallTargetType === "ip") && (
+                    <>
+                      <Field label="call_start target">
+                        <input
+                          style={inputStyle()}
+                          value={intercom.csipCallTarget || ""}
+                          onChange={(e) => patchDoorIntercom(doorIndex, "csipCallTarget", e.target.value)}
+                          placeholder={intercom.csipCallTargetType === "ip" ? "192.168.1.50" : "201"}
+                        />
+                      </Field>
+                      <Field label="call_start user (opcional)">
+                        <input
+                          style={inputStyle()}
+                          value={intercom.csipCallUser || ""}
+                          onChange={(e) => patchDoorIntercom(doorIndex, "csipCallUser", e.target.value)}
+                        />
+                      </Field>
+                    </>
+                  )}
+                  <div style={{ gridColumn: "1 / -1", marginTop: 8, fontWeight: 600, color: "#334155" }}>
+                    Cuenta SIP tablet (opcional — audio PBX)
+                  </div>
+                  <Field label="SIP URI">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.sipUri || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipUri", e.target.value)}
+                      placeholder="sip:201@pbx.local"
+                    />
+                  </Field>
+                  <Field label="SIP usuario">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.sipUsername || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipUsername", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="SIP contraseña">
+                    <input
+                      style={inputStyle()}
+                      type="password"
+                      value={intercom.sipPassword || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipPassword", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="SIP dominio">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.sipDomain || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipDomain", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="WS SIP (host:puerto)">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.sipServer || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipServer", e.target.value)}
+                      placeholder="pbx.local:5066"
+                    />
+                  </Field>
+                  <Field label="Destino llamada SIP">
+                    <input
+                      style={inputStyle()}
+                      value={intercom.sipCallDestination || ""}
+                      onChange={(e) => patchDoorIntercom(doorIndex, "sipCallDestination", e.target.value)}
+                      placeholder="sip:panphone@pbx.local"
+                    />
+                  </Field>
+                </>
+              )}
               <Field label="Usuario ONVIF">
                 <input style={inputStyle()} value={intercom.onvifUsername || ""} onChange={(e) => patchDoorIntercom(doorIndex, "onvifUsername", e.target.value)} />
               </Field>
