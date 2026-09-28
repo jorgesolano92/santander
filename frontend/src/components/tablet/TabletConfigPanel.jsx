@@ -4,6 +4,8 @@
 import { useEffect, useState } from "react";
 import AuthorizedTabletsSection from "./AuthorizedTabletsSection";
 
+const CSIP_API_KEY_DEFAULT = "f3fb37ac959b795507cf3d6794b1f29b91ed2b1b1d1f06c6";
+
 export const DEFAULT_TABLET_PANEL_CONFIG = {
   doors: [
     {
@@ -13,27 +15,27 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
       ipInterior: "",
       intercom: {
         name: "Intercomunicador Calle (P1)",
-        cameraIP: "192.168.1.200",
+        cameraIP: "192.168.1.70",
         httpPort: 80,
         httpsPort: 443,
-        onvifUsername: "ceroideas",
-        onvifPassword: "Cero21264712-",
+        onvifUsername: "admin",
+        onvifPassword: "panphone",
         rtspPort: 554,
         sdkPort: 9008,
         sdkUsername: "admin",
         sdkPassword: "Santander@01",
         voiceChannel: -1,
-        intercomMode: "bridge",
+        intercomMode: "sip",
         bridgeUrl: "ws://192.168.1.155:8765",
-        sipUri: "",
-        sipUsername: "",
-        sipPassword: "",
-        sipDomain: "",
-        sipServer: "",
-        sipCallDestination: "",
+        sipUri: "sip:201@192.168.1.154",
+        sipUsername: "201",
+        sipPassword: "Santander201",
+        sipDomain: "192.168.1.154",
+        sipServer: "192.168.1.154:8088/ws",
+        sipCallDestination: "sip:100@192.168.1.154",
         csipApiHost: "192.168.1.70:8090",
         csipApiUseHttps: false,
-        csipApiKey: "",
+        csipApiKey: CSIP_API_KEY_DEFAULT,
         csipBearerToken: "",
         sipSignaling: "pbx",
         sipP2pPeerIp: "",
@@ -48,12 +50,13 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         doorControlPassword: "Scati2023",
         doorControlPCB: 2,
         doorControlSwitch: 7,
-        doorControlAction: "set_output",
+        doorControlAction: "door_endpoint",
+        doorControlEndpoint: "api/v1/door/open/p1",
         doorControlRuleKey: "",
         doorOutputMode: "auto",
         doorControlPulseTime: 1,
         hasAudio: true,
-        rtspPath: "profile1",
+        rtspPath: "video1",
       },
     },
     {
@@ -83,7 +86,7 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         sipCallDestination: "",
         csipApiHost: "192.168.1.70:8090",
         csipApiUseHttps: false,
-        csipApiKey: "",
+        csipApiKey: CSIP_API_KEY_DEFAULT,
         csipBearerToken: "",
         sipSignaling: "pbx",
         sipP2pPeerIp: "",
@@ -93,13 +96,17 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         csipCallRecording: false,
         csipButtonId: "p2",
         videoProfile: "MainStream",
+        snapshotPath: "ISAPI/Streaming/channels/101/picture",
         doorControlUsername: "Scati2023",
         doorControlPassword: "Scati2023",
         doorControlPCB: 3,
         doorControlSwitch: 7,
         doorControlAction: "set_output",
+        doorControlRuleKey: "",
         doorOutputMode: "auto",
+        doorControlPulseTime: 1,
         hasAudio: true,
+        rtspPath: "profile1",
       },
     },
     { enabled: false, name: "Puerta 3", ipExterior: "", ipInterior: "", intercom: { name: "P3", cameraIP: "" } },
@@ -183,6 +190,70 @@ function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
+/** Une config guardada con fábrica (rellena campos CSIP/SIP/rtsp nuevos sin borrar lo ya personalizado). */
+function mergeIntercom(defIc, savedIc) {
+  const out = { ...(defIc || {}) };
+  if (!savedIc || typeof savedIc !== "object") return out;
+  for (const [k, v] of Object.entries(savedIc)) {
+    if (v == null) continue;
+    if (typeof v === "string" && !v.trim() && String(out[k] || "").trim()) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function mergeWithDefaults(saved) {
+  const base = deepClone(DEFAULT_TABLET_PANEL_CONFIG);
+  if (!saved || typeof saved !== "object") return ensureDoors(base);
+  const merged = { ...base, ...deepClone(saved) };
+  const savedDoors = Array.isArray(saved.doors) ? saved.doors : [];
+  merged.doors = base.doors.map((defDoor, i) => {
+    const s = savedDoors[i];
+    if (!s) return defDoor;
+    return {
+      ...defDoor,
+      ...s,
+      intercom: mergeIntercom(defDoor.intercom, s.intercom),
+    };
+  });
+  while (merged.doors.length < 5) {
+    const i = merged.doors.length;
+    const extra = savedDoors[i];
+    merged.doors.push(
+      extra
+        ? {
+            enabled: false,
+            name: `Puerta ${i + 1}`,
+            ipExterior: "",
+            ipInterior: "",
+            intercom: { name: "", cameraIP: "" },
+            ...extra,
+            intercom: { name: "", cameraIP: "", ...(extra.intercom || {}) },
+          }
+        : {
+            enabled: false,
+            name: `Puerta ${i + 1}`,
+            ipExterior: "",
+            ipInterior: "",
+            intercom: { name: "", cameraIP: "" },
+          },
+    );
+  }
+  if (saved.api) merged.api = { ...base.api, ...saved.api };
+  if (saved.network) merged.network = { ...base.network, ...saved.network };
+  if (saved.modes) {
+    merged.modes = { ...base.modes };
+    for (const [k, v] of Object.entries(saved.modes)) {
+      merged.modes[k] = { ...(base.modes?.[k] || {}), ...(v || {}) };
+    }
+  }
+  if (saved.emergency) merged.emergency = { ...base.emergency, ...saved.emergency };
+  if (saved.tabletCall) merged.tabletCall = { ...base.tabletCall, ...saved.tabletCall };
+  if (saved.configLogin) merged.configLogin = { ...base.configLogin, ...saved.configLogin };
+  if (saved.schedules) merged.schedules = { ...base.schedules, ...saved.schedules };
+  return ensureDoors(merged);
+}
+
 function ensureDoors(config) {
   const doors = Array.isArray(config.doors) ? [...config.doors] : [];
   while (doors.length < 5) {
@@ -229,7 +300,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
     setLoading(true);
     try {
       const data = await apiFetch("/api/config/tablet");
-      const cfg = ensureDoors({ ...deepClone(DEFAULT_TABLET_PANEL_CONFIG), ...(data?.config || {}) });
+      const cfg = mergeWithDefaults(data?.config || {});
       setDraft(cfg);
       setRevision(data?.revision || "builtin");
       setUpdatedAt(data?.updated_at || null);
@@ -432,6 +503,22 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
               </Field>
               <Field label="Cámara IP">
                 <input style={inputStyle()} value={intercom.cameraIP || ""} onChange={(e) => patchDoorIntercom(doorIndex, "cameraIP", e.target.value)} />
+              </Field>
+              <Field label="Ruta RTSP (ej. video1)">
+                <input
+                  style={inputStyle()}
+                  value={intercom.rtspPath || ""}
+                  onChange={(e) => patchDoorIntercom(doorIndex, "rtspPath", e.target.value)}
+                  placeholder="video1"
+                />
+              </Field>
+              <Field label="Puerto RTSP">
+                <input
+                  style={inputStyle()}
+                  type="number"
+                  value={intercom.rtspPort ?? 554}
+                  onChange={(e) => patchDoorIntercom(doorIndex, "rtspPort", Number(e.target.value) || 554)}
+                />
               </Field>
               <Field label="Bridge URL (WebSocket)">
                 <input style={inputStyle()} value={intercom.bridgeUrl || ""} onChange={(e) => patchDoorIntercom(doorIndex, "bridgeUrl", e.target.value)} />
