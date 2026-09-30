@@ -240,11 +240,10 @@ async def recibir_pulsacion(
     El ESP32 llama a este endpoint cuando se pulsa un botón físico.
     El ESP32 dispara y se olvida — responder rápido.
 
-    Mapeo de canales (1 ESP por canal lógico):
-      p1 → P1 videoportero exterior      (192.168.1.60) → abre P1 (.80 / placa 2)
-      p2 → P2 videoportero               (192.168.1.62) → abre P2 (.70 / placa 3)
-      p3 → P1 pulsador interior          (192.168.1.61) → abre P1 (.80 / placa 2)
-      p4 → P2 pulsador interior          (192.168.1.63) → abre P2 (.70 / placa 3)
+    Mapeo (2 Panphones; p3/p4 = alias lógico del botón interior, no hay placa p3/p4):
+      .80 puerta P1: botón local p1 → canal p1 (ext), botón local p2 → canal p3 (int)
+      .70 puerta P2: botón local p1 → canal p2 (ext), botón local p2 → canal p4 (int)
+      Ambos botones de .80 abren P1; ambos de .70 abren P2.
     """
     payload_raw: Any = None
     if request is not None:

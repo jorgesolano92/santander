@@ -16,10 +16,11 @@ export function ZaguanSimulationSection({
         <div className="sim-block">
           <h3 className="sim-block-title">Simular pulsación → backend</h3>
           <p className="muted sim-block-desc">
-            Igual que cuando el ESP32 pulsa: avisa al <strong>backend</strong> (
-            <code className="mono">POST /api/zaguan/pulsacion/pN</code>), no al
-            ESP32. Cada canal lógico (p1–p4) tiene su IP y rol en la tabla de
-            red.
+            Igual que notify Panphone → backend (
+            <code className="mono">POST /api/zaguan/pulsacion/pN</code>). Solo 2
+            placas: <code className="mono">.80</code> = puerta P1 (botones locales
+            p1/p2), <code className="mono">.70</code> = puerta P2 (botones locales
+            p1/p2). Los canales lógicos 3/4 son el botón interior de la misma placa.
           </p>
           <div className="sim-grid sim-grid-pulse">
             {ZAGUAN_PULSADOR_CANALES.map(

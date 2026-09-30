@@ -1,4 +1,4 @@
-"""Registro de placas Panphone / CSIP (N dispositivos).
+"""Registro de placas Panphone / CSIP (2 puertas = 2 placas).
 
 Configuración preferida (JSON en env ``CSIP_DEVICES``)::
 
@@ -15,12 +15,16 @@ Configuración preferida (JSON en env ``CSIP_DEVICES``)::
       }
     }
 
-- ``p1`` = Panphone Calle (.80); ``p2`` = Panphone Oficina (.70).
-- Cada placa tiene 2 botones locales (p1/p2). El backend remapea por IP:
-  - Calle ``.80`` botón local p1→lógico **p1** (ext), p2→lógico **p3** (int)
-  - Oficina ``.70`` botón local p1→lógico **p2** (ext), p2→lógico **p4** (int)
-- Si no defines ``p3``/``p4``, se sintetizan como alias LED ``p2`` en la misma placa.
-- ``token`` opcional; si falta, se usa ``CSIP_API_TOKEN``.
+Hardware real (no hay Panphone p3/p4):
+  - ``.80`` = puerta **P1** (calle). Botones locales ``p1`` (ext) y ``p2`` (int).
+  - ``.70`` = puerta **P2** (oficina). Botones locales ``p1`` (ext) y ``p2`` (int).
+
+El orquestador usa 4 canales lógicos solo para LEDs cara ext/int:
+  - Calle ``.80`` local p1→lógico p1, local p2→lógico p3  (ambos abren puerta P1)
+  - Oficina ``.70`` local p1→lógico p2, local p2→lógico p4  (ambos abren puerta P2)
+
+Si no defines ``p3``/``p4`` en env, se sintetizan como alias LED ``p2`` en la misma
+placa. ``token`` opcional; si falta, se usa ``CSIP_API_TOKEN``.
 
 Compatibilidad: si ``CSIP_DEVICES`` está vacío y hay ``CSIP_BASE_URL``, se sintetiza
 un mapa ``p1``+``p2`` apuntando al mismo host (canales LED p1/p2 en una sola placa).
@@ -116,8 +120,8 @@ def _parse_devices_json(raw: str) -> dict[str, CsipDevice]:
 
 def _ensure_interior_aliases(devices: dict[str, CsipDevice]) -> dict[str, CsipDevice]:
     """
-    Con 2 Panphones (p1 calle + p2 oficina), sintetiza p3/p4 como LED local p2
-    en la misma placa (botón/LED interior).
+    Alias lógicos p3/p4 = LED/botón local p2 de la misma placa (no son dispositivos).
+    p1(.80)+p3 → puerta P1; p2(.70)+p4 → puerta P2.
     """
     out = dict(devices)
     calle = out.get("p1")
@@ -225,10 +229,11 @@ def map_plate_button_to_logical(
     plate_button: str,
 ) -> str:
     """
-    Botón local de la placa → canal lógico zaguán.
+    Botón local Panphone → canal lógico (LED). Ambos botones de una placa
+    abren la misma puerta (P1 en .80, P2 en .70).
 
-    - Placa calle (p1 / .80): local p1→p1, local p2→p3
-    - Placa oficina (p2 / .70): local p1→p2, local p2→p4
+    - Placa P1 calle (.80): local p1→lógico p1 (ext), local p2→lógico p3 (int)
+    - Placa P2 oficina (.70): local p1→lógico p2 (ext), local p2→lógico p4 (int)
     """
     button = (plate_button or "").strip().lower()
     if button.isdigit():

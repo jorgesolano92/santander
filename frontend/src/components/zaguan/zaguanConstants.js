@@ -1,11 +1,15 @@
 export const ESTADOS_VALIDOS = ["libre", "ocupado", "abriendo", "apagado"];
 
-/** IP por defecto de cada ESP (canal lógico p1–p4). */
+/**
+ * IP Panphone por canal lógico.
+ * Solo hay 2 placas: .80 = puerta P1, .70 = puerta P2 (cada una con botones locales p1/p2).
+ * Canales lógicos 3/4 = botón/LED interior de la misma placa (no son ESP ni otro Panphone).
+ */
 export const CANAL_DEFAULT_IPS = {
-  1: "192.168.1.60",
-  2: "192.168.1.62",
-  3: "192.168.1.61",
-  4: "192.168.1.63",
+  1: "192.168.1.80",
+  2: "192.168.1.70",
+  3: "192.168.1.80",
+  4: "192.168.1.70",
 };
 
 export const CANAL_INFO = {
@@ -13,8 +17,8 @@ export const CANAL_INFO = {
     corto: "C1",
     puerta: "P1",
     rol: "Videoportero",
-    ubicacion: "Exterior",
-    nombre: "P1 — videoportero exterior",
+    ubicacion: "Exterior · botón local p1",
+    nombre: "P1 — videoportero exterior (.80)",
     ip: CANAL_DEFAULT_IPS[1],
     gpioLed: 2,
     gpioBtn: 15,
@@ -23,8 +27,8 @@ export const CANAL_INFO = {
     corto: "C2",
     puerta: "P2",
     rol: "Videoportero",
-    ubicacion: "Exterior (oficina)",
-    nombre: "P2 — videoportero exterior",
+    ubicacion: "Exterior · botón local p1",
+    nombre: "P2 — videoportero exterior (.70)",
     ip: CANAL_DEFAULT_IPS[2],
     gpioLed: 4,
     gpioBtn: 16,
@@ -33,8 +37,8 @@ export const CANAL_INFO = {
     corto: "C3",
     puerta: "P1",
     rol: "Pulsador",
-    ubicacion: "Interior (calle)",
-    nombre: "P1 — pulsador interior",
+    ubicacion: "Interior · botón local p2",
+    nombre: "P1 — pulsador interior (.80)",
     ip: CANAL_DEFAULT_IPS[3],
     gpioLed: 5,
     gpioBtn: 17,
@@ -43,8 +47,8 @@ export const CANAL_INFO = {
     corto: "C4",
     puerta: "P2",
     rol: "Pulsador",
-    ubicacion: "Interior",
-    nombre: "P2 — pulsador interior",
+    ubicacion: "Interior · botón local p2",
+    nombre: "P2 — pulsador interior (.70)",
     ip: CANAL_DEFAULT_IPS[4],
     gpioLed: 6,
     gpioBtn: 18,
@@ -80,12 +84,15 @@ export function withWinhoseParpadeo(canal, estado, baseCfg, winhoseParpadeo) {
   };
 }
 
-/** Canales p1–p4: simulación POST /api/zaguan/pulsacion/pN al orquestador. */
+/**
+ * Simulación POST /api/zaguan/pulsacion/pN.
+ * Hardware: 2 Panphones (.80=P1, .70=P2), cada uno con botones locales p1/p2.
+ */
 export const ZAGUAN_PULSADOR_CANALES = [
   {
     canal: 1,
     puerta: "P1 (calle)",
-    dispositivo: "Videoportero exterior P1",
+    dispositivo: "Videoportero exterior · .80 botón p1",
     ubicacion: "Exterior",
     led: "C1",
     ip: CANAL_DEFAULT_IPS[1],
@@ -94,8 +101,8 @@ export const ZAGUAN_PULSADOR_CANALES = [
   {
     canal: 2,
     puerta: "P2 (oficina)",
-    dispositivo: "Videoportero exterior P2",
-    ubicacion: "Interior zaguán (cara oficina)",
+    dispositivo: "Videoportero exterior · .70 botón p1",
+    ubicacion: "Exterior",
     led: "C2",
     ip: CANAL_DEFAULT_IPS[2],
     inModbus: "IN_03_08",
@@ -103,8 +110,8 @@ export const ZAGUAN_PULSADOR_CANALES = [
   {
     canal: 3,
     puerta: "P1 (calle)",
-    dispositivo: "Pulsador interior P1",
-    ubicacion: "Interior zaguán (cara calle)",
+    dispositivo: "Pulsador interior · .80 botón p2",
+    ubicacion: "Interior",
     led: "C3",
     ip: CANAL_DEFAULT_IPS[3],
     inModbus: "IN_02_07",
@@ -112,8 +119,8 @@ export const ZAGUAN_PULSADOR_CANALES = [
   {
     canal: 4,
     puerta: "P2 (oficina)",
-    dispositivo: "Pulsador interior P2",
-    ubicacion: "Interior zaguán",
+    dispositivo: "Pulsador interior · .70 botón p2",
+    ubicacion: "Interior",
     led: "C4",
     ip: CANAL_DEFAULT_IPS[4],
     inModbus: "IN_03_07",

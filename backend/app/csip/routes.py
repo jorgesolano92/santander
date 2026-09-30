@@ -4,6 +4,7 @@ Rutas CSIP custom1 — módulo aparte, mismo FastAPI.
 Webhooks (placa → nosotros), públicos salvo CSIP_WEBHOOK_TOKEN:
   POST /api/csip/notify/p1
   POST /api/csip/notify/p2
+  POST /api/csip/notify/push   (alias exterior → p1 local)
   POST /api/csip/notify/p3   (N canales: p1…pN)
   POST /api/csip/notify      (body.button_id / canal)
 
@@ -16,6 +17,7 @@ Proxy hacia la(s) placa(s) (panel JWT):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -139,10 +141,10 @@ def _client_host(request: Request) -> str:
 
 def _remap_notify_canal(request: Request, plate_button: str) -> tuple[str, Optional[str]]:
     """
-    Cada Panphone añade /p1|/p2 según su botón LOCAL.
-    Remapea por IP origen a canal lógico zaguán:
-      .80 (placa p1): local p1→p1, local p2→p3
-      .70 (placa p2): local p1→p2, local p2→p4
+    Cada Panphone añade /p1|/p2 según su botón LOCAL (no existen p3/p4 en placa).
+    Remapea por IP a canal lógico (LED); la puerta la decide el orquestador:
+      .80 = puerta P1: local p1→p1 (ext), local p2→p3 (int)  → ambos abren P1
+      .70 = puerta P2: local p1→p2 (ext), local p2→p4 (int)  → ambos abren P2
     """
     plate_btn = _parse_canal_or_400(plate_button)
     host = _client_host(request)
@@ -168,7 +170,16 @@ def _remap_notify_canal(request: Request, plate_button: str) -> tuple[str, Optio
     return logical, plate_id
 
 
+def _pulsacion_ts(body: dict[str, Any]) -> int:
+    ts_raw = body.get("ts") or body.get("timestamp") or int(time.time() * 1000)
+    try:
+        return int(ts_raw)
+    except (TypeError, ValueError):
+        return int(time.time() * 1000)
+
+
 async def _forward_zaguan(canal: str, body: dict[str, Any]) -> bool:
+    """Ejecuta la pulsación (bloqueante: incluye pulso Modbus ~2s)."""
     if not settings.csip_forward_pulsacion_to_zaguan:
         return False
     if canal not in _ZAGUAN_PULSADORES:
@@ -177,11 +188,7 @@ async def _forward_zaguan(canal: str, body: dict[str, Any]) -> bool:
             canal,
         )
         return False
-    ts_raw = body.get("ts") or body.get("timestamp") or int(time.time() * 1000)
-    try:
-        ts = int(ts_raw)
-    except (TypeError, ValueError):
-        ts = int(time.time() * 1000)
+    ts = _pulsacion_ts(body)
     try:
         from app.services import zaguan_orchestrator
 
@@ -190,6 +197,38 @@ async def _forward_zaguan(canal: str, body: dict[str, Any]) -> bool:
     except Exception as e:  # noqa: BLE001
         log.warning("CSIP notify: fallo al reenviar a zaguán (%s): %s", canal, e)
         return False
+
+
+def _queue_forward_zaguan(canal: str, body: dict[str, Any]) -> bool:
+    """
+    ACK rápido a la placa: la apertura Modbus no debe bloquear notification_url.
+
+    Si el webhook espera el pulso (~2s), el Panphone marca http_error/http_code=0
+    y el botón exterior (videoportero + SIP) parece no hacer nada.
+    """
+    if not settings.csip_forward_pulsacion_to_zaguan:
+        return False
+    if canal not in _ZAGUAN_PULSADORES:
+        log.info(
+            "CSIP notify %s: sin mapeo zaguán (solo p1–p4 se reenvían); se registra igual",
+            canal,
+        )
+        return False
+
+    async def _run() -> None:
+        ok = await _forward_zaguan(canal, body)
+        if not ok:
+            log.warning("CSIP notify background: pulsación %s no reenviada", canal)
+
+    try:
+        asyncio.get_running_loop().create_task(
+            _run(),
+            name=f"csip-forward-{canal}",
+        )
+    except TypeError:
+        # Python <3.11: create_task sin name=
+        asyncio.get_running_loop().create_task(_run())
+    return True
 
 
 @router.get("/health", summary="Salud del módulo CSIP")
@@ -227,11 +266,15 @@ def csip_status() -> CsipStatusResponse:
 @router.post(
     "/notify/{canal}",
     response_model=CsipNotifyAck,
-    summary="Webhook placa → app (notification_url/p1|p2|p3…)",
+    summary="Webhook placa → app (notification_url/p1|p2|push…)",
 )
 async def csip_notify_canal(
     request: Request,
-    canal: str = Path(..., description="Botón local placa p1|p2 (se remapea por IP)", pattern=r"^p\d+$"),
+    canal: str = Path(
+        ...,
+        description="Botón local placa p1|p2|push|5 (se remapea por IP)",
+        pattern=r"^(?:p\d+|push|5)$",
+    ),
 ) -> CsipNotifyAck:
     _require_webhook_auth(request)
     plate_button = _parse_canal_or_400(canal)
@@ -248,7 +291,8 @@ async def csip_notify_canal(
         plate_id or "?",
         body,
     )
-    forwarded = await _forward_zaguan(canal_n, body)
+    # Responder ya: el pulso Modbus no debe retrasar el ACK a la placa.
+    forwarded = _queue_forward_zaguan(canal_n, body)
     entry = csip_state.record_notification(canal_n, body, forwarded=forwarded)
     return CsipNotifyAck(
         ok=True,
@@ -275,7 +319,7 @@ async def csip_notify(request: Request) -> CsipNotifyAck:
     if not plate_button:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Indica button_id o canal: p1|p2 (o 1|2). "
+            detail="Indica button_id o canal: p1|p2 (o 1/2, push, 5). "
             "Mejor: notification_url sin sufijo y deja que la placa añada /p1|/p2.",
         )
     canal, plate_id = _remap_notify_canal(request, plate_button)
@@ -290,7 +334,7 @@ async def csip_notify(request: Request) -> CsipNotifyAck:
         plate_id or "?",
         body,
     )
-    forwarded = await _forward_zaguan(canal, body)
+    forwarded = _queue_forward_zaguan(canal, body)
     entry = csip_state.record_notification(canal, body, forwarded=forwarded)
     return CsipNotifyAck(
         ok=True,
