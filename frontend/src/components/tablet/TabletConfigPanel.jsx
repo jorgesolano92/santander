@@ -11,7 +11,7 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
     {
       enabled: true,
       name: "Calle (P1)",
-      ipExterior: "192.168.1.200",
+      ipExterior: "192.168.1.70",
       ipInterior: "",
       intercom: {
         name: "Intercomunicador Calle (P1)",
@@ -46,8 +46,8 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         csipButtonId: "p1",
         videoProfile: "MainStream",
         snapshotPath: "ISAPI/Streaming/channels/101/picture",
-        doorControlUsername: "Scati2023",
-        doorControlPassword: "Scati2023",
+        doorControlUsername: "ceroideas",
+        doorControlPassword: "12345678",
         doorControlPCB: 2,
         doorControlSwitch: 7,
         doorControlAction: "door_endpoint",
@@ -97,8 +97,8 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         csipButtonId: "p2",
         videoProfile: "MainStream",
         snapshotPath: "ISAPI/Streaming/channels/101/picture",
-        doorControlUsername: "Scati2023",
-        doorControlPassword: "Scati2023",
+        doorControlUsername: "ceroideas",
+        doorControlPassword: "12345678",
         doorControlPCB: 3,
         doorControlSwitch: 7,
         doorControlAction: "set_output",
@@ -197,7 +197,9 @@ function mergeIntercom(defIc, savedIc) {
   for (const [k, v] of Object.entries(savedIc)) {
     if (v == null) continue;
     if (typeof v === "string" && !v.trim() && String(out[k] || "").trim()) continue;
-    out[k] = v;
+    let next = v;
+    if (typeof next === "string" && next.trim() === "inviasistemas") next = "ceroideas";
+    out[k] = next;
   }
   return out;
 }
@@ -511,6 +513,18 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                   onChange={(e) => patchDoorIntercom(doorIndex, "rtspPath", e.target.value)}
                   placeholder="video1"
                 />
+              </Field>
+              <Field label="Codec vídeo RTSP (concurrencia)">
+                <select
+                  style={inputStyle()}
+                  value={intercom.rtspVideoCodec || "auto"}
+                  onChange={(e) => patchDoorIntercom(doorIndex, "rtspVideoCodec", e.target.value)}
+                >
+                  <option value="auto">Auto (Panphone→MPEG-4, TVT→H.264)</option>
+                  <option value="h264">H.264</option>
+                  <option value="mpeg4">MPEG-4</option>
+                  <option value="hevc">H.265 / HEVC</option>
+                </select>
               </Field>
               <Field label="Puerto RTSP">
                 <input

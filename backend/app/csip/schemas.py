@@ -1,4 +1,4 @@
-"""Esquemas alineados con CSIP custom1 OpenAPI v1.1.0."""
+"""Esquemas alineados con CSIP custom1 OpenAPI v1.1.0 (+ multi-dispositivo)."""
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
@@ -20,7 +20,8 @@ LedEstado = Literal[
     "rainbow",
 ]
 CallTargetType = Literal["number", "ip", "default"]
-NotifyCanal = Literal["p1", "p2"]
+# Canales lógicos; validación abierta en rutas (p1…pN).
+NotifyCanal = str
 
 
 class ButtonEventRequest(BaseModel):
@@ -35,6 +36,9 @@ class CallStartRequest(BaseModel):
     user: Optional[str] = None
     recording: Optional[bool] = None
     rec: Optional[bool] = None
+    device_id: Optional[str] = Field(
+        default=None, description="Id lógico Panphone (p1, p2, …) si hay varios"
+    )
 
 
 class LedControlRequest(BaseModel):
@@ -42,6 +46,9 @@ class LedControlRequest(BaseModel):
     led: Optional[LedId] = None
     estado: Optional[LedEstado] = None
     brightness: Optional[int] = Field(default=None, ge=1, le=9)
+    device_id: Optional[str] = Field(
+        default=None, description="Id lógico Panphone destino (clave en CSIP_DEVICES)"
+    )
 
 
 class CsipNotifyAck(BaseModel):
@@ -52,6 +59,13 @@ class CsipNotifyAck(BaseModel):
     body: dict[str, Any] = Field(default_factory=dict)
 
 
+class CsipDeviceStatus(BaseModel):
+    id: str
+    base_url: str
+    led: str
+    token_configured: bool
+
+
 class CsipStatusResponse(BaseModel):
     enabled: bool
     base_url_configured: bool
@@ -60,4 +74,5 @@ class CsipStatusResponse(BaseModel):
     webhook_token_required: bool
     forward_pulsacion_to_zaguan: bool
     timeout_s: float
+    devices: list[CsipDeviceStatus] = Field(default_factory=list)
     recent_notifications: list[dict[str, Any]] = Field(default_factory=list)

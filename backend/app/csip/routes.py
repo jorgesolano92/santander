@@ -4,9 +4,10 @@ Rutas CSIP custom1 — módulo aparte, mismo FastAPI.
 Webhooks (placa → nosotros), públicos salvo CSIP_WEBHOOK_TOKEN:
   POST /api/csip/notify/p1
   POST /api/csip/notify/p2
-  POST /api/csip/notify   (body.button_id / canal)
+  POST /api/csip/notify/p3   (N canales: p1…pN)
+  POST /api/csip/notify      (body.button_id / canal)
 
-Proxy hacia la placa (panel JWT):
+Proxy hacia la(s) placa(s) (panel JWT):
   POST /api/csip/device/call_start
   POST /api/csip/device/led_control
   POST /api/csip/device/button_event
@@ -16,6 +17,7 @@ Proxy hacia la placa (panel JWT):
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Optional
 
@@ -24,23 +26,41 @@ from fastapi import APIRouter, HTTPException, Path, Request, status
 from app.core.config import settings
 from app.csip import client as csip_client
 from app.csip import state as csip_state
+from app.csip.devices import default_device, devices_public_status, get_device, list_device_ids
 from app.csip.schemas import (
     ButtonEventRequest,
     CallStartRequest,
+    CsipDeviceStatus,
     CsipNotifyAck,
     CsipStatusResponse,
     LedControlRequest,
-    NotifyCanal,
 )
 
 log = logging.getLogger("csip.routes")
 
 router = APIRouter(prefix="/csip", tags=["CSIP Panphone"])
 
+_CANAL_RE = re.compile(r"^p\d+$", re.IGNORECASE)
+_ZAGUAN_PULSADORES = frozenset({"p1", "p2", "p3", "p4"})
+
 
 def _mask_url(url: str) -> Optional[str]:
     u = (url or "").strip()
     return u or None
+
+
+def _normalize_canal(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def _parse_canal_or_400(raw: str) -> str:
+    canal = _normalize_canal(raw)
+    if not _CANAL_RE.match(canal):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Indica button_id o canal: p1, p2, p3…",
+        )
+    return canal
 
 
 def _extract_webhook_token(request: Request) -> Optional[str]:
@@ -87,8 +107,14 @@ async def _read_body_dict(request: Request) -> dict[str, Any]:
         return {"raw": raw}
 
 
-async def _forward_zaguan(canal: NotifyCanal, body: dict[str, Any]) -> bool:
+async def _forward_zaguan(canal: str, body: dict[str, Any]) -> bool:
     if not settings.csip_forward_pulsacion_to_zaguan:
+        return False
+    if canal not in _ZAGUAN_PULSADORES:
+        log.info(
+            "CSIP notify %s: sin mapeo zaguán (solo p1–p4 se reenvían); se registra igual",
+            canal,
+        )
         return False
     ts_raw = body.get("ts") or body.get("timestamp") or int(time.time() * 1000)
     try:
@@ -98,7 +124,7 @@ async def _forward_zaguan(canal: NotifyCanal, body: dict[str, Any]) -> bool:
     try:
         from app.services import zaguan_orchestrator
 
-        await zaguan_orchestrator.handle_pulsacion(canal, ts)
+        await zaguan_orchestrator.handle_pulsacion(canal, ts)  # type: ignore[arg-type]
         return True
     except Exception as e:  # noqa: BLE001
         log.warning("CSIP notify: fallo al reenviar a zaguán (%s): %s", canal, e)
@@ -107,25 +133,32 @@ async def _forward_zaguan(canal: NotifyCanal, body: dict[str, Any]) -> bool:
 
 @router.get("/health", summary="Salud del módulo CSIP")
 def csip_health() -> dict[str, Any]:
+    ids = list_device_ids()
     return {
         "ok": True,
         "module": "csip",
         "enabled": bool(settings.csip_enabled),
-        "base_url_configured": bool((settings.csip_base_url or "").strip()),
+        "base_url_configured": bool((settings.csip_base_url or "").strip()) or bool(ids),
+        "device_count": len(ids),
+        "device_ids": ids,
     }
 
 
 @router.get("/status", response_model=CsipStatusResponse, summary="Estado integración CSIP")
 def csip_status() -> CsipStatusResponse:
-    base = _mask_url(settings.csip_base_url)
+    devices = [CsipDeviceStatus(**row) for row in devices_public_status()]
+    legacy = _mask_url(settings.csip_base_url)
+    primary = devices[0].base_url if devices else legacy
     return CsipStatusResponse(
         enabled=bool(settings.csip_enabled),
-        base_url_configured=bool(base),
-        base_url=base,
-        api_token_configured=bool((settings.csip_api_token or "").strip()),
+        base_url_configured=bool(primary),
+        base_url=primary,
+        api_token_configured=bool((settings.csip_api_token or "").strip())
+        or any(d.token_configured for d in devices),
         webhook_token_required=bool((settings.csip_webhook_token or "").strip()),
         forward_pulsacion_to_zaguan=bool(settings.csip_forward_pulsacion_to_zaguan),
         timeout_s=float(settings.csip_timeout_s),
+        devices=devices,
         recent_notifications=csip_state.list_recent(20),
     )
 
@@ -133,22 +166,23 @@ def csip_status() -> CsipStatusResponse:
 @router.post(
     "/notify/{canal}",
     response_model=CsipNotifyAck,
-    summary="Webhook placa → app (notification_url/p1|p2)",
+    summary="Webhook placa → app (notification_url/p1|p2|p3…)",
 )
 async def csip_notify_canal(
     request: Request,
-    canal: NotifyCanal = Path(..., description="p1 o p2"),
+    canal: str = Path(..., description="Canal lógico p1, p2, p3…", pattern=r"^p\d+$"),
 ) -> CsipNotifyAck:
     _require_webhook_auth(request)
+    canal_n = _parse_canal_or_400(canal)
     body = await _read_body_dict(request)
-    body.setdefault("button_id", canal)
-    body.setdefault("canal", canal)
-    log.info("CSIP notify %s ← %s", canal, body)
-    forwarded = await _forward_zaguan(canal, body)
-    entry = csip_state.record_notification(canal, body, forwarded=forwarded)
+    body.setdefault("button_id", canal_n)
+    body.setdefault("canal", canal_n)
+    log.info("CSIP notify %s ← %s", canal_n, body)
+    forwarded = await _forward_zaguan(canal_n, body)
+    entry = csip_state.record_notification(canal_n, body, forwarded=forwarded)
     return CsipNotifyAck(
         ok=True,
-        canal=canal,
+        canal=canal_n,
         forwarded_to_zaguan=forwarded,
         received_at=entry["received_at"],
         body=body,
@@ -162,12 +196,7 @@ async def csip_notify(request: Request) -> CsipNotifyAck:
     raw_id = str(body.get("button_id") or body.get("canal") or body.get("led") or "").strip().lower()
     if raw_id in ("push", "5", "1"):
         raw_id = "p1"
-    if raw_id not in ("p1", "p2"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Indica button_id o canal: p1 | p2",
-        )
-    canal: NotifyCanal = raw_id  # type: ignore[assignment]
+    canal = _parse_canal_or_400(raw_id)
     body.setdefault("button_id", canal)
     body.setdefault("canal", canal)
     log.info("CSIP notify %s ← %s", canal, body)
@@ -200,10 +229,24 @@ def _device_error(exc: csip_client.CsipClientError) -> HTTPException:
     )
 
 
+def _resolve_proxy_device_id(explicit: Optional[str]) -> Optional[str]:
+    if explicit:
+        if not get_device(explicit):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"device_id desconocido: {explicit}. Configurados: {list_device_ids()}",
+            )
+        return explicit.strip().lower()
+    d = default_device()
+    return d.id if d else None
+
+
 @router.post("/device/call_start", summary="Proxy → placa call_start.php")
 def device_call_start(body: CallStartRequest) -> dict[str, Any]:
     try:
-        return csip_client.call_start(body)
+        device_id = _resolve_proxy_device_id(body.device_id)
+        payload = body.model_copy(update={"device_id": None})
+        return csip_client.call_start(payload, device_id=device_id)
     except csip_client.CsipClientError as e:
         raise _device_error(e) from e
 
@@ -211,14 +254,16 @@ def device_call_start(body: CallStartRequest) -> dict[str, Any]:
 @router.post("/device/led_control", summary="Proxy → placa led_control.php")
 def device_led_control(body: LedControlRequest) -> dict[str, Any]:
     try:
-        return csip_client.led_control(body)
+        device_id = _resolve_proxy_device_id(body.device_id)
+        return csip_client.led_control(body, device_id=device_id)
     except csip_client.CsipClientError as e:
         raise _device_error(e) from e
 
 
 @router.post("/device/button_event", summary="Proxy → placa button_event.php")
-def device_button_event(body: ButtonEventRequest) -> dict[str, Any]:
+def device_button_event(body: ButtonEventRequest, device_id: Optional[str] = None) -> dict[str, Any]:
     try:
-        return csip_client.button_event(body)
+        resolved = _resolve_proxy_device_id(device_id)
+        return csip_client.button_event(body, device_id=resolved)
     except csip_client.CsipClientError as e:
         raise _device_error(e) from e

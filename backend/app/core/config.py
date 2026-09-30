@@ -130,10 +130,14 @@ class Settings(BaseSettings):
     tablet_call_pulsadores: str = "p1"
 
     # Panphone / CSIP custom1 (placa remota ↔ este FastAPI)
+    # Base URL legacy (1 placa). Preferir CSIP_DEVICES para N placas.
     # Base URL de la placa, p. ej. https://192.168.150.50:8090/api/custom1
     csip_enabled: bool = False
     csip_base_url: str = ""
     csip_api_token: Optional[str] = None
+    # JSON: {"p1":{"base_url":"http://…/api/custom1","token":"…","led":"p1"}, "p2":{…}, …}
+    # Permite N Panphones. Si vacío, se usa CSIP_BASE_URL (p1+p2 en la misma placa).
+    csip_devices: str = ""
     csip_timeout_s: float = 5.0
     # Si se define, los webhooks /api/csip/notify* exigen Bearer o X-API-Key.
     csip_webhook_token: Optional[str] = None

@@ -60,8 +60,8 @@ def _intercom_base(
         "preferredResolution": "1920x1080",
         "preferredFPS": 25,
         "defaultOpenTime": 5,
-        "doorControlUsername": "Scati2023",
-        "doorControlPassword": "Scati2023",
+        "doorControlUsername": "ceroideas",
+        "doorControlPassword": "12345678",
         "doorControlPCB": pcb,
         "doorControlSwitch": switch,
         "rtspPath": rtsp_path,
@@ -95,8 +95,14 @@ def _intercom_p1_panphone() -> dict[str, Any]:
             "sipDomain": "192.168.1.154",
             "sipServer": "192.168.1.154:8088/ws",
             "sipCallDestination": "sip:100@192.168.1.154",
+            "doorControlUsername": "ceroideas",
+            "doorControlPassword": "12345678",
+            "doorControlPCB": 2,
+            "doorControlSwitch": 7,
             "doorControlAction": "door_endpoint",
             "doorControlEndpoint": "api/v1/door/open/p1",
+            "doorControlRuleKey": "",
+            "doorOutputMode": "auto",
         }
     )
     return ic
@@ -118,7 +124,7 @@ def get_builtin_default_tablet_config() -> dict[str, Any]:
             {
                 "enabled": True,
                 "name": "Calle (P1)",
-                "ipExterior": "192.168.1.200",
+                "ipExterior": "192.168.1.70",
                 "ipInterior": "",
                 "intercom": _intercom_p1_panphone(),
             },

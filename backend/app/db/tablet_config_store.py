@@ -37,6 +37,9 @@ def _merge_intercom(base: dict[str, Any], saved: dict[str, Any] | None) -> dict[
         # Cadena vacía no pisa un default ya relleno (migración CSIP/SIP/rtsp).
         if isinstance(v, str) and not v.strip() and str(out.get(k) or "").strip():
             continue
+        # Renombre legacy de usuario de acceso/ONVIF.
+        if isinstance(v, str) and v.strip() == "inviasistemas":
+            v = "ceroideas"
         out[k] = v
     return out
 

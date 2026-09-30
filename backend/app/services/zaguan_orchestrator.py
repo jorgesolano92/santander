@@ -264,9 +264,8 @@ def set_led_state_from_console(canal: str, estado: EstadoLed) -> None:
         _led_states[ch] = estado
         _sync_led_memory()
     _publish_zaguan_led_state()
-    # La placa Panphone no recibe el push ESP32; reenviar p1/p2 por CSIP.
-    if ch in ("p1", "p2"):
-        _schedule_csip_led_push({ch: estado})
+    # La placa Panphone no recibe el push ESP32; reenviar por CSIP si hay mapeo.
+    _schedule_csip_led_push({ch: estado})
 
 
 def get_autoservicio_status() -> dict[str, Any]:
@@ -361,34 +360,37 @@ def _schedule_led_device_push(
     _schedule_coro(_worker())
 
 
+def _csip_led_color_for_estado(est: EstadoLed) -> str:
+    if est == "libre":
+        return "green"
+    if est == "ocupado":
+        return "red"
+    if est == "abriendo":
+        return "orange"
+    if est == "apagado":
+        return "off"
+    return str(est)
+
+
 def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
     """
     Comando compacto CSIP (cmd) color fijo (sin animación, de momento).
     Formato placa/tester: 'LED:COLOR' (ej. p1:green, p1:orange).
+    Nota: con CSIP_DEVICES el push usa led físico del dispositivo; este helper
+    queda para compat / logs.
     """
-    if est == "libre":
-        return f"{ch}:green"
-    if est == "ocupado":
-        return f"{ch}:red"
-    if est == "abriendo":
-        return f"{ch}:orange"
-    if est == "apagado":
-        return f"{ch}:off"
-    return f"{ch}:{est}"
+    return f"{ch}:{_csip_led_color_for_estado(est)}"
 
 
 def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
-    """Empuja p1/p2 a Panphone vía CSIP led_control (cmd + brightness). Best-effort."""
-    csip_states = {ch: est for ch, est in states.items() if ch in ("p1", "p2")}
-    if not csip_states:
-        return
+    """Empuja LEDs a cada Panphone mapeado en CSIP_DEVICES (o legacy BASE_URL)."""
 
     async def _worker() -> None:
         def _run() -> None:
             try:
                 from app.core.config import settings
                 from app.csip import client as csip_client
-                from app.csip.schemas import LedControlRequest
+                from app.csip.devices import get_device
             except Exception as e:  # noqa: BLE001
                 log.debug("CSIP led import: %s", e)
                 return
@@ -397,24 +399,26 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
             brightness = settings.csip_led_brightness
             if brightness is not None:
                 brightness = max(1, min(9, int(brightness)))
-            for ch, est in csip_states.items():
-                cmd = _csip_led_cmd_for_estado(ch, est)
+            for ch, est in states.items():
+                if not get_device(ch):
+                    continue
+                color = _csip_led_color_for_estado(est)
                 try:
-                    # Formato placa / tester CSIP: solo cmd + brightness.
-                    csip_client.led_control(
-                        LedControlRequest(cmd=cmd, brightness=brightness)
+                    csip_client.led_control_for_logical_channel(
+                        ch, color=color, brightness=brightness
                     )
                     log.info(
-                        "CSIP led_control cmd=%s brightness=%s (estado lógico %s) OK",
-                        cmd,
+                        "CSIP led_control canal=%s color=%s brightness=%s (estado %s) OK",
+                        ch,
+                        color,
                         brightness,
                         est,
                     )
                 except Exception as e:  # noqa: BLE001
-                    # Panphone a veces responde "could not persist" aunque el LED cambie.
                     log.warning(
-                        "CSIP led_control cmd=%s brightness=%s (estado lógico %s): %s",
-                        cmd,
+                        "CSIP led_control canal=%s color=%s brightness=%s (estado %s): %s",
+                        ch,
+                        color,
                         brightness,
                         est,
                         e,
