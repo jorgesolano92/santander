@@ -5,18 +5,21 @@ Configuración preferida (JSON en env ``CSIP_DEVICES``)::
     {
       "p1": {
         "base_url": "http://192.168.1.80:8090/api/custom1",
-        "token": "api-key-placa-1",
+        "token": "api-key-placa-calle",
         "led": "p1"
       },
       "p2": {
         "base_url": "http://192.168.1.70:8090/api/custom1",
-        "token": "api-key-placa-2",
+        "token": "api-key-placa-oficina",
         "led": "p1"
       }
     }
 
-- La clave (``p1``, ``p2``, ``p3``…) es el canal lógico (notify + orquestador).
-- ``led`` es el id LED en esa placa física (suele ser ``p1`` si solo tiene un botón).
+- ``p1`` = Panphone Calle (.80); ``p2`` = Panphone Oficina (.70).
+- Cada placa tiene 2 botones locales (p1/p2). El backend remapea por IP:
+  - Calle ``.80`` botón local p1→lógico **p1** (ext), p2→lógico **p3** (int)
+  - Oficina ``.70`` botón local p1→lógico **p2** (ext), p2→lógico **p4** (int)
+- Si no defines ``p3``/``p4``, se sintetizan como alias LED ``p2`` en la misma placa.
 - ``token`` opcional; si falta, se usa ``CSIP_API_TOKEN``.
 
 Compatibilidad: si ``CSIP_DEVICES`` está vacío y hay ``CSIP_BASE_URL``, se sintetiza
@@ -29,6 +32,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from app.core.config import settings
 
@@ -54,6 +58,19 @@ _cached_map: dict[str, CsipDevice] = {}
 
 def _normalize_base_url(url: str) -> str:
     return (url or "").strip().rstrip("/")
+
+
+def _host_from_base_url(base_url: str) -> str:
+    raw = _normalize_base_url(base_url)
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    try:
+        host = (urlparse(raw).hostname or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        host = ""
+    return host
 
 
 def _parse_devices_json(raw: str) -> dict[str, CsipDevice]:
@@ -94,6 +111,31 @@ def _parse_devices_json(raw: str) -> dict[str, CsipDevice]:
             log.warning("CSIP_DEVICES[%s]: sin base_url", did)
             continue
         out[did] = CsipDevice(id=did, base_url=base, token=token, led=led)
+    return _ensure_interior_aliases(out)
+
+
+def _ensure_interior_aliases(devices: dict[str, CsipDevice]) -> dict[str, CsipDevice]:
+    """
+    Con 2 Panphones (p1 calle + p2 oficina), sintetiza p3/p4 como LED local p2
+    en la misma placa (botón/LED interior).
+    """
+    out = dict(devices)
+    calle = out.get("p1")
+    oficina = out.get("p2")
+    if calle and "p3" not in out:
+        out["p3"] = CsipDevice(
+            id="p3",
+            base_url=calle.base_url,
+            token=calle.token,
+            led="p2",
+        )
+    if oficina and "p4" not in out:
+        out["p4"] = CsipDevice(
+            id="p4",
+            base_url=oficina.base_url,
+            token=oficina.token,
+            led="p2",
+        )
     return out
 
 
@@ -151,6 +193,52 @@ def default_device() -> Optional[CsipDevice]:
     if "p1" in devices:
         return devices["p1"]
     return devices[list_device_ids()[0]]
+
+
+def find_plate_device_id_by_host(client_host: str) -> Optional[str]:
+    """
+    Resuelve la placa física (p1 calle / p2 oficina) por IP origen del webhook.
+    Ignora alias p3/p4 (misma IP que p1/p2).
+    """
+    host = (client_host or "").strip().lower()
+    if not host:
+        return None
+    if host.startswith("::ffff:"):
+        host = host[7:]
+    for did in ("p1", "p2"):
+        d = get_device(did)
+        if not d:
+            continue
+        if _host_from_base_url(d.base_url) == host:
+            return did
+    for did, d in get_csip_devices().items():
+        if did in ("p3", "p4"):
+            continue
+        if _host_from_base_url(d.base_url) == host:
+            return did
+    return None
+
+
+def map_plate_button_to_logical(
+    *,
+    plate_device_id: Optional[str],
+    plate_button: str,
+) -> str:
+    """
+    Botón local de la placa → canal lógico zaguán.
+
+    - Placa calle (p1 / .80): local p1→p1, local p2→p3
+    - Placa oficina (p2 / .70): local p1→p2, local p2→p4
+    """
+    button = (plate_button or "").strip().lower()
+    if button.isdigit():
+        button = f"p{int(button)}"
+    plate = (plate_device_id or "").strip().lower()
+    if plate == "p1":
+        return "p1" if button in ("p1", "1") else "p3"
+    if plate == "p2":
+        return "p2" if button in ("p1", "1") else "p4"
+    return button if button.startswith("p") else f"p{button}"
 
 
 def devices_public_status() -> list[dict[str, Any]]:

@@ -1,23 +1,11 @@
 {
-  "host": "192.168.1.60",
+  "host": "",
   "port": 80,
-  "timeout_s": 2.0,
+  "timeout_s": 0.5,
   "channels": {
-    "p1": {
-      "host": "192.168.1.60",
-      "port": null
-    },
-    "p2": {
-      "host": "192.168.1.62",
-      "port": null
-    },
-    "p3": {
-      "host": "192.168.1.61",
-      "port": null
-    },
-    "p4": {
-      "host": "192.168.1.63",
-      "port": null
-    }
+    "p1": { "host": "", "port": null },
+    "p2": { "host": "", "port": null },
+    "p3": { "host": "", "port": null },
+    "p4": { "host": "", "port": null }
   }
 }

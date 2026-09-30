@@ -89,7 +89,16 @@ def _uses_per_channel_ips(storage: dict[str, Any]) -> bool:
     )
 
 
+def _esp_targets_configured(storage: dict[str, Any]) -> bool:
+    """False si no hay host global ni IPs por canal (modo solo Panphone/CSIP)."""
+    if str(storage.get("host") or "").strip():
+        return True
+    return _uses_per_channel_ips(storage)
+
+
 def _channel_is_enabled(ch: str, storage: dict[str, Any]) -> bool:
+    if not _esp_targets_configured(storage):
+        return False
     if not _uses_per_channel_ips(storage):
         return True
     override = (storage.get("channels") or {}).get(ch) or {}
@@ -140,10 +149,11 @@ def _channels_grouped_by_host(storage: dict[str, Any] | None = None) -> dict[tup
 def _enrich_target_response(storage: dict[str, Any]) -> dict[str, Any]:
     channels_out: dict[str, Any] = {}
     per_channel = _uses_per_channel_ips(storage)
+    esp_on = _esp_targets_configured(storage)
     for ch in CHANNEL_IDS:
         override = (storage.get("channels") or {}).get(ch) or {}
         host_override = str(override.get("host") or "").strip()
-        if per_channel and not host_override:
+        if not esp_on or (per_channel and not host_override):
             channels_out[ch] = {
                 "host": "",
                 "port": override.get("port"),
@@ -173,6 +183,7 @@ def _enrich_target_response(storage: dict[str, Any]) -> dict[str, Any]:
         "port": storage["port"],
         "timeout_s": storage["timeout_s"],
         "channels": channels_out,
+        "esp_enabled": esp_on,
     }
 
 
@@ -397,21 +408,17 @@ def config_get(canal: str | None = None) -> dict[str, Any]:
 
 def set_estado_canal(canal: str, estado_value: str) -> dict[str, Any]:
     ch = _normalize_channel_key(canal)
+    storage = _runtime_target or _load_storage()
+    if not _channel_is_enabled(ch, storage):
+        return {"ok": True, "skipped": True, "disabled": True, "canal": ch, "estado": estado_value}
     return _request_json("POST", f"/api/{ch}/estado", {"estado": estado_value}, canal=ch)
-
-
-def config_red(payload: dict[str, Any], canal: str | None = None) -> dict[str, Any]:
-    ch = _normalize_channel_key(canal) if canal else _canal_from_payload(payload)
-    return _request_json("POST", "/api/config/red", payload, canal=ch)
-
-
-def config_canal(payload: dict[str, Any], canal: str | None = None) -> dict[str, Any]:
-    ch = _normalize_channel_key(canal) if canal else _canal_from_payload(payload)
-    return _request_json("POST", "/api/config/canal", payload, canal=ch)
 
 
 def config_estado(payload: dict[str, Any], canal: str | None = None) -> dict[str, Any]:
     ch = _normalize_channel_key(canal) if canal else _canal_from_payload(payload)
+    storage = _runtime_target or _load_storage()
+    if ch and not _channel_is_enabled(ch, storage):
+        return {"ok": True, "skipped": True, "disabled": True, "canal": ch}
     return _request_json("POST", "/api/config/estado", payload, canal=ch)
 
 

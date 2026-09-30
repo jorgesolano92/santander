@@ -26,7 +26,14 @@ from fastapi import APIRouter, HTTPException, Path, Request, status
 from app.core.config import settings
 from app.csip import client as csip_client
 from app.csip import state as csip_state
-from app.csip.devices import default_device, devices_public_status, get_device, list_device_ids
+from app.csip.devices import (
+    default_device,
+    devices_public_status,
+    find_plate_device_id_by_host,
+    get_device,
+    list_device_ids,
+    map_plate_button_to_logical,
+)
 from app.csip.schemas import (
     ButtonEventRequest,
     CallStartRequest,
@@ -124,6 +131,43 @@ async def _read_body_dict(request: Request) -> dict[str, Any]:
         return {"raw": raw}
 
 
+def _client_host(request: Request) -> str:
+    if request.client and request.client.host:
+        return str(request.client.host).strip()
+    return ""
+
+
+def _remap_notify_canal(request: Request, plate_button: str) -> tuple[str, Optional[str]]:
+    """
+    Cada Panphone añade /p1|/p2 según su botón LOCAL.
+    Remapea por IP origen a canal lógico zaguán:
+      .80 (placa p1): local p1→p1, local p2→p3
+      .70 (placa p2): local p1→p2, local p2→p4
+    """
+    plate_btn = _parse_canal_or_400(plate_button)
+    host = _client_host(request)
+    plate_id = find_plate_device_id_by_host(host)
+    logical = map_plate_button_to_logical(
+        plate_device_id=plate_id,
+        plate_button=plate_btn,
+    )
+    if plate_id and logical != plate_btn:
+        log.info(
+            "CSIP notify remap %s → %s (placa=%s host=%s)",
+            plate_btn,
+            logical,
+            plate_id,
+            host or "?",
+        )
+    elif not plate_id:
+        log.warning(
+            "CSIP notify sin placa por IP (%s); uso botón local %s sin remap",
+            host or "?",
+            plate_btn,
+        )
+    return logical, plate_id
+
+
 async def _forward_zaguan(canal: str, body: dict[str, Any]) -> bool:
     if not settings.csip_forward_pulsacion_to_zaguan:
         return False
@@ -187,15 +231,23 @@ def csip_status() -> CsipStatusResponse:
 )
 async def csip_notify_canal(
     request: Request,
-    canal: str = Path(..., description="Canal lógico p1, p2, p3…", pattern=r"^p\d+$"),
+    canal: str = Path(..., description="Botón local placa p1|p2 (se remapea por IP)", pattern=r"^p\d+$"),
 ) -> CsipNotifyAck:
     _require_webhook_auth(request)
-    canal_n = _parse_canal_or_400(canal)
+    plate_button = _parse_canal_or_400(canal)
     body = await _read_body_dict(request)
-    # El path manda: no dejar que body.canal numérico confunda logs/estado.
+    canal_n, plate_id = _remap_notify_canal(request, plate_button)
+    body["plate_button"] = plate_button
+    body["plate_device_id"] = plate_id
     body["button_id"] = canal_n
     body["canal"] = canal_n
-    log.info("CSIP notify %s ← %s", canal_n, body)
+    log.info(
+        "CSIP notify %s ← host=%s plate=%s body=%s",
+        canal_n,
+        _client_host(request) or "?",
+        plate_id or "?",
+        body,
+    )
     forwarded = await _forward_zaguan(canal_n, body)
     entry = csip_state.record_notification(canal_n, body, forwarded=forwarded)
     return CsipNotifyAck(
@@ -217,18 +269,27 @@ async def csip_notify(request: Request) -> CsipNotifyAck:
     """
     _require_webhook_auth(request)
     body = await _read_body_dict(request)
-    canal = _normalize_canal_id(
+    plate_button = _normalize_canal_id(
         body.get("button_id") or body.get("canal") or body.get("led")
     )
-    if not canal:
+    if not plate_button:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Indica button_id o canal: p1|p2 (o 1|2). "
             "Mejor: notification_url sin sufijo y deja que la placa añada /p1|/p2.",
         )
+    canal, plate_id = _remap_notify_canal(request, plate_button)
+    body["plate_button"] = plate_button
+    body["plate_device_id"] = plate_id
     body["button_id"] = canal
     body["canal"] = canal
-    log.info("CSIP notify %s ← %s", canal, body)
+    log.info(
+        "CSIP notify %s ← host=%s plate=%s body=%s",
+        canal,
+        _client_host(request) or "?",
+        plate_id or "?",
+        body,
+    )
     forwarded = await _forward_zaguan(canal, body)
     entry = csip_state.record_notification(canal, body, forwarded=forwarded)
     return CsipNotifyAck(
