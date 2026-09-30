@@ -161,21 +161,17 @@ def led_control_for_logical_channel(
     brightness: Optional[int] = None,
 ) -> dict[str, Any]:
     """
-    Empuja un color LED sólido al Panphone de ``channel``.
+    Empuja LED al Panphone de ``channel``.
 
-    Importante: las placas tienen segmentos p1 y p2. Si solo se actualiza
-    ``p1``, ``p2`` puede quedar en ocupado/animación (rojo dando vueltas).
-    Por eso se fuerza ``ALL:<color>`` salvo que ``led`` en CSIP_DEVICES sea
-    explícitamente ``p1``/``p2``/``A``/``B`` (modo dual en una sola placa).
+    Prefiere ``led`` + ``estado`` (mapeo firmware):
+      green→libre, orange→abriendo, red→ocupado, off→apagado.
+    Así abriendo llega como estado abriendo (naranja/cometa), no como rojo.
     """
     device = get_device(channel)
     if not device:
         raise CsipClientError(f"Sin dispositivo CSIP para canal {channel}")
     configured = (device.led or "ALL").strip().lower()
-    # En multi-placa (1 botón por equipo) conviene ALL para limpiar ambos segmentos.
     if configured in ("p1", "p2", "a", "b"):
-        # Aun así, si hay 2 dispositivos distintos, cada uno suele necesitar ALL.
-        # Solo respetamos led parcial cuando es la misma base_url compartida (legacy).
         from app.csip.devices import get_csip_devices
 
         siblings = [
@@ -184,7 +180,33 @@ def led_control_for_logical_channel(
         led_id = configured if len(siblings) > 1 else "ALL"
     else:
         led_id = "ALL"
-    # Color/estado: el firmware aplica la animación (respiración/cometa/parpadeo).
-    cmd = f"{led_id}:{color}"
-    body = LedControlRequest(cmd=cmd, brightness=brightness)
+
+    color_l = (color or "").strip().lower()
+    # Si viene "efectovuelta:orange" (legacy), quedarnos con el color.
+    if ":" in color_l:
+        color_l = color_l.split(":")[-1]
+
+    estado_by_color = {
+        "green": "libre",
+        "orange": "abriendo",
+        "red": "ocupado",
+        "off": "apagado",
+        "libre": "libre",
+        "abriendo": "abriendo",
+        "ocupado": "ocupado",
+        "apagado": "apagado",
+    }
+    estado = estado_by_color.get(color_l)
+    if estado:
+        # Enviar estado lógico (la placa aplica color+animación).
+        body = LedControlRequest(led=led_id if led_id != "ALL" else "ALL", estado=estado, brightness=brightness)  # type: ignore[arg-type]
+    else:
+        body = LedControlRequest(cmd=f"{led_id}:{color_l}", brightness=brightness)
+    log.info(
+        "CSIP LED logical channel=%s device=%s led=%s estado/cmd=%s",
+        channel,
+        device.id,
+        led_id,
+        estado or color_l,
+    )
     return led_control(body, device_id=device.id)

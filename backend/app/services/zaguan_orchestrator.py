@@ -2186,8 +2186,17 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             _start_extendido_p2_call()
         if force_carga_tablet_call:
             _start_carga_p1_call(pulsador)
-        # Llamada en curso: LED ocupado en ESP32 + Panphone (p1/p2).
-        _apply_led_channels(DOOR_TO_LED_CHANNELS[door], "ocupado")
+        # Llamada en curso: puerta activa → abriendo (naranja/cometa);
+        # opuesta → ocupado (rojo/parpadeo). Antes se mandaba ocupado a la activa (rojo mal).
+        _apply_led_map(
+            {
+                DOOR_TO_LED_CHANNELS[door][0]: "abriendo",
+                DOOR_TO_LED_CHANNELS[door][1]: "abriendo",
+                DOOR_TO_LED_CHANNELS[OPPOSITE_DOOR[door]][0]: "ocupado",
+                DOOR_TO_LED_CHANNELS[OPPOSITE_DOOR[door]][1]: "ocupado",
+            },
+            priority_door=door,
+        )
         _record(
             "zaguan_tablet_call",
             f"Llamada tablet {pulsador} → {door}",
@@ -2224,7 +2233,15 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             pulsador=pulsador,
             mode=panel_mode or _current_mode or "",
         )
-        _apply_led_channels(DOOR_TO_LED_CHANNELS[door], "ocupado")
+        _apply_led_map(
+            {
+                DOOR_TO_LED_CHANNELS[door][0]: "abriendo",
+                DOOR_TO_LED_CHANNELS[door][1]: "abriendo",
+                DOOR_TO_LED_CHANNELS[OPPOSITE_DOOR[door]][0]: "ocupado",
+                DOOR_TO_LED_CHANNELS[OPPOSITE_DOOR[door]][1]: "ocupado",
+            },
+            priority_door=door,
+        )
         _record(
             "zaguan_tablet_call",
             f"Llamada tablet {pulsador} → {door}",
