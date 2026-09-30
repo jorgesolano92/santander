@@ -383,11 +383,13 @@ def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
 
 
 def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
-    """Empuja LEDs a cada Panphone mapeado en CSIP_DEVICES (o legacy BASE_URL)."""
+    """Empuja LEDs a cada Panphone mapeado (en paralelo; timeout corto por placa)."""
 
     async def _worker() -> None:
         def _run() -> None:
             try:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
                 from app.core.config import settings
                 from app.csip import client as csip_client
                 from app.csip.devices import get_device
@@ -399,30 +401,42 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
             brightness = settings.csip_led_brightness
             if brightness is not None:
                 brightness = max(1, min(9, int(brightness)))
+
+            jobs: list[tuple[str, EstadoLed, str]] = []
             for ch, est in states.items():
                 if not get_device(ch):
                     continue
-                color = _csip_led_color_for_estado(est)
+                jobs.append((ch, est, _csip_led_color_for_estado(est)))
+            if not jobs:
+                return
+
+            def _one(ch: str, est: EstadoLed, color: str) -> tuple[str, str, Optional[str]]:
                 try:
                     csip_client.led_control_for_logical_channel(
                         ch, color=color, brightness=brightness
                     )
-                    log.info(
-                        "CSIP led_control canal=%s color=%s brightness=%s (estado %s) OK",
-                        ch,
-                        color,
-                        brightness,
-                        est,
-                    )
+                    return ch, color, None
                 except Exception as e:  # noqa: BLE001
-                    log.warning(
-                        "CSIP led_control canal=%s color=%s brightness=%s (estado %s): %s",
-                        ch,
-                        color,
-                        brightness,
-                        est,
-                        e,
-                    )
+                    return ch, color, str(e)
+
+            # Paralelo: si .80 cuelga, .70 no espera 20s.
+            with ThreadPoolExecutor(max_workers=min(4, len(jobs))) as pool:
+                futs = [pool.submit(_one, ch, est, color) for ch, est, color in jobs]
+                for fut in as_completed(futs):
+                    ch, color, err = fut.result()
+                    if err:
+                        log.warning(
+                            "CSIP led_control canal=%s color=%s (estado falló): %s",
+                            ch,
+                            color,
+                            err,
+                        )
+                    else:
+                        log.info(
+                            "CSIP led_control canal=%s color=%s OK",
+                            ch,
+                            color,
+                        )
 
         await asyncio.to_thread(_run)
 

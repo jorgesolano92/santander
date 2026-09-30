@@ -54,6 +54,7 @@ def _post(
     *,
     device_id: Optional[str] = None,
     device: Optional[CsipDevice] = None,
+    timeout_s: Optional[float] = None,
 ) -> dict[str, Any]:
     if not settings.csip_enabled:
         raise CsipClientError("CSIP desactivado (CSIP_ENABLED=false)")
@@ -61,7 +62,10 @@ def _post(
     url = f"{target.base_url}/{path.lstrip('/')}"
     data = json.dumps(payload or {}).encode("utf-8")
     req = request.Request(url, data=data, headers=_headers(target), method="POST")
-    timeout = max(0.5, float(settings.csip_timeout_s))
+    if timeout_s is None:
+        timeout = max(0.5, float(settings.csip_timeout_s))
+    else:
+        timeout = max(0.5, float(timeout_s))
     try:
         with request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
@@ -82,6 +86,14 @@ def _post(
         raise CsipClientError(
             f"CSIP no alcanzable ({url}, device={target.id}): {e.reason}"
         ) from e
+    except Exception as e:  # noqa: BLE001
+        # socket.timeout en Windows a veces no es TimeoutError.
+        name = type(e).__name__.lower()
+        if "timeout" in name or "timed out" in str(e).lower():
+            raise CsipClientError(
+                f"CSIP timeout ({url}, device={target.id}, {timeout}s)"
+            ) from e
+        raise
 
     if not raw.strip():
         return {"status": "ok", "http_code": status, "device_id": target.id}
@@ -112,6 +124,7 @@ def led_control(
     body: LedControlRequest,
     *,
     device_id: Optional[str] = None,
+    timeout_s: Optional[float] = None,
 ) -> dict[str, Any]:
     payload = body.model_dump(exclude_none=True)
     # device_id en el body no se envía a la placa
@@ -120,7 +133,15 @@ def led_control(
     if not payload.get("cmd") and not (payload.get("led") and payload.get("estado")) and payload.get("brightness") is None:
         raise CsipClientError("LedControl requiere cmd, led+estado o brightness")
     log.info("CSIP led_control device=%s → %s", target_id or "(default)", payload)
-    return _post("led_control.php", payload, device_id=target_id)
+    led_timeout = timeout_s
+    if led_timeout is None:
+        led_timeout = float(getattr(settings, "csip_led_timeout_s", None) or settings.csip_timeout_s)
+    return _post(
+        "led_control.php",
+        payload,
+        device_id=target_id,
+        timeout_s=led_timeout,
+    )
 
 
 def button_event(
@@ -140,13 +161,30 @@ def led_control_for_logical_channel(
     brightness: Optional[int] = None,
 ) -> dict[str, Any]:
     """
-    Empuja un color LED al Panphone mapeado para ``channel`` (p1, p2, …).
-    Usa el ``led`` físico configurado en CSIP_DEVICES (p. ej. siempre p1 en placas de un botón).
+    Empuja un color LED sólido al Panphone de ``channel``.
+
+    Importante: las placas tienen segmentos p1 y p2. Si solo se actualiza
+    ``p1``, ``p2`` puede quedar en ocupado/animación (rojo dando vueltas).
+    Por eso se fuerza ``ALL:<color>`` salvo que ``led`` en CSIP_DEVICES sea
+    explícitamente ``p1``/``p2``/``A``/``B`` (modo dual en una sola placa).
     """
     device = get_device(channel)
     if not device:
         raise CsipClientError(f"Sin dispositivo CSIP para canal {channel}")
-    led_id = (device.led or "p1").strip().lower()
+    configured = (device.led or "ALL").strip().lower()
+    # En multi-placa (1 botón por equipo) conviene ALL para limpiar ambos segmentos.
+    if configured in ("p1", "p2", "a", "b"):
+        # Aun así, si hay 2 dispositivos distintos, cada uno suele necesitar ALL.
+        # Solo respetamos led parcial cuando es la misma base_url compartida (legacy).
+        from app.csip.devices import get_csip_devices
+
+        siblings = [
+            d for d in get_csip_devices().values() if d.base_url == device.base_url
+        ]
+        led_id = configured if len(siblings) > 1 else "ALL"
+    else:
+        led_id = "ALL"
+    # Colores sólidos (evita estados lógicos que en firmware animan / efectovuelta).
     cmd = f"{led_id}:{color}"
     body = LedControlRequest(cmd=cmd, brightness=brightness)
     return led_control(body, device_id=device.id)

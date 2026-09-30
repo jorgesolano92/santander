@@ -139,6 +139,8 @@ class Settings(BaseSettings):
     # Permite N Panphones. Si vacío, se usa CSIP_BASE_URL (p1+p2 en la misma placa).
     csip_devices: str = ""
     csip_timeout_s: float = 5.0
+    # Timeout corto solo para led_control (evitar que una placa caída bloquee la otra).
+    csip_led_timeout_s: float = 4.0
     # Si se define, los webhooks /api/csip/notify* exigen Bearer o X-API-Key.
     csip_webhook_token: Optional[str] = None
     # Reenviar pulsaciones CSIP al orquestador zaguán (misma lógica que ESP32).
