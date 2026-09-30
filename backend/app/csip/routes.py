@@ -44,23 +44,40 @@ _CANAL_RE = re.compile(r"^p\d+$", re.IGNORECASE)
 _ZAGUAN_PULSADORES = frozenset({"p1", "p2", "p3", "p4"})
 
 
-def _mask_url(url: str) -> Optional[str]:
-    u = (url or "").strip()
-    return u or None
-
-
-def _normalize_canal(raw: str) -> str:
-    return (raw or "").strip().lower()
+def _normalize_canal_id(raw: Any) -> Optional[str]:
+    """
+    Acepta p1/p2, enteros 1/2 (como envía Panphone en el body) y aliases.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if not s:
+        return None
+    if s in ("push", "5"):
+        return "p1"
+    if s.isdigit():
+        return f"p{int(s)}"
+    if _CANAL_RE.match(s):
+        return s
+    m = re.match(r"^p(\d+)$", s)
+    if m:
+        return f"p{int(m.group(1))}"
+    return None
 
 
 def _parse_canal_or_400(raw: str) -> str:
-    canal = _normalize_canal(raw)
-    if not _CANAL_RE.match(canal):
+    canal = _normalize_canal_id(raw)
+    if not canal:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Indica button_id o canal: p1, p2, p3…",
+            detail="Indica button_id o canal: p1, p2, p3… (o 1, 2, 3…)",
         )
     return canal
+
+
+def _mask_url(url: str) -> Optional[str]:
+    u = (url or "").strip()
+    return u or None
 
 
 def _extract_webhook_token(request: Request) -> Optional[str]:
@@ -175,8 +192,9 @@ async def csip_notify_canal(
     _require_webhook_auth(request)
     canal_n = _parse_canal_or_400(canal)
     body = await _read_body_dict(request)
-    body.setdefault("button_id", canal_n)
-    body.setdefault("canal", canal_n)
+    # El path manda: no dejar que body.canal numérico confunda logs/estado.
+    body["button_id"] = canal_n
+    body["canal"] = canal_n
     log.info("CSIP notify %s ← %s", canal_n, body)
     forwarded = await _forward_zaguan(canal_n, body)
     entry = csip_state.record_notification(canal_n, body, forwarded=forwarded)
@@ -191,14 +209,25 @@ async def csip_notify_canal(
 
 @router.post("/notify", response_model=CsipNotifyAck, summary="Webhook genérico (button_id)")
 async def csip_notify(request: Request) -> CsipNotifyAck:
+    """
+    URL base que debe ir en notification_url de la placa:
+      http://<backend>:8000/api/csip/notify
+    La placa añade sola /p1 o /p2 según el botón configurado en el Panphone.
+    Si llega aquí sin sufijo, se usa body.canal / button_id (acepta 1/2 o p1/p2).
+    """
     _require_webhook_auth(request)
     body = await _read_body_dict(request)
-    raw_id = str(body.get("button_id") or body.get("canal") or body.get("led") or "").strip().lower()
-    if raw_id in ("push", "5", "1"):
-        raw_id = "p1"
-    canal = _parse_canal_or_400(raw_id)
-    body.setdefault("button_id", canal)
-    body.setdefault("canal", canal)
+    canal = _normalize_canal_id(
+        body.get("button_id") or body.get("canal") or body.get("led")
+    )
+    if not canal:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Indica button_id o canal: p1|p2 (o 1|2). "
+            "Mejor: notification_url sin sufijo y deja que la placa añada /p1|/p2.",
+        )
+    body["button_id"] = canal
+    body["canal"] = canal
     log.info("CSIP notify %s ← %s", canal, body)
     forwarded = await _forward_zaguan(canal, body)
     entry = csip_state.record_notification(canal, body, forwarded=forwarded)
