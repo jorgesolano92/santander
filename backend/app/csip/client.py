@@ -184,7 +184,7 @@ def led_control_for_logical_channel(
         led_id = configured if len(siblings) > 1 else "ALL"
     else:
         led_id = "ALL"
-    # cmd: "green" | "red" | "off" | "efectovuelta:orange" (abriendo con giro).
+    # Color/estado: el firmware aplica la animación (respiración/cometa/parpadeo).
     cmd = f"{led_id}:{color}"
     body = LedControlRequest(cmd=cmd, brightness=brightness)
     return led_control(body, device_id=device.id)

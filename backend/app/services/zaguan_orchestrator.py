@@ -363,15 +363,20 @@ def _schedule_led_device_push(
 def _csip_led_cmd_suffix(est: EstadoLed) -> str:
     """
     Sufijo del cmd CSIP tras 'ALL:' / 'p1:'.
-    - libre/ocupado/apagado: color sólido
-    - abriendo: giro + naranja (efectovuelta)
+
+    En Panphone la animación la aplica el firmware según color/estado:
+      green  → libre     → respiración
+      orange → abriendo  → cometa (efecto vuelta)
+      red    → ocupado   → parpadeo
+      off    → apagado   → sin iluminación
+    No hace falta enviar 'efectovuelta' en el cmd.
     """
     if est == "libre":
         return "green"
     if est == "ocupado":
         return "red"
     if est == "abriendo":
-        return "efectovuelta:orange"
+        return "orange"
     if est == "apagado":
         return "off"
     return str(est)
