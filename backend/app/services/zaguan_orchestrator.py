@@ -115,6 +115,8 @@ EXTERIOR_PULSADOR: dict[PuertaId, PulsadorId] = {"p1": "p1", "p2": "p2"}
 
 OPPOSITE_DOOR: dict[PuertaId, PuertaId] = {"p1": "p2", "p2": "p1"}
 
+# Mapa canónico: p1/p3 → P1 (calle, placa 2 / Panphone .80);
+# p2/p4 → P2 (oficina, placa 3 / Panphone .70).
 PULSADOR_TO_DOOR: dict[PulsadorId, PuertaId] = {
     "p1": "p1",
     "p2": "p2",
@@ -190,6 +192,8 @@ _current_mode: Optional[str] = None
 _door_was_open: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _pending_abriendo: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _abriendo_since: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
+# Un OFF diferido por puerta: al re-pulsar se cancela el anterior (si no, corta el pulso nuevo).
+_door_output_off_tasks: dict[PuertaId, asyncio.Task] = {}
 # Tiempo continuo con sensor abierto (alerta door_held → COCE).
 _door_open_since: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
 _door_held_alert_active: dict[PuertaId, bool] = {"p1": False, "p2": False}
@@ -1556,6 +1560,30 @@ async def _execute_cerrado_exterior_pulse(door: PuertaId) -> dict[str, Any]:
     }
 
 
+def _pulsacion_open_door_direct(door: PuertaId, *, rule_key: str) -> dict[str, Any]:
+    """
+    Apertura por puerta lógica (OUT_xx_07 + bulones), sin ejecutar panel_rules.
+
+    Evita el cruce p2/p3 si las reglas interfono_* tienen activate_outputs
+    intercambiados entre calle_interior y oficina_exterior.
+    """
+    _door_pulse_with_locks_sync(door, restore_locks=False)
+    open_code = DOOR_OPEN_OUTPUT[door]
+    released = list(_locks_to_restore.get(door) or [])
+    _notify_panel_outputs_written([open_code], on=False)
+    if released:
+        _notify_panel_outputs_written(released, on=False)
+    return {
+        "executed": True,
+        "direct_output": open_code,
+        "locks_released": released,
+        "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
+        "locks_restore_on_close": True,
+        "rule": rule_key,
+        "reason": "pulsacion_door_direct",
+    }
+
+
 def execute_tablet_door_open_sync(rule_key: str) -> Optional[dict[str, Any]]:
     """Compat: set_rule interfono → misma lógica que POST /door/open."""
     if _current_mode not in TABLET_LOCK_RELEASE_MODES:
@@ -2291,9 +2319,20 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
     modbus_ok = True
     modbus_detail: Any = None
     if MODBUS_ON_PULSACION:
-        panel = _import_panel()
         try:
-            if _cerrado_exterior_uses_direct_pulse(pulsador):
+            if _current_mode in TABLET_LOCK_RELEASE_MODES:
+                # Manual/carga/extendido: misma ruta tablet (bulones + pulso).
+                modbus_detail = await asyncio.to_thread(open_door_from_tablet, door)
+                modbus_ok = bool(
+                    modbus_detail.get("ok") or modbus_detail.get("executed")
+                )
+                if not modbus_ok:
+                    log.warning(
+                        "Apertura tablet desde pulsación %s falló: %s",
+                        pulsador,
+                        modbus_detail.get("reason"),
+                    )
+            elif _cerrado_exterior_uses_direct_pulse(pulsador):
                 modbus_detail = await _execute_cerrado_exterior_pulse(door)
                 modbus_ok = True
                 log.info(
@@ -2303,28 +2342,21 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
                     modbus_detail.get("locks_released"),
                 )
             else:
+                # Siempre por puerta lógica (p1/p3→P1, p2/p4→P2), no por regla JSON.
                 modbus_detail = await asyncio.to_thread(
-                    panel.api_v1_execute_rule_for_tablet,
-                    rule_key,
+                    _pulsacion_open_door_direct, door, rule_key=rule_key
                 )
                 modbus_ok = bool(modbus_detail.get("executed"))
-                if not modbus_ok:
-                    log.warning(
-                        "Regla interfono no ejecutada para %s: %s",
-                        pulsador,
-                        modbus_detail.get("reason"),
-                    )
+                log.info(
+                    "Pulsación %s → puerta %s salida %s (directo)",
+                    pulsador,
+                    door,
+                    modbus_detail.get("direct_output"),
+                )
         except Exception as e:  # noqa: BLE001
             modbus_ok = False
             modbus_detail = str(e)
             log.warning("Error Modbus pulsación %s: %s", pulsador, e)
-
-        if (
-            modbus_ok
-            and DOOR_PULSE_OFF_SECONDS > 0
-            and not _cerrado_exterior_uses_direct_pulse(pulsador)
-        ):
-            asyncio.create_task(_schedule_door_output_off(door, rule_key, DOOR_PULSE_OFF_SECONDS))
 
     _record(
         "zaguan_pulsacion",
@@ -2348,14 +2380,31 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
     }
 
 
+def _arm_door_output_off(door: PuertaId, rule_key: str, seconds: float) -> None:
+    """Programa OFF de la salida de apertura; cancela un OFF pendiente de la misma puerta."""
+    prev = _door_output_off_tasks.get(door)
+    if prev is not None and not prev.done():
+        prev.cancel()
+    _door_output_off_tasks[door] = asyncio.create_task(
+        _schedule_door_output_off(door, rule_key, seconds)
+    )
+
+
 async def _schedule_door_output_off(door: PuertaId, rule_key: str, seconds: float) -> None:
-    await asyncio.sleep(seconds)
+    try:
+        await asyncio.sleep(seconds)
+    except asyncio.CancelledError:
+        return
     panel = _import_panel()
     out_code = DOOR_OPEN_OUTPUT[door]
     try:
         await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, False)
     except Exception as e:  # noqa: BLE001
         log.warning("No se pudo apagar %s tras pulso %s: %s", out_code, rule_key, e)
+    finally:
+        task = asyncio.current_task()
+        if _door_output_off_tasks.get(door) is task:
+            _door_output_off_tasks.pop(door, None)
 
 
 def bootstrap_from_panel() -> None:

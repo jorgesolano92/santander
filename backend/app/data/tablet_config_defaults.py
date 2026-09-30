@@ -74,38 +74,75 @@ def _intercom_base(
     }
 
 
-def _intercom_p1_panphone() -> dict[str, Any]:
-    """P1 Calle: cámara/CSIP Panphone + SIP tablet vía FreePBX."""
+def _intercom_panphone_sip(
+    name: str,
+    camera_ip: str,
+    *,
+    pcb: int,
+    switch: int,
+    csip_button_id: str,
+    door_endpoint: str,
+    sip_call_destination: str,
+) -> dict[str, Any]:
+    """Panphone + SIP tablet vía FreePBX (mapa A: P1=.80/101, P2=.70/100)."""
     ic = _intercom_base(
-        "Intercomunicador Calle (P1)",
-        "192.168.1.70",
-        2,
-        7,
+        name,
+        camera_ip,
+        pcb,
+        switch,
         onvif_user="admin",
         onvif_password="panphone",
         rtsp_path="video1",
         intercom_mode="sip",
-        csip_button_id="p1",
+        csip_button_id=csip_button_id,
     )
     ic.update(
         {
+            "snapshotPath": "camara.php",
             "sipUri": "sip:201@192.168.1.154",
             "sipUsername": "201",
             "sipPassword": "Santander201",
             "sipDomain": "192.168.1.154",
             "sipServer": "192.168.1.154:8088/ws",
-            "sipCallDestination": "sip:100@192.168.1.154",
+            "sipCallDestination": sip_call_destination,
+            "csipApiHost": f"{camera_ip}:8090",
             "doorControlUsername": "ceroideas",
             "doorControlPassword": "12345678",
-            "doorControlPCB": 2,
-            "doorControlSwitch": 7,
+            "doorControlPCB": pcb,
+            "doorControlSwitch": switch,
             "doorControlAction": "door_endpoint",
-            "doorControlEndpoint": "api/v1/door/open/p1",
+            "doorControlEndpoint": door_endpoint,
             "doorControlRuleKey": "",
             "doorOutputMode": "auto",
         }
     )
     return ic
+
+
+def _intercom_p1_panphone() -> dict[str, Any]:
+    """P1 Calle: Panphone .80 / FreePBX ext 101."""
+    return _intercom_panphone_sip(
+        "Intercomunicador Calle (P1)",
+        "192.168.1.80",
+        pcb=2,
+        switch=7,
+        csip_button_id="p1",
+        door_endpoint="api/v1/door/open/p1",
+        sip_call_destination="sip:101@192.168.1.154",
+    )
+
+
+def _intercom_p2_panphone() -> dict[str, Any]:
+    """P2 Oficina: Panphone .70 / FreePBX ext 100."""
+    return _intercom_panphone_sip(
+        "Intercomunicador Oficina (P2)",
+        "192.168.1.70",
+        pcb=3,
+        switch=7,
+        csip_button_id="p2",
+        door_endpoint="api/v1/door/open/p2",
+        sip_call_destination="sip:100@192.168.1.154",
+    )
 
 
 def _mode(rule_key: str) -> dict[str, Any]:
@@ -124,23 +161,16 @@ def get_builtin_default_tablet_config() -> dict[str, Any]:
             {
                 "enabled": True,
                 "name": "Calle (P1)",
-                "ipExterior": "192.168.1.70",
+                "ipExterior": "192.168.1.80",
                 "ipInterior": "",
                 "intercom": _intercom_p1_panphone(),
             },
             {
                 "enabled": True,
                 "name": "Oficina (P2)",
-                "ipExterior": "192.168.1.210",
+                "ipExterior": "192.168.1.70",
                 "ipInterior": "",
-                "intercom": _intercom_base(
-                    "Intercomunicador Oficina (P2)",
-                    "192.168.1.210",
-                    3,
-                    7,
-                    sdk_password="Santander@01.",
-                    csip_button_id="p2",
-                ),
+                "intercom": _intercom_p2_panphone(),
             },
             {
                 "enabled": False,

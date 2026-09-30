@@ -4,12 +4,12 @@ Configuración preferida (JSON en env ``CSIP_DEVICES``)::
 
     {
       "p1": {
-        "base_url": "http://192.168.1.70:8090/api/custom1",
+        "base_url": "http://192.168.1.80:8090/api/custom1",
         "token": "api-key-placa-1",
         "led": "p1"
       },
       "p2": {
-        "base_url": "http://192.168.1.80:8090/api/custom1",
+        "base_url": "http://192.168.1.70:8090/api/custom1",
         "token": "api-key-placa-2",
         "led": "p1"
       }

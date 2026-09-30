@@ -241,10 +241,10 @@ async def recibir_pulsacion(
     El ESP32 dispara y se olvida — responder rápido.
 
     Mapeo de canales (1 ESP por canal lógico):
-      p1 → P1 videoportero exterior      (192.168.1.60)
-      p2 → P2 videoportero interior      (192.168.1.62)
-      p3 → P1 pulsador exterior          (192.168.1.61)
-      p4 → P2 pulsador interior          (192.168.1.63)
+      p1 → P1 videoportero exterior      (192.168.1.60) → abre P1 (.80 / placa 2)
+      p2 → P2 videoportero               (192.168.1.62) → abre P2 (.70 / placa 3)
+      p3 → P1 pulsador interior          (192.168.1.61) → abre P1 (.80 / placa 2)
+      p4 → P2 pulsador interior          (192.168.1.63) → abre P2 (.70 / placa 3)
     """
     payload_raw: Any = None
     if request is not None:

@@ -11,10 +11,62 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
     {
       enabled: true,
       name: "Calle (P1)",
-      ipExterior: "192.168.1.70",
+      ipExterior: "192.168.1.80",
       ipInterior: "",
       intercom: {
         name: "Intercomunicador Calle (P1)",
+        cameraIP: "192.168.1.80",
+        httpPort: 80,
+        httpsPort: 443,
+        onvifUsername: "admin",
+        onvifPassword: "panphone",
+        rtspPort: 554,
+        sdkPort: 9008,
+        sdkUsername: "admin",
+        sdkPassword: "Santander@01",
+        voiceChannel: -1,
+        intercomMode: "sip",
+        bridgeUrl: "ws://192.168.1.155:8765",
+        sipUri: "sip:201@192.168.1.154",
+        sipUsername: "201",
+        sipPassword: "Santander201",
+        sipDomain: "192.168.1.154",
+        sipServer: "192.168.1.154:8088/ws",
+        // Panphone Calle FreePBX ext 101
+        sipCallDestination: "sip:101@192.168.1.154",
+        csipApiHost: "192.168.1.80:8090",
+        csipApiUseHttps: false,
+        csipApiKey: CSIP_API_KEY_DEFAULT,
+        csipBearerToken: "",
+        sipSignaling: "pbx",
+        sipP2pPeerIp: "",
+        csipCallTargetType: "default",
+        csipCallTarget: "",
+        csipCallUser: "",
+        csipCallRecording: false,
+        csipButtonId: "p1",
+        videoProfile: "MainStream",
+        snapshotPath: "camara.php",
+        doorControlUsername: "ceroideas",
+        doorControlPassword: "12345678",
+        doorControlPCB: 2,
+        doorControlSwitch: 7,
+        doorControlAction: "door_endpoint",
+        doorControlEndpoint: "api/v1/door/open/p1",
+        doorControlRuleKey: "",
+        doorOutputMode: "auto",
+        doorControlPulseTime: 1,
+        hasAudio: true,
+        rtspPath: "video1",
+      },
+    },
+    {
+      enabled: true,
+      name: "Oficina (P2)",
+      ipExterior: "192.168.1.70",
+      ipInterior: "",
+      intercom: {
+        name: "Intercomunicador Oficina (P2)",
         cameraIP: "192.168.1.70",
         httpPort: 80,
         httpsPort: 443,
@@ -32,58 +84,8 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         sipPassword: "Santander201",
         sipDomain: "192.168.1.154",
         sipServer: "192.168.1.154:8088/ws",
+        // Panphone Oficina FreePBX ext 100
         sipCallDestination: "sip:100@192.168.1.154",
-        csipApiHost: "192.168.1.70:8090",
-        csipApiUseHttps: false,
-        csipApiKey: CSIP_API_KEY_DEFAULT,
-        csipBearerToken: "",
-        sipSignaling: "pbx",
-        sipP2pPeerIp: "",
-        csipCallTargetType: "default",
-        csipCallTarget: "",
-        csipCallUser: "",
-        csipCallRecording: false,
-        csipButtonId: "p1",
-        videoProfile: "MainStream",
-        snapshotPath: "ISAPI/Streaming/channels/101/picture",
-        doorControlUsername: "ceroideas",
-        doorControlPassword: "12345678",
-        doorControlPCB: 2,
-        doorControlSwitch: 7,
-        doorControlAction: "door_endpoint",
-        doorControlEndpoint: "api/v1/door/open/p1",
-        doorControlRuleKey: "",
-        doorOutputMode: "auto",
-        doorControlPulseTime: 1,
-        hasAudio: true,
-        rtspPath: "video1",
-      },
-    },
-    {
-      enabled: true,
-      name: "Oficina (P2)",
-      ipExterior: "192.168.1.210",
-      ipInterior: "",
-      intercom: {
-        name: "Intercomunicador Oficina (P2)",
-        cameraIP: "192.168.1.210",
-        httpPort: 80,
-        httpsPort: 443,
-        onvifUsername: "ceroideas",
-        onvifPassword: "Cero21264712-",
-        rtspPort: 554,
-        sdkPort: 9008,
-        sdkUsername: "admin",
-        sdkPassword: "Santander@01.",
-        voiceChannel: -1,
-        intercomMode: "bridge",
-        bridgeUrl: "ws://192.168.1.155:8765",
-        sipUri: "",
-        sipUsername: "",
-        sipPassword: "",
-        sipDomain: "",
-        sipServer: "",
-        sipCallDestination: "",
         csipApiHost: "192.168.1.70:8090",
         csipApiUseHttps: false,
         csipApiKey: CSIP_API_KEY_DEFAULT,
@@ -96,17 +98,18 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
         csipCallRecording: false,
         csipButtonId: "p2",
         videoProfile: "MainStream",
-        snapshotPath: "ISAPI/Streaming/channels/101/picture",
+        snapshotPath: "camara.php",
         doorControlUsername: "ceroideas",
         doorControlPassword: "12345678",
         doorControlPCB: 3,
         doorControlSwitch: 7,
-        doorControlAction: "set_output",
+        doorControlAction: "door_endpoint",
+        doorControlEndpoint: "api/v1/door/open/p2",
         doorControlRuleKey: "",
         doorOutputMode: "auto",
         doorControlPulseTime: 1,
         hasAudio: true,
-        rtspPath: "profile1",
+        rtspPath: "video1",
       },
     },
     { enabled: false, name: "Puerta 3", ipExterior: "", ipInterior: "", intercom: { name: "P3", cameraIP: "" } },
@@ -564,7 +567,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.csipApiHost || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "csipApiHost", e.target.value)}
-                      placeholder="192.168.1.70:8090"
+                      placeholder="192.168.1.80:8090"
                     />
                   </Field>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 20 }}>
@@ -645,7 +648,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                           style={inputStyle()}
                           value={intercom.csipCallTarget || ""}
                           onChange={(e) => patchDoorIntercom(doorIndex, "csipCallTarget", e.target.value)}
-                          placeholder={intercom.csipCallTargetType === "ip" ? "192.168.1.50" : "201"}
+                          placeholder={intercom.csipCallTargetType === "ip" ? "192.168.1.80" : "201"}
                         />
                       </Field>
                       <Field label="call_start user (opcional)">
@@ -665,7 +668,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipUri || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipUri", e.target.value)}
-                      placeholder="sip:201@192.168.1.50"
+                      placeholder="sip:201@192.168.1.154"
                     />
                   </Field>
                   <Field label="SIP usuario">
@@ -689,7 +692,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipDomain || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipDomain", e.target.value)}
-                      placeholder="192.168.1.50"
+                      placeholder="192.168.1.154"
                     />
                   </Field>
                   <Field label="WS SIP (Asterisk, ej. :8088/ws)">
@@ -697,7 +700,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipServer || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipServer", e.target.value)}
-                      placeholder="192.168.1.50:8088/ws"
+                      placeholder="192.168.1.154:8088/ws"
                     />
                   </Field>
                   <Field label="Destino llamada SIP">
@@ -705,7 +708,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
                       style={inputStyle()}
                       value={intercom.sipCallDestination || ""}
                       onChange={(e) => patchDoorIntercom(doorIndex, "sipCallDestination", e.target.value)}
-                      placeholder="sip:100@192.168.1.50"
+                      placeholder="sip:101@192.168.1.154"
                     />
                   </Field>
                     </>
