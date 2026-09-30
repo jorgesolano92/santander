@@ -360,26 +360,31 @@ def _schedule_led_device_push(
     _schedule_coro(_worker())
 
 
-def _csip_led_color_for_estado(est: EstadoLed) -> str:
+def _csip_led_cmd_suffix(est: EstadoLed) -> str:
+    """
+    Sufijo del cmd CSIP tras 'ALL:' / 'p1:'.
+    - libre/ocupado/apagado: color sólido
+    - abriendo: giro + naranja (efectovuelta)
+    """
     if est == "libre":
         return "green"
     if est == "ocupado":
         return "red"
     if est == "abriendo":
-        return "orange"
+        return "efectovuelta:orange"
     if est == "apagado":
         return "off"
     return str(est)
 
 
+def _csip_led_color_for_estado(est: EstadoLed) -> str:
+    """Alias histórico; ahora puede incluir efecto (p. ej. efectovuelta:orange)."""
+    return _csip_led_cmd_suffix(est)
+
+
 def _csip_led_cmd_for_estado(ch: PulsadorId, est: EstadoLed) -> str:
-    """
-    Comando compacto CSIP (cmd) color fijo (sin animación, de momento).
-    Formato placa/tester: 'LED:COLOR' (ej. p1:green, p1:orange).
-    Nota: con CSIP_DEVICES el push usa led físico del dispositivo; este helper
-    queda para compat / logs.
-    """
-    return f"{ch}:{_csip_led_color_for_estado(est)}"
+    """Formato placa: 'LED:COLOR' o 'LED:efectovuelta:COLOR'."""
+    return f"{ch}:{_csip_led_cmd_suffix(est)}"
 
 
 def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
@@ -406,36 +411,36 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
             for ch, est in states.items():
                 if not get_device(ch):
                     continue
-                jobs.append((ch, est, _csip_led_color_for_estado(est)))
+                jobs.append((ch, est, _csip_led_cmd_suffix(est)))
             if not jobs:
                 return
 
-            def _one(ch: str, est: EstadoLed, color: str) -> tuple[str, str, Optional[str]]:
+            def _one(ch: str, est: EstadoLed, cmd_suffix: str) -> tuple[str, str, Optional[str]]:
                 try:
                     csip_client.led_control_for_logical_channel(
-                        ch, color=color, brightness=brightness
+                        ch, color=cmd_suffix, brightness=brightness
                     )
-                    return ch, color, None
+                    return ch, cmd_suffix, None
                 except Exception as e:  # noqa: BLE001
-                    return ch, color, str(e)
+                    return ch, cmd_suffix, str(e)
 
             # Paralelo: si .80 cuelga, .70 no espera 20s.
             with ThreadPoolExecutor(max_workers=min(4, len(jobs))) as pool:
-                futs = [pool.submit(_one, ch, est, color) for ch, est, color in jobs]
+                futs = [pool.submit(_one, ch, est, suffix) for ch, est, suffix in jobs]
                 for fut in as_completed(futs):
-                    ch, color, err = fut.result()
+                    ch, cmd_suffix, err = fut.result()
                     if err:
                         log.warning(
-                            "CSIP led_control canal=%s color=%s (estado falló): %s",
+                            "CSIP led_control canal=%s cmd=%s (falló): %s",
                             ch,
-                            color,
+                            cmd_suffix,
                             err,
                         )
                     else:
                         log.info(
-                            "CSIP led_control canal=%s color=%s OK",
+                            "CSIP led_control canal=%s cmd=%s OK",
                             ch,
-                            color,
+                            cmd_suffix,
                         )
 
         await asyncio.to_thread(_run)
