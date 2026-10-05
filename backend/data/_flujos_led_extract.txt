@@ -1,0 +1,333 @@
+SAIMA SEGURIDAD
+Control de Accesos — Banco Santander
+Flujos de Operación LED por Modo de Trabajo
+Señalización LED ESP32-S3-ETH  ·  4 canales por zaguán
+Versión 1.0  ·  Firmware v2.3
+Modos de trabajo cubiertos
+Modo
+Descripción
+AUTOMÁTICO
+Apertura por radar. ICR2 y llave Winhouse desactivados. Sin alarma conectada.
+ESCLUSA
+Apertura secuencial una puerta a la vez. ICR1 y llave Winhouse desactivados.
+EXTENDIDO
+Horario extendido. Todas las funciones operativas (semiautomático / manual).
+AUTOSERVICIO
+Cajeros en servicio. P2 con cierre de seguridad. Solo acceso manual.
+CERRADO
+Instalación cerrada. Cierres en ambas puertas. Solo emergencias activas.
+CARGA CAJERO
+Recarga de cajeros. P1 bloqueada. P2 abierta. Emergencias anuladas.
+MANUAL
+Control 100% manual. Cierres en ambas puertas. Solo por pulsadores.
+Referencia de canales LED
+Canal
+Tira LED
+GPIO LED
+GPIO Pulsador
+Ubicación
+C1
+Tira exterior P1
+GPIO 2
+GPIO 15
+Cara calle — P1
+C2
+Tira exterior P2
+GPIO 4
+GPIO 16
+Cara oficina — P2
+C3
+Pulsador interior P1
+GPIO 5
+GPIO 17
+Interior zaguán (junto a P1)
+C4
+Pulsador interior P2
+GPIO 6
+GPIO 18
+Interior zaguán (junto a P2)
+Leyenda estados:  ● LIBRE (verde respiración)  ● OCUPADO (rojo parpadeo)  ● ABRIENDO (naranja barrido)  ● APAGADO (negro fijo)
+● MODO AUTOMÁTICO
+Apertura automática por detección de radares. La llave Winhouse y el ICR2 están desactivados. El sistema no opera con alarma conectada para prevenir aperturas en festivos.
+Ambas puertas pueden abrir a la vez y obedecen a los radares y pulsadores.
+Estado LED inicial al activar el modo
+Canal
+Tira LED
+Estado inicial
+Color
+Animación
+C1
+Tira exterior P1 (calle)
+libre
+Verde (0,200,0)
+Respiración suave 3s
+C2
+Tira exterior P2 (oficina)
+libre
+Verde (0,200,0)
+Respiración suave 3s
+C3
+Pulsador interior P1
+libre
+Verde (0,200,0)
+Respiración suave 3s
+C4
+Pulsador interior P2
+libre
+Verde (0,200,0)
+Respiración suave 3s
+Estado Pulsadores al activar el modo
+Canal
+Pulsador
+Estado inicial
+P1
+Pulsación canal 1 (exterior calle P1)
+Funcional
+P2
+Pulsación canal 2 (exterior oficina P2)
+Funcional
+P3
+Pulsación canal 3 (interior P1)
+Funcional
+P4
+Pulsación canal 4 (interior P2)
+Funcional
+Flujo A — Entrada por P1 (radar exterior detecta presencia o se pulsa pulsador)
+#
+Actor
+Acción / Evento
+LEDs resultantes
+1
+Sistema
+Radar exterior o pulsador detecta presencia frente a P1
+C1=LIBRE, C2=LIBRE, C3= LIBRE, C4= LIBRE
+2
+Backend
+POST /api/p1/estado {"estado":"abriendo"} al ESP32
+C1=ABRIENDO (naranja barrido)C3=ABRIENDO (naranja barrido)
+3
+Backend
+Comando Modbus al ETD8A12 — abre puerta P1
+C1=ABRIENDO (naranja barrido)C3=ABRIENDO (naranja barrido)
+4
+Usuario
+Usuario entra al zaguán — P1 se cierra
+C1=ABRIENDO (naranja barrido)C3=ABRIENDO (naranja barrido)
+5
+Backend
+Sensor detecta P1 cerrada → POST /api/p1/estado {"estado":"libre"}
+C1=LIBRE, C3= LIBRE
+6
+Sistema
+Radar interior o pulsado detecta presencia frente a P2
+7
+Sistema
+Radar interior detecta presencia frente a P2
+C1=LIBRE, C2=LIBRE, C3= LIBRE, C4= LIBRE (No hacer Cambios de led)
+9
+Backend
+POST /api/p2/estado {"estado":"abriendo"} al ESP32
+C2=ABRIENDO (naranja barrido)C4=ABRIENDO (naranja barrido)
+10
+Backend
+Abre puerta P2. Usuario entra a la oficina
+C2=ABRIENDO (naranja barrido)C4=ABRIENDO (naranja barrido)
+11
+Backend
+P2 cerrada → POST /api/p2/estado {"estado":"libre"}
+11
+Backend
+P2 cerrada → POST /api/p2/estado {"estado":"libre"}
+C1=LIBRE, C2=LIBRE, C3= LIBRE, C4= LIBRE
+Flujo B — Salida por P2 (radar exterior detecta presencia o se pulsa pulsador)
+#
+Actor
+Acción / Evento
+LEDs resultantes
+1
+Sistema
+Radar exterior o pulsador detecta presencia frente a P2
+C1=LIBRE, C2=LIBRE, C3= LIBRE, C4= LIBRE
+2
+Backend
+POST /api/p2/estado {"estado":"abriendo"} al ESP32
+C2=ABRIENDO (naranja barrido)C4=ABRIENDO (naranja barrido)
+3
+Backend
+Comando Modbus al ETD8A12 — abre puerta P2
+C2=ABRIENDO (naranja barrido)C4=ABRIENDO (naranja barrido)
+4
+Usuario
+Usuario entra al zaguán — P2 se cierra
+C2=ABRIENDO (naranja barrido)C4=ABRIENDO (naranja barrido)
+5
+Backend
+Sensor detecta P2 cerrada → POST /api/p2/estado {"estado":"libre"}
+C2=LIBRE, C4= LIBRE
+6
+Sistema
+Radar interior o pulsado detecta presencia frente a P1
+7
+Sistema
+Radar interior detecta presencia frente a P1
+C1=LIBRE, C2=LIBRE, C3= LIBRE, C4= LIBRE (No hacer Cambios de led)
+9
+Backend
+POST /api/p1/estado {"estado":"abriendo"} al ESP32
+C1=ABRIENDO (naranja barrido)C3=ABRIENDO (naranja barrido)
+10
+Backend
+Abre puerta P1. Usuario entra a la oficina
+C1=ABRIENDO (naranja barrido)C3=ABRIENDO (naranja barrido)
+11
+Backend
+P1 cerrada → POST /api/p1/estado {"estado":"libre"}
+11
+Backend
+P1 cerrada → POST /api/p1/estado {"estado":"libre"}
+C1=LIBRE, C2=LIBRE, C3= LIBRE, C4= LIBRE
+● MODO AUTOSERVICIO (ATM)
+Cajeros automáticos en servicio. Acceso manual mediante pulsadores y videoportero en ambas direcciones. La puerta de oficina (P2) aplica cierre de seguridad si está cerrada. Modo esclusa activo. Antiatrapamiento operativo.
+Estado LED inicial al activar el modo
+Canal
+Tira LED
+Estado inicial
+Color
+Animación
+C1
+Tira exterior P1 (calle)
+libre
+Verde (0,200,0)
+Respiración suave 3s
+C2
+Tira exterior P2 (oficina)
+ocupado
+Rojo (200,0,0)
+Parpadeo 1s — P2 bloqueada
+C3
+Pulsador interior P1
+libre
+Verde (0,200,0)
+Respiración suave 3s
+C4
+Pulsador interior P2
+ocupado
+Rojo (200,0,0)
+Parpadeo 1s — P2 bloqueadaSi se hace un pulso debe abrir y dejar salir, una vez se vuelva a cerrar se debe armar la puerta en modo cerrado.
+ℹ  P2 se muestra en OCUPADO (rojo parpadeo) como indicador visual de que la puerta de oficina está bajo cierre de seguridad. El usuario solo puede acceder a los cajeros, no a la zona de empleados.
+Flujo A — Usuario accede al cajero (solo zaguán, P2 bloqueada)
+#
+Actor
+Acción / Evento
+LEDs resultantes
+1
+Usuario
+Pulsa videoportero exterior P1 para acceder al cajero
+C1=LIBRE, C3=LIBREC2=OCUPADO, C4=OCUPADO
+2
+Backend
+Verifica modo ATM → solo se permite acceso hasta zaguán
+Sin cambio
+3
+Backend
+POST /api/p1/estado {"estado":"abriendo"}
+C1=ABRIENDO, C3=ABRIENDO
+4
+Backend
+Abre puerta P1. Usuario entra al zaguán/área cajero
+C1=ABRIENDO, C3=ABRIENDO
+5
+Backend
+P1 cerrada → C1=OCUPADO
+C1=OCUPADO, C2=OCUPADO,C3=LBRE, C4=OCUPADO
+6
+Usuario
+Usa el cajero automático
+C1=OCUPADO, C2=OCUPADO,C3=LBRE, C4=OCUPADO
+7
+Usuario
+Pulsa C3 para salir (interior P1 → calle)
+C3: flash blanco
+8
+Backend
+POST /api/p1/estado {"estado":"abriendo"}
+C1=ABRIENDO, C3=ABRIENDO
+9
+Backend
+P1 cerrada → C1=LIBRE, C3=LIBRE. C2 continúa OCUPADO
+C1=LIBRE, C2=OCUPADO
+● MODO CERRADO
+Instalación cerrada para horarios sin empleados. Cierres de seguridad activos en ambas puertas. Solo se permite acceso mediante llave física o apertura remota autorizada desde COCE. Solo emergencias activas.
+Estado LED inicial al activar el modo
+Canal
+Tira LED
+Estado inicial
+Color
+Animación
+C1
+Tira exterior P1 (calle)
+ocupado
+Rojo (200,0,0)
+Parpadeo 1s — P1 bloqueada
+C2
+Tira exterior P2 (oficina)
+ocupado
+Rojo (200,0,0)
+Parpadeo 1s — P2 bloqueada
+C3
+Pulsador interior P1
+ocupado
+Rojo (200,0,0)
+Parpadeo 1s — P1 bloqueadaSi se hace un pulso debe abrir y dejar salir, una vez se vuelva a cerrar se debe armar la puerta en modo cerrado.
+C4
+Pulsador interior P2
+ocupado
+Rojo (200,0,0)
+Parpadeo 1s — P2 bloqueadaSi se hace un pulso debe abrir y dejar salir, una vez se vuelva a cerrar se debe armar la puerta en modo cerrado.
+Flujo A — Apertura remota autorizada desde COCE
+#
+Actor
+Acción / Evento
+LEDs resultantes
+1
+Sistema
+Operador en COCE autoriza apertura remota (emergencia o acceso)
+Todos APAGADO
+2
+Backend
+POST /api/p1/estado {"estado":"abriendo"}
+C1=ABRIENDO, C3=ABRIENDO
+3
+Backend
+Abre puerta P1 (Modbus) temporalmente
+C1=ABRIENDO
+4
+Usuario
+Persona autorizada entra al zaguán
+C1=ABRIENDO
+5
+Backend
+P1 cerrada → Backend decide si abrir P2 o mantener en zaguán
+C1=OCUPADO
+6
+Backend
+Apertura P2 autorizada → C2=ABRIENDO. Usuario entra
+C2=ABRIENDO
+7
+Backend
+P2 cerrada → vuelve todos a OCUPADO (modo cerrado restaurado)
+Todos APAGADO
+Flujo B — Pulsación detectada (intento de acceso)
+#
+Actor
+Acción / Evento
+LEDs resultantes
+1
+Usuario
+2
+ESP32
+3
+Backend
+4
+Backend
+⚠

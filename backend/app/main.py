@@ -14,11 +14,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config, panel, tablet_v1, auth_panel
+from app.api.routes import health, status, modes, events, config, panel, panel_ws, tablet_v1, tablet_ws, auth_panel, coce_status
+from app.csip.routes import router as csip_router
+from app.coce.client import start_coce_client_task
+from app.services import panel_live_hub, tablet_call_hub
 from app.db import system_events_store as ses
 from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
 from zaguan_esp32 import registrar_callback_pulsacion, router as zaguan_esp32_router
+from app.services import zaguan_orchestrator
+from app.services.schedule_runner import schedule_background_loop
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -26,17 +31,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("control_accesos")
-
-# Mapeo fijo de pulsadores ESP32 -> salida física a activar en ETD8A12.
-# Ajustar estos códigos OUT_YY_ZZ según instalación real.
-ZAGUAN_PULSADOR_TO_OUT_CODE = {
-    "p1": "OUT_02_01",  # Exterior calle P1
-    "p2": "OUT_03_01",  # Exterior oficina P2
-    "p3": "OUT_02_01",  # Interior P1
-    "p4": "OUT_03_01",  # Interior P2
-}
-ZAGUAN_PULSE_SECONDS = 0.7
-
 
 async def _events_retention_loop() -> None:
     while True:
@@ -50,7 +44,7 @@ async def _events_retention_loop() -> None:
 
 
 async def _auto_rules_background_loop() -> None:
-    interval_s = max(1, int(settings.auto_rules_background_interval_seconds))
+    interval_s = max(0.15, float(settings.auto_rules_background_interval_seconds))
     while True:
         await asyncio.sleep(interval_s)
         try:
@@ -64,59 +58,33 @@ async def _auto_rules_background_loop() -> None:
             log.warning("Ciclo auto-rules background: %s", e)
 
 
+async def _zaguan_door_sensors_loop() -> None:
+    """Sensores de puerta + LEDs zaguán: separado del ciclo de IN/reglas (no bloquear Modbus)."""
+    interval_s = max(0.15, float(settings.zaguan_door_poll_interval_seconds))
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await asyncio.to_thread(zaguan_orchestrator.poll_door_sensors)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Poll sensores puerta zaguán: %s", e)
+
+
 async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
-    """Callback base para pulsaciones de zaguán (p1..p4) con mapeo fijo."""
+    """Orquestador zaguán: LEDs + apertura según modo (automático / autoservicio)."""
     log.info("Pulsación zaguán recibida: canal=%s ts=%s", canal, ts)
-    out_code = ZAGUAN_PULSADOR_TO_OUT_CODE.get(canal)
-    if not out_code:
-        log.warning("Canal zaguán sin mapeo fijo: %s", canal)
-        try:
-            ses.record_event(
-                "WARN",
-                f"Pulsación zaguán sin mapeo: {canal}",
-                event_type="zaguan_button_unmapped",
-                source="zaguan_esp32",
-                payload={"canal": canal, "ts": ts},
-            )
-        except Exception:  # noqa: BLE001
-            pass
+    if canal not in ("p1", "p2", "p3", "p4"):
+        log.warning("Canal zaguán no válido: %s", canal)
         return
-
-    # Pulso de apertura: ON corto y luego OFF (Modbus síncrono → hilo aparte).
-    try:
-        await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, True)
-        await asyncio.sleep(ZAGUAN_PULSE_SECONDS)
-        await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, False)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Error al ejecutar mapeo zaguán %s -> %s: %s", canal, out_code, e)
-        try:
-            ses.record_event(
-                "ERR",
-                f"Error mapeo zaguán {canal} -> {out_code}",
-                event_type="zaguan_button_action_error",
-                source="zaguan_esp32",
-                payload={"canal": canal, "out_code": out_code, "ts": ts, "error": str(e)},
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return
-
-    try:
-        ses.record_event(
-            "INFO",
-            f"Pulsación zaguán {canal} -> {out_code}",
-            event_type="zaguan_button_press",
-            source="zaguan_esp32",
-            payload={"canal": canal, "out_code": out_code, "ts": ts},
-        )
-    except Exception as e:  # noqa: BLE001
-        log.warning("No se pudo registrar evento zaguán: %s", e)
+    return await zaguan_orchestrator.handle_pulsacion(canal, ts)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Inicio y cierre: conexión BD, polling Modbus, etc."""
     log.info("Iniciando servicio Control de Accesos")
+    zaguan_orchestrator.bind_async_loop(asyncio.get_running_loop())
+    panel_live_pump = asyncio.create_task(panel_live_hub.pump_loop())
+    tablet_ws_pump = asyncio.create_task(tablet_call_hub.pump_loop())
     try:
         ses.ensure_system_events_schema()
         n0 = ses.purge_events_older_than()
@@ -125,16 +93,33 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         log.warning("system_events al arranque: %s", e)
     registrar_callback_pulsacion(_on_zaguan_pulsacion)
+    try:
+        zaguan_orchestrator.bootstrap_from_panel()
+    except Exception as e:  # noqa: BLE001
+        log.warning("Bootstrap orquestador zaguán: %s", e)
     retention_task = asyncio.create_task(_events_retention_loop())
+    schedule_task = asyncio.create_task(schedule_background_loop())
     auto_rules_task: Optional[asyncio.Task] = None
     if settings.auto_rules_background_enabled:
         auto_rules_task = asyncio.create_task(_auto_rules_background_loop())
+    door_sensors_task = asyncio.create_task(_zaguan_door_sensors_loop())
+    coce_ws_task: Optional[asyncio.Task] = start_coce_client_task()
     yield
+    panel_live_pump.cancel()
+    tablet_ws_pump.cancel()
     retention_task.cancel()
+    schedule_task.cancel()
     if auto_rules_task:
         auto_rules_task.cancel()
+    door_sensors_task.cancel()
+    if coce_ws_task:
+        coce_ws_task.cancel()
     try:
         await retention_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await schedule_task
     except asyncio.CancelledError:
         pass
     if auto_rules_task:
@@ -142,6 +127,23 @@ async def lifespan(app: FastAPI):
             await auto_rules_task
         except asyncio.CancelledError:
             pass
+    try:
+        await door_sensors_task
+    except asyncio.CancelledError:
+        pass
+    if coce_ws_task:
+        try:
+            await coce_ws_task
+        except asyncio.CancelledError:
+            pass
+    try:
+        await tablet_ws_pump
+    except asyncio.CancelledError:
+        pass
+    try:
+        await panel_live_pump
+    except asyncio.CancelledError:
+        pass
     log.info("Cerrando servicio")
 
 
@@ -166,13 +168,18 @@ app.add_middleware(TabletActorContextMiddleware)
 
 # Rutas bajo /api (ver API_SPEC.md)
 app.include_router(health.router, prefix=settings.api_prefix, tags=["Salud"])
+app.include_router(coce_status.router, prefix=settings.api_prefix)
 app.include_router(status.router, prefix=settings.api_prefix, tags=["Estado"])
 app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])
 app.include_router(config.router, prefix=settings.api_prefix, tags=["Configuración"])
 app.include_router(panel.router, prefix=settings.api_prefix, tags=["Panel ETD8A12"])
+app.include_router(panel_ws.router, prefix=f"{settings.api_prefix}/panel", tags=["Panel ETD8A12"])
 app.include_router(auth_panel.router, prefix=settings.api_prefix)
 app.include_router(tablet_v1.router, prefix=settings.api_prefix)
+app.include_router(tablet_ws.router, prefix=f"{settings.api_prefix}/v1")
+# Panphone / CSIP custom1 (módulo aparte, mismo prefijo /api)
+app.include_router(csip_router, prefix=settings.api_prefix)
 # Endpoints para integración ESP32 zaguán (sin prefijo /api, compat firmware)
 app.include_router(zaguan_esp32_router)
 

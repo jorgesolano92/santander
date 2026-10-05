@@ -1,0 +1,11 @@
+{
+  "host": "",
+  "port": 80,
+  "timeout_s": 0.5,
+  "channels": {
+    "p1": { "host": "", "port": null },
+    "p2": { "host": "", "port": null },
+    "p3": { "host": "", "port": null },
+    "p4": { "host": "", "port": null }
+  }
+}

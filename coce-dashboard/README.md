@@ -1,41 +1,48 @@
 # COCE — Dashboard (POC)
 
-Aplicación **React + Vite + TypeScript** para prototipo de **Centro de Control**: registro de sucursales (sistemas locales), consulta de modos del panel, modo activo, activación de reglas y estado de placas vía la misma API que usa la tableta y el panel web del backend `santander`.
+Aplicación **React + Vite + TypeScript** para el **Centro de Control**. Los datos de sucursales y credenciales viven en **`coce-api`** (servidor central); este front solo guarda el **JWT de sesión** en `sessionStorage`.
+
+## Requisitos
+
+1. **coce-api** en marcha (puerto 9000 por defecto).
+2. Copiar `.env.example` → `.env` con `VITE_COCE_API_URL`.
 
 ## Arranque
 
 ```bash
+# Terminal 1 — API central
+cd coce-api
+pip install -r requirements.txt
+python -m app.main
+
+# Terminal 2 — Dashboard
 cd coce-dashboard
 npm install
+cp .env.example .env
 npm run dev
 ```
 
-Por defecto el servidor de desarrollo usa el puerto **5174** (el `frontend` habitual suele usar 5173).
+Abre **http://localhost:5174** → pantalla de login COCE → registrar primer usuario si la BD está vacía.
 
 ## Funcionalidad
 
-| Acción | API usada |
-|--------|-----------|
-| Login tableta | `POST /api/v1/auth/token` |
-| Lista de modos / reglas | `GET /api/v1/modes` |
-| Modo activo | `GET /api/v1/get_mode` |
-| Activar modo | `POST /api/v1/set_mode` (`action: set_rule`, `rule_key`, `active: true`) |
-| Placas (opcional) | `POST /api/auth/login` + `GET /api/panel/status` |
+| Acción | Origen |
+|--------|--------|
+| Login / registro COCE | `coce-api` `/api/coce/auth/*` |
+| CRUD sucursales | `coce-api` `/api/coce/branches` |
+| Modo activo / cambio modo / placas | `coce-api` proxy → backend de cada oficina |
+| Auditoría | `coce-api` `/api/coce/audit` |
 
-Las rutas son **fijas**; solo cambian host, puerto y protocolo (HTTP/HTTPS) por sucursal.
+Ya **no** se usa `localStorage` para sucursales (`src/storage/sucursales.ts` queda obsoleto).
 
-## Datos locales
+## CORS y proxy
 
-Las sucursales y credenciales se guardan en **localStorage** del navegador. Es adecuado para demostración; en un COCE real habría servidor central, cifrado y políticas de acceso.
+En desarrollo, `vite.config.ts` puede hacer proxy de `/api/coce` al puerto 9000. En producción, servir el dashboard y la API bajo políticas CORS definidas en `COCE_CORS_ORIGINS`.
 
-## CORS
-
-Las peticiones van del navegador directamente al PC de cada oficina. El backend ya incluye `CORSMiddleware` con orígenes abiertos en desarrollo; en producción conviene restringir orígenes o servir este dashboard detrás del mismo dominio que decida el banco.
-
-## Build estático
+## Build
 
 ```bash
 npm run build
 ```
 
-Salida en `dist/`. Se puede servir con cualquier servidor estático o integrarse más adelante en un monorepo de despliegue.
+Salida en `dist/`. Definir `VITE_COCE_API_URL` en el build apuntando al servidor COCE de producción.

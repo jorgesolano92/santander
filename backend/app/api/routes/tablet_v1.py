@@ -1,18 +1,26 @@
 """API v1 para tablet / integraciones: modos del panel, JWT y usuarios."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, model_validator
 
 from app.api.deps_tablet import get_tablet_username
 from app.api.routes import panel
 from app.core.config import settings
+from app.db import coce_message_store
 from app.db import system_events_store as ses
 from app.db import tablet_users_store as tus
+from app.db import technicians_store
+from app.db.tablet_config_store import get_tablet_config_record
+from app.db import authorized_tablets_store as ats
+from app.db.schedule_store import get_schedule_config, normalize_location, opening_hours_summary, set_schedule_config
+from app.utils.rule_mode_colors import resolve_rule_color, rule_key_to_label
 from app.services import tablet_jwt
+from app.services.schedule_runner import notify_schedule_config_changed
 from app.services.tablet_password import hash_password, verify_password
 
 router = APIRouter(prefix="/v1", tags=["Tablet API v1"])
@@ -108,7 +116,129 @@ def list_modes(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
 
 @router.get("/get_mode")
 def get_mode(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
-    return {"current_mode": panel.api_v1_get_current_mode()}
+    return panel.api_v1_get_mode_status()
+
+
+@router.get("/output")
+def read_output(
+    code: str,
+    _user: Annotated[str, Depends(get_tablet_username)],
+    refresh: bool = True,
+) -> dict:
+    """Lee estado ON/OFF de una salida (p. ej. OUT_02_07 / OUT_03_07)."""
+    code = code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="code es obligatorio")
+    on = panel.api_v1_read_output_by_code(code, refresh=refresh)
+    return {"code": code, "on": on}
+
+
+@router.get("/tablet-config")
+def get_tablet_config(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    """Configuración por defecto de la sucursal para tablets."""
+    return get_tablet_config_record()
+
+
+@router.get("/tablet-config/revision")
+def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    rec = get_tablet_config_record()
+    return {"revision": rec.get("revision"), "updated_at": rec.get("updated_at")}
+
+
+@router.get(
+    "/authorized-tablets/check",
+    summary="Comprobar si este Android ID está autorizado en la sucursal",
+)
+def check_authorized_tablet(
+    android_id: str = Query(..., min_length=1, max_length=128),
+) -> dict:
+    """Público (bajo /api/v1): la tablet lo consulta al arrancar sin JWT."""
+    return ats.check_authorization(android_id)
+
+
+@router.get("/branch/location", summary="Ubicación y modo actual (COCE / mapa)")
+def get_branch_location(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    """Coordenadas, dirección y modo activo con su color. Sin Modbus."""
+    cfg = get_schedule_config()
+    loc = normalize_location(cfg.get("location"))
+    mode_key = panel.api_v1_get_current_mode()
+    return {
+        **loc,
+        "current_mode": mode_key,
+        "mode_label": rule_key_to_label(mode_key),
+        "mode_color": resolve_rule_color(mode_key, panel.rules_config),
+        "opening_hours": opening_hours_summary(cfg),
+        "schedules_enabled": bool(cfg.get("enabled")),
+    }
+
+
+class OpenDoorBody(BaseModel):
+    door: Literal["p1", "p2"] = Field(description="Puerta a abrir: p1=calle, p2=oficina")
+
+
+def _open_door_for_tablet(door: str, user: str) -> dict:
+    from app.services import zaguan_orchestrator as zo
+
+    door_norm = door.strip().lower()
+    if door_norm not in ("p1", "p2"):
+        raise HTTPException(status_code=400, detail="Puerta no válida (use p1 o p2)")
+
+    result = zo.open_door_from_tablet(door_norm)  # type: ignore[arg-type]
+    if not result.get("ok"):
+        reason = str(result.get("reason") or "Apertura rechazada")
+        try:
+            ses.record_event(
+                "WARN",
+                f"Apertura tablet {door_norm} rechazada: {reason}",
+                event_type="door_open_blocked",
+                source="tablet_v1",
+                actor_principal="tablet",
+                actor_username=user,
+                payload={"door": door_norm, "reason": reason},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": f"No se pudo abrir {door_norm}", "reason": reason},
+        )
+    try:
+        ses.record_event(
+            "OK",
+            f"Apertura tablet {door_norm}",
+            event_type="door_open",
+            source="tablet_v1",
+            actor_principal="tablet",
+            actor_username=user,
+            payload=result,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, **result}
+
+
+@router.post("/door/open/{door}")
+def open_door_by_path(
+    door: Literal["p1", "p2"],
+    user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    """
+    Abre puerta desde tablet (ruta corta).
+    Ej.: POST /api/v1/door/open/p2
+    """
+    return _open_door_for_tablet(door, user)
+
+
+@router.post("/door/open")
+def open_door(
+    body: OpenDoorBody,
+    user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    """
+    Abre puerta desde tablet (cuerpo JSON legacy).
+    Preferir POST /api/v1/door/open/{door}.
+    """
+    return _open_door_for_tablet(body.door, user)
 
 
 class SetModeBody(BaseModel):
@@ -143,6 +273,13 @@ def set_mode(
         rk = body.rule_key.strip()  # type: ignore[union-attr]
         if body.active:
             result = panel.api_v1_execute_rule_for_tablet(rk)
+            if result.get("queued"):
+                return {
+                    "ok": True,
+                    "action": "set_rule",
+                    "queued": True,
+                    "result": result,
+                }
             if not bool(result.get("executed", False)):
                 reason = str(result.get("reason") or "Regla bloqueada")
                 blocked_inputs = result.get("blocked_inputs") or []
@@ -164,11 +301,19 @@ def set_mode(
                         "message": f"No se pudo activar el modo {rk}",
                         "reason": reason,
                         "blocked_inputs": blocked_inputs,
+                        "closing_doors": bool(result.get("closing_doors")),
+                        "closed_transition": result.get("closed_transition"),
                     },
                 )
-            return {"ok": True, "action": "set_rule", "result": result}
-        cleared = panel.api_v1_clear_current_mode_if_match(rk)
-        return {"ok": True, "action": "set_rule", "active": False, **cleared}
+            return {
+                "ok": True,
+                "action": "set_rule",
+                "result": result,
+                "closing_doors": bool(result.get("closing_doors")),
+                "bolt_settle_s": result.get("bolt_settle_s"),
+            }
+        deactivated = panel.api_v1_deactivate_rule_for_tablet(rk)
+        return {"ok": True, "action": "set_rule", "active": False, **deactivated}
     code = body.code.strip()  # type: ignore[union-attr]
     on = body.on
     if on is None and body.value is not None:
@@ -178,3 +323,87 @@ def set_mode(
     assert on is not None
     out = panel.api_v1_set_output_by_code(code, on)
     return {"ok": True, "action": "set_output", **out}
+
+
+@router.get("/coce-messages", summary="Historial de mensajes COCE (solo lectura)")
+def list_coce_messages(
+    _user: Annotated[str, Depends(get_tablet_username)],
+    limit: int = 100,
+) -> dict:
+    return {"messages": coce_message_store.list_messages(limit=limit)}
+
+
+class CoceMessageAckBody(BaseModel):
+    message_ids: list[str] = Field(default_factory=list)
+    channel: str = "tablet"
+
+
+@router.post("/coce-messages/ack", summary="Confirmar lectura de mensajes COCE")
+def ack_coce_messages(
+    body: CoceMessageAckBody,
+    _user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    ids = [str(i).strip() for i in (body.message_ids or []) if str(i).strip()]
+    if not ids:
+        return {"ok": True, "acked": []}
+    newly = coce_message_store.mark_seen(ids)
+    channel = (body.channel or "tablet").strip() or "tablet"
+    now = datetime.now().astimezone().isoformat()
+    for mid in newly:
+        try:
+            from app.coce.notify import emit_coce_event
+
+            emit_coce_event(
+                "message_ack",
+                {
+                    "id": mid,
+                    "message_id": mid,
+                    "read_by": channel,
+                    "read_at": now,
+                    "channel": channel,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "acked": newly}
+
+
+@router.get("/schedules", summary="Horarios semanales (mismas franjas que el panel)")
+def get_schedules_v1(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    return get_schedule_config()
+
+
+@router.put("/schedules", summary="Actualizar horarios semanales desde tablet")
+def put_schedules_v1(
+    _user: Annotated[str, Depends(get_tablet_username)],
+    config: dict = Body(...),
+) -> dict:
+    set_schedule_config(config)
+    notify_schedule_config_changed()
+    return get_schedule_config()
+
+
+@router.get("/technicians", summary="Consulta técnicos habilitados (COCE)")
+def get_technicians(
+    _user: Annotated[str, Depends(get_tablet_username)],
+    dni: Optional[str] = None,
+) -> dict:
+    if dni and dni.strip():
+        tech = technicians_store.find_by_dni(dni)
+        if not tech:
+            return {"found": False, "reason": "not_found"}
+        if not tech.get("active", True):
+            return {"found": False, "reason": "inactive", "technician": tech}
+        valid_until = tech.get("valido_hasta")
+        if valid_until:
+            try:
+                # Accept YYYY-MM-DD or ISO
+                day = str(valid_until)[:10]
+                from datetime import date
+
+                if date.fromisoformat(day) < date.today():
+                    return {"found": False, "reason": "expired", "technician": tech}
+            except ValueError:
+                pass
+        return {"found": True, "technician": tech}
+    return {"technicians": technicians_store.list_all()}

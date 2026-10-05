@@ -1,11 +1,16 @@
-export function GlobalLoader({ open, message = "Cargando..." }) {
+export function GlobalLoader({
+  open,
+  message = "Cargando...",
+  logoSrc = "/assets/invia-board-logo.png",
+  logoFallback = "/assets/invia-board-logo.png",
+}) {
   if (!open) return null;
 
   return (
     <>
       <style>
         {`
-          @keyframes santander-loader-pulse {
+          @keyframes template-loader-pulse {
             0%, 100% { transform: scale(1); opacity: 0.92; }
             50% { transform: scale(1.08); opacity: 1; }
           }
@@ -50,14 +55,19 @@ export function GlobalLoader({ open, message = "Cargando..." }) {
             }}
           >
             <img
-              src="/assets/santander-logo.png"
+              src={logoSrc || logoFallback}
               alt="Cargando"
               style={{
                 width: 80,
                 height: 80,
                 objectFit: "contain",
-                animation: "santander-loader-pulse 1.1s ease-in-out infinite",
+                animation: "template-loader-pulse 1.1s ease-in-out infinite",
                 zIndex: 1,
+              }}
+              onError={(e) => {
+                if (e.currentTarget.src !== logoFallback) {
+                  e.currentTarget.src = logoFallback;
+                }
               }}
             />
           </div>

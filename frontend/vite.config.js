@@ -14,7 +14,9 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // En desarrollo, /api → backend (mismo prefijo que `API_PREFIX` del backend, por defecto /api).
         // Si el API corre en otra máquina/puerto: VITE_API_PROXY_TARGET=http://192.168.1.10:8000
-        "/api": { target: apiTarget, changeOrigin: true },
+        "/api": { target: apiTarget, changeOrigin: true, ws: true },
+        // Pulsaciones ESP32 (firmware usa /zaguan/pulsacion/pN sin prefijo /api)
+        "/zaguan": { target: apiTarget, changeOrigin: true },
         "/docs": { target: apiTarget, changeOrigin: true },
         "/redoc": { target: apiTarget, changeOrigin: true },
       },

@@ -30,9 +30,11 @@ env/
 *.swp
 *.swo
 
-# Base de datos local / datos de desarrollo (ajusta si necesitas versionar algo en data/)
-# backend/data/*.db
-# backend/data/*.db-journal
+# Base de datos local / datos de desarrollo (no subir datos reales ni credenciales)
+backend/data/*.db
+backend/data/*.db-journal
+coce-api/data/*.db
+coce-api/data/*.db-journal
 
 # Logs y cobertura
 *.log
@@ -45,3 +47,7 @@ htmlcov/
 Thumbs.db
 Desktop.ini
 .DS_Store
+coce-api/.env
+coce-api/.env.example
+coce-dashboard/.env
+coce-dashboard/.env.example

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -11,9 +12,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from app.db import panel_modules_store as pms
 from app.db import system_events_store as ses
+from app.db import coce_message_store
 from app.db.session import get_connection
 from app.core.config import settings
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pymodbus.client import ModbusSerialClient, ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
@@ -36,9 +38,306 @@ PULSE_5_SG_TYPE = "pulso_5_sg"
 PULSE_5_SG_DEFAULT_SECONDS = 0
 
 
-def _rule_owns_operational_mode(rule: dict) -> bool:
-    """Solo `enclavamiento` define el modo operativo global (`current_mode`). Pulso, manual, etc. no lo sustituyen."""
-    return (rule.get("type") or "enclavamiento") == "enclavamiento"
+_coce_status_last_emit: float = 0.0
+_COCE_STATUS_MIN_INTERVAL_S = 0.3
+
+
+def _build_status_payload() -> dict[str, Any]:
+    """Misma forma que GET /api/panel/status (estado en RAM, sin releer Modbus)."""
+    cfg_map = pms.get_boards_config_map()
+    return {
+        "boards": {
+            str(bid): {
+                "id": bid,
+                "config": {
+                    "name": cfg_map[bid]["name"],
+                    "host": cfg_map[bid]["host"],
+                    "port": cfg_map[bid]["port"],
+                    "slave_id": cfg_map[bid]["slave_id"],
+                    "modbus_mode": _modbus_mode(),
+                    "serial_port": settings.modbus_serial_port if _is_rtu_mode() else None,
+                },
+                **io_state.get(bid, {}),
+                "input_overrides": input_overrides.get(bid, []),
+            }
+            for bid in _module_ids()
+            if bid in cfg_map
+        },
+        "modules_config": pms.get_full_config_for_api(),
+        "current_mode": current_mode,
+        "active_toggle_rules": sorted(active_toggle_rules),
+        "pending_manual_enclavamiento_mode": pending_manual_enclavamiento_mode,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def _io_tuple(board_id: int) -> tuple[tuple[bool, ...], tuple[bool, ...], tuple[bool, ...]]:
+    st = io_state.get(board_id) or {}
+    return (
+        tuple(st.get("inputs_raw") or []),
+        tuple(st.get("inputs") or []),
+        tuple(st.get("outputs") or []),
+    )
+
+
+def _publish_panel_status_debounced(*, force: bool = False) -> None:
+    """Estado panel en RAM → COCE (WS) y dashboard local (WS)."""
+    global _coce_status_last_emit
+    now = time.time()
+    if not force and now - _coce_status_last_emit < _COCE_STATUS_MIN_INTERVAL_S:
+        return
+    _coce_status_last_emit = now
+    payload = _build_status_payload()
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event("panel_status", payload)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.services import panel_live_hub as plh
+
+        plh.publish_sync({"type": "panel_status", "payload": payload})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _coce_notify(event_type: str, payload: dict | None = None) -> None:
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event(event_type, payload or {})
+    except Exception:  # noqa: BLE001
+        pass
+    if event_type == "mode_changed":
+        try:
+            from app.services import tablet_call_hub
+
+            data = payload or {}
+            tablet_call_hub.notify_mode_changed(data.get("current_mode"))
+        except Exception:  # noqa: BLE001
+            pass
+    if event_type in ("mode_changed", "toggle_rules_changed"):
+        _coce_sync_branch_alerts()
+    if event_type != "heartbeat":
+        _publish_panel_status_debounced()
+
+
+def _is_emergency_toggle_rule(rule_key: str) -> bool:
+    return isinstance(rule_key, str) and rule_key.startswith(EMERGENCY_TOGGLE_RULE_PREFIX)
+
+
+def _coce_sync_branch_alerts() -> None:
+    """Emite alertas COCE solo en transición (incendio / emergencia verde)."""
+    global _coce_branch_alert_state
+    fire_key = "senal_de_incendio_activada"
+    fire_active = current_mode == fire_key
+    if fire_active != _coce_branch_alert_state.get("fire"):
+        _coce_branch_alert_state["fire"] = fire_active
+        try:
+            from app.coce.notify import emit_coce_event
+
+            emit_coce_event(
+                "branch_alert",
+                {
+                    "alert_type": "fire",
+                    "active": fire_active,
+                    "rule_key": fire_key,
+                    "current_mode": current_mode,
+                    "message": (
+                        "Alarma de incendio activada en la sucursal. "
+                        "Contactar de inmediato con la oficina."
+                        if fire_active
+                        else "Alarma de incendio desactivada."
+                    ),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    emerg_keys = sorted(k for k in active_toggle_rules if _is_emergency_toggle_rule(k))
+    emerg_active = bool(emerg_keys)
+    if emerg_active != _coce_branch_alert_state.get("emergency"):
+        _coce_branch_alert_state["emergency"] = emerg_active
+        try:
+            from app.coce.notify import emit_coce_event
+
+            emit_coce_event(
+                "branch_alert",
+                {
+                    "alert_type": "emergency",
+                    "active": emerg_active,
+                    "rule_key": emerg_keys[0] if emerg_keys else "pulsador_emergencia_verde",
+                    "active_toggle_rules": emerg_keys,
+                    "current_mode": current_mode,
+                    "message": (
+                        "Emergencia activada en la sucursal. "
+                        "Contactar de inmediato con la oficina."
+                        if emerg_active
+                        else "Emergencia desactivada en la sucursal."
+                    ),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _zaguan_mode_changed(mode: Optional[str]) -> None:
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        zo.on_mode_changed(mode)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _zaguan_rule_executed(rule_key: str, result: dict) -> None:
+    if not result.get("executed"):
+        return
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        zo.on_rule_executed(rule_key, result)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# Modos operativos de consola central (IN1–IN7) + emergencia/incendio (actuación 8, IN9 central).
+HORARIO_MODE_KEY_PREFIX = "horario_"
+EMERGENCY_MODE_RULE_KEYS = frozenset({"senal_de_incendio_activada"})
+EMERGENCY_TOGGLE_RULE_PREFIX = "pulsador_emergencia_verde_"
+_coce_branch_alert_state: Dict[str, bool] = {"fire": False, "emergency": False}
+
+
+def _rule_owns_operational_mode(rule: dict, rule_key: str) -> bool:
+    """Solo horarios (IN1–IN7) e incendio/emergencia global actualizan `current_mode`."""
+    if (rule.get("type") or "enclavamiento") != "enclavamiento":
+        return False
+    if rule_key.startswith(HORARIO_MODE_KEY_PREFIX):
+        return True
+    return rule_key in EMERGENCY_MODE_RULE_KEYS
+
+
+def _rule_eligible_for_manual_queue(rule_key: str, rule: Optional[dict] = None) -> bool:
+    """Modos operativos enclavamiento (horarios / incendio global), no interruptores ni pulso."""
+    r = rule if rule is not None else rules_config.get(rule_key) or {}
+    return _rule_owns_operational_mode(r, rule_key)
+
+
+def _blocked_active_codes_for_rule(rule: dict) -> List[str]:
+    """Bloqueos para cola de modo: IN efectivo del panel (override OFF libera), sin forzar lectura física."""
+    return [
+        code
+        for code in rule.get("blocked_if_active", [])
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=True,
+            use_overrides=True,
+            physical_inputs=False,
+        )
+    ]
+
+
+def _set_pending_manual_enclavamiento(rule_key: str, blocked_inputs: Optional[List[str]] = None) -> None:
+    global pending_manual_enclavamiento_mode
+    pending_manual_enclavamiento_mode = rule_key
+    add_event(
+        "INFO",
+        f"Modo {rule_key} en cola (esperando liberar bloqueos)",
+        1,
+    )
+    _notify_tablets_mode_queued(rule_key, blocked_inputs)
+
+
+def _clear_pending_manual_enclavamiento() -> None:
+    global pending_manual_enclavamiento_mode
+    had_pending = pending_manual_enclavamiento_mode is not None
+    pending_manual_enclavamiento_mode = None
+    if had_pending:
+        _notify_tablets_mode_queued(None)
+
+
+def _notify_tablets_mode_queued(
+    pending_mode: Optional[str],
+    blocked_inputs: Optional[List[str]] = None,
+) -> None:
+    try:
+        from app.services import tablet_call_hub
+
+        tablet_call_hub.notify_mode_queued(pending_mode, blocked_inputs)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _try_execute_pending_manual_enclavamiento(
+    *, apply_outputs_to_hardware: bool = True
+) -> Optional[dict]:
+    """Reintenta el modo en cola cuando ya no hay entradas de bloqueo activas."""
+    global pending_manual_enclavamiento_mode
+    rk = pending_manual_enclavamiento_mode
+    if not rk:
+        return None
+    rule = rules_config.get(rk)
+    if not rule or not rule.get("enabled", True):
+        _clear_pending_manual_enclavamiento()
+        return None
+    if not _rule_eligible_for_manual_queue(rk, rule):
+        _clear_pending_manual_enclavamiento()
+        return None
+    if _blocked_active_codes_for_rule(rule):
+        return None
+    result = _execute_rule_forced(rk, apply_outputs_to_hardware=apply_outputs_to_hardware)
+    if result.get("executed"):
+        add_event("OK", f"Modo en cola ejecutado: {rk}", 1)
+        return result
+    if not result.get("queued"):
+        _clear_pending_manual_enclavamiento()
+    return result if result.get("executed") else None
+
+
+def _rule_is_emergency_operational(rule_key: str) -> bool:
+    return rule_key in EMERGENCY_MODE_RULE_KEYS
+
+
+def _is_operative_mode_rule_key(rule_key: str) -> bool:
+    """Modos operativos globales: horarios (IN1–IN7) e incendio (IN9), sin prefijo horario_."""
+    return rule_key.startswith(HORARIO_MODE_KEY_PREFIX) or rule_key in EMERGENCY_MODE_RULE_KEYS
+
+
+def _is_radares_esclusa_rule(rule_key: str) -> bool:
+    return rule_key.startswith("radares_") and rule_key.endswith("_esclusa")
+
+
+def _is_radares_automatico_rule(rule_key: str) -> bool:
+    return rule_key.startswith("radares_") and not rule_key.endswith("_esclusa")
+
+
+def _rule_participates_in_auto_cycle(rule_key: str, rule: Optional[dict] = None) -> bool:
+    """
+    Radares «normales» y «_esclusa» comparten el mismo IN físico: solo evalúa la variante
+    coherente con `current_mode` (automático vs esclusa).
+    """
+    if _is_radares_esclusa_rule(rule_key):
+        return current_mode == "horario_esclusa"
+    if _is_radares_automatico_rule(rule_key):
+        return current_mode != "horario_esclusa"
+    return True
+
+
+def _is_toggle_enclavamiento_rule(rule_key: str, rule: Optional[dict] = None) -> bool:
+    """
+    Enclavamiento tipo interruptor: ON/OFF al pulsar (lateral o IN), sin mantener apretado.
+    Excluye solo horarios (IN1–IN7) e incendio global. El resto de `enclavamiento` en JSON es interruptor.
+    Los «timbre» (pulso N s) son `pulso_5_sg`, no entran aquí.
+    """
+    r = rule if rule is not None else rules_config.get(rule_key) or {}
+    if r.get("type") != "enclavamiento":
+        return False
+    if rule_key.startswith(HORARIO_MODE_KEY_PREFIX):
+        return False
+    if _rule_is_emergency_operational(rule_key):
+        return False
+    return True
 
 
 def _pymodbus_client_kwargs() -> Dict[str, Any]:
@@ -50,12 +349,36 @@ def _pymodbus_client_kwargs() -> Dict[str, Any]:
 
 pms.ensure_panel_modules_schema()
 pms.seed_default_modules_if_empty()
+pms.sync_channel_names_from_catalog(only_if_empty=True)
 
 clients: Dict[int, Optional[Any]] = {}
 io_state: Dict[int, dict] = {}
 input_overrides: Dict[int, List[Optional[bool]]] = {}
 serial_client: Optional[ModbusSerialClient] = None
+# RTU: un solo bus serie → un lock global. TCP: un RLock por placa (conexiones IP independientes).
 modbus_io_lock = threading.RLock()
+_board_modbus_locks: Dict[int, threading.RLock] = {}
+_board_modbus_locks_guard = threading.Lock()
+_auto_rules_eval_lock = threading.RLock()
+
+
+def _board_modbus_lock(board_id: int) -> threading.RLock:
+    """Candado de I/O Modbus para una placa. En RTU devuelve el lock del bus compartido."""
+    if _is_rtu_mode():
+        return modbus_io_lock
+    with _board_modbus_locks_guard:
+        lock = _board_modbus_locks.get(board_id)
+        if lock is None:
+            lock = threading.RLock()
+            _board_modbus_locks[board_id] = lock
+        return lock
+
+
+def _drop_board_modbus_lock(board_id: int) -> None:
+    with _board_modbus_locks_guard:
+        _board_modbus_locks.pop(board_id, None)
+
+
 # Tras fallo al abrir el puerto serie (p. ej. COM inexistente en PC remoto), evita spam de pymodbus/logs cada ciclo.
 _rtu_connect_skip_until: float = 0.0
 _RTU_OPEN_FAIL_BACKOFF_SEC: float = 60.0
@@ -119,15 +442,16 @@ def _sync_runtime_from_db() -> None:
     """Alinea clientes en memoria, tamaños de I/O y overrides con la configuración en SQLite."""
     global clients, io_state, input_overrides
     mids = _module_ids()
-    with modbus_io_lock:
-        for old in list(clients.keys()):
-            if old not in mids:
+    for old in list(clients.keys()):
+        if old not in mids:
+            with _board_modbus_lock(old):
                 c = clients.pop(old, None)
                 if c:
                     try:
                         c.close()
                     except Exception:
                         pass
+            _drop_board_modbus_lock(old)
     for old in list(io_state.keys()):
         if old not in mids:
             io_state.pop(old, None)
@@ -152,13 +476,18 @@ def _sync_runtime_from_db() -> None:
             "last_update": prev.get("last_update"),
             "error": prev.get("error"),
             "in_out_associated": prev.get("in_out_associated"),
+            "pulse_baseline_set": prev.get("pulse_baseline_set", False),
         }
         o_prev = input_overrides.get(mid, [])
         input_overrides[mid] = [
             (o_prev[i] if i < len(o_prev) and o_prev[i] in (None, True, False) else None) for i in range(n_in)
         ]
 mode_latches: Dict[str, bool] = {}
+# IN trigger de reglas enclavamiento → clave de modo (p. ej. IN_01_05 → horario_cerrado).
+in_trigger_to_mode: Dict[str, str] = {}
 current_mode: Optional[str] = None
+previous_operational_mode: Optional[str] = None
+active_toggle_rules: set[str] = set()
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 RULES_FILE = BACKEND_DIR / "data" / "panel_rules.json"
@@ -183,15 +512,24 @@ def _save_rules_to_disk(rules: Dict[str, dict]) -> None:
 
 rules_config: Dict[str, dict] = _load_rules_from_disk()
 rules_runtime: Dict[str, dict] = {}
+pending_manual_enclavamiento_mode: Optional[str] = None
 background_auto_rules_last_run_at: Optional[str] = None
 background_auto_rules_last_result: Dict[str, Any] = {}
 background_auto_rules_last_error: Optional[str] = None
 
 
 def _sync_mode_latches_from_rules(rules: Dict[str, dict]) -> None:
-    """Asegura entradas en mode_latches para cada código IN referenciado en las reglas."""
-    for _rk, rule in rules.items():
+    """Asegura entradas en mode_latches y el mapa IN trigger → modo enclavamiento."""
+    global in_trigger_to_mode
+    trigger_map: Dict[str, str] = {}
+    for rk, rule in rules.items():
         tc = rule.get("trigger")
+        if (
+            rule.get("type") == "enclavamiento"
+            and isinstance(tc, str)
+            and tc.startswith("IN_")
+        ):
+            trigger_map[tc] = rk
         if isinstance(tc, str) and tc.startswith("IN_"):
             mode_latches.setdefault(tc, False)
         for code in rule.get("blocked_if_active") or []:
@@ -200,6 +538,7 @@ def _sync_mode_latches_from_rules(rules: Dict[str, dict]) -> None:
         for code in rule.get("deactivate_modes") or []:
             if isinstance(code, str) and code.startswith("IN_"):
                 mode_latches.setdefault(code, False)
+    in_trigger_to_mode = trigger_map
 
 
 def _sync_rules_runtime(rules: Dict[str, dict]) -> None:
@@ -218,6 +557,7 @@ def _sync_rules_runtime(rules: Dict[str, dict]) -> None:
         else:
             rules_runtime[k].setdefault("pulse_until", None)
             rules_runtime[k].setdefault("last_follow_on", False)
+            rules_runtime[k].setdefault("temp_deact_snapshot", {})
 
 
 _sync_mode_latches_from_rules(rules_config)
@@ -225,6 +565,8 @@ _sync_rules_runtime(rules_config)
 
 PANEL_STATE_OVERRIDES_KEY = "panel_input_overrides"
 PANEL_STATE_CURRENT_MODE_KEY = "panel_current_mode"
+PANEL_STATE_PREVIOUS_MODE_KEY = "panel_previous_operational_mode"
+PANEL_STATE_ACTIVE_TOGGLE_RULES_KEY = "panel_active_toggle_rules"
 
 
 def _ensure_panel_state_table() -> None:
@@ -273,8 +615,148 @@ def _persist_current_mode_to_db() -> None:
     _save_panel_state_value(PANEL_STATE_CURRENT_MODE_KEY, json.dumps({"current_mode": current_mode}))
 
 
+def _persist_previous_operational_mode_to_db() -> None:
+    _save_panel_state_value(
+        PANEL_STATE_PREVIOUS_MODE_KEY,
+        json.dumps({"previous_operational_mode": previous_operational_mode}),
+    )
+
+
+def _persist_active_toggle_rules_to_db() -> None:
+    _save_panel_state_value(
+        PANEL_STATE_ACTIVE_TOGGLE_RULES_KEY,
+        json.dumps({"active_toggle_rules": sorted(active_toggle_rules)}),
+    )
+
+
+def _notify_toggle_rules_changed() -> None:
+    _persist_active_toggle_rules_to_db()
+    keys = sorted(active_toggle_rules)
+    _coce_notify(
+        "toggle_rules_changed",
+        {"active_toggle_rules": keys},
+    )
+    _publish_panel_status_debounced()
+    try:
+        from app.services import tablet_call_hub
+
+        tablet_call_hub.notify_toggle_rules_changed(keys)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _stash_operational_mode_before_emergency() -> None:
+    """Guarda el horario vigente antes de activar incendio/emergencia (como la tablet)."""
+    global previous_operational_mode
+    if (
+        current_mode
+        and current_mode.startswith(HORARIO_MODE_KEY_PREFIX)
+        and not _rule_is_emergency_operational(current_mode)
+    ):
+        previous_operational_mode = current_mode
+        _persist_previous_operational_mode_to_db()
+
+
+def _clear_rule_deactivate_mode_overrides(rule: dict) -> None:
+    for code in rule.get("deactivate_modes", []):
+        if not isinstance(code, str) or not code.strip():
+            continue
+        mode_latches[code] = False
+        board_id, channel = _parse_in_code(code)
+        input_overrides[board_id][channel - 1] = None
+
+
+def _reapply_operational_mode_outputs(rule_key: str) -> None:
+    """Vuelve a aplicar salidas del horario restaurado sin re-ejecutar toda la regla."""
+    rule = rules_config.get(rule_key)
+    if not rule:
+        return
+    origin = f"restore_after_emergency:{rule_key}"
+    lock_codes: List[str] = []
+    for do_code in rule.get("activate_outputs", []):
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            if zo.is_door_lock_output(str(do_code)):
+                lock_codes.append(str(do_code))
+                continue
+        except Exception:  # noqa: BLE001
+            pass
+        board_id, channel = _parse_out_code(do_code)
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin,
+            apply_outputs_to_hardware=True,
+        )
+    if lock_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            zo.defer_lock_outputs_until_door_settled(lock_codes)
+            add_event(
+                "INFO",
+                f"Bulones diferidos hasta cierre de puerta (+ settle): {', '.join(lock_codes)}",
+                1,
+            )
+        except Exception:  # noqa: BLE001
+            for do_code in lock_codes:
+                board_id, channel = _parse_out_code(do_code)
+                _apply_output_for_rule(
+                    board_id,
+                    channel,
+                    True,
+                    out_code=do_code,
+                    origin=origin,
+                    apply_outputs_to_hardware=True,
+                )
+    _apply_deactivate_outputs(
+        rule, True, rule_key=rule_key, origin=origin
+    )
+    _persist_overrides_to_db()
+
+
+def _restore_operational_mode_after_emergency(
+    *,
+    require_trigger_on: bool = True,
+    reapply_outputs: bool = False,
+) -> Optional[str]:
+    """Al soltar emergencia/incendio, restaura el horario anterior si aplica."""
+    global current_mode, previous_operational_mode
+    prev = previous_operational_mode
+    previous_operational_mode = None
+    _persist_previous_operational_mode_to_db()
+    restored: Optional[str] = None
+    if prev:
+        rule = rules_config.get(prev) or {}
+        trigger = rule.get("trigger")
+        if not require_trigger_on:
+            restored = prev
+        elif isinstance(trigger, str) and trigger:
+            try:
+                still_on = _read_input_effective(
+                    trigger,
+                    use_hardware_if_no_override=False,
+                    use_overrides=True,
+                    physical_inputs=False,
+                )
+            except Exception:  # noqa: BLE001
+                still_on = False
+            if still_on:
+                restored = prev
+    current_mode = restored
+    _persist_current_mode_to_db()
+    _coce_notify("mode_changed", {"current_mode": current_mode})
+    _zaguan_mode_changed(current_mode)
+    if restored and reapply_outputs:
+        _reapply_operational_mode_outputs(restored)
+    return restored
+
+
 def _load_persisted_panel_state() -> None:
-    global current_mode
+    global current_mode, previous_operational_mode, active_toggle_rules
     _sync_runtime_from_db()
     raw_overrides = _load_panel_state_value(PANEL_STATE_OVERRIDES_KEY)
     if raw_overrides:
@@ -302,14 +784,56 @@ def _load_persisted_panel_state() -> None:
         except Exception:  # noqa: BLE001
             pass
 
+    raw_prev = _load_panel_state_value(PANEL_STATE_PREVIOUS_MODE_KEY)
+    if raw_prev:
+        try:
+            prev_obj = json.loads(raw_prev)
+            prev_value = prev_obj.get("previous_operational_mode")
+            if isinstance(prev_value, str) or prev_value is None:
+                previous_operational_mode = prev_value
+        except Exception:  # noqa: BLE001
+            pass
+
+    raw_toggles = _load_panel_state_value(PANEL_STATE_ACTIVE_TOGGLE_RULES_KEY)
+    if raw_toggles:
+        try:
+            tobj = json.loads(raw_toggles)
+            keys = tobj.get("active_toggle_rules")
+            if isinstance(keys, list):
+                active_toggle_rules = {
+                    str(k)
+                    for k in keys
+                    if isinstance(k, str) and k in rules_config
+                    and _is_toggle_enclavamiento_rule(k)
+                }
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        _coce_sync_branch_alerts()
+    except Exception:  # noqa: BLE001
+        pass
+
 
 _load_persisted_panel_state()
 
 
-def add_event(level: str, message: str, board_id: int = 0) -> None:
+def add_event(
+    level: str,
+    message: str,
+    board_id: int = 0,
+    *,
+    event_type: str = "general",
+    payload: Optional[dict] = None,
+) -> None:
     """Registra evento en SQLite (actor desde contexto panel/tablet o system)."""
     try:
-        ses.record_event(level, message, board_id=board_id)
+        ses.record_event(
+            level,
+            message,
+            board_id=board_id,
+            event_type=event_type,
+            payload=payload,
+        )
     except Exception:  # noqa: BLE001
         # No bloquear operación crítica si falla el log
         pass
@@ -415,9 +939,9 @@ def _connect_board(board_id: int) -> bool:
                     f"(comprueba puerto Modbus, suele ser 502)"
                 )
                 return False
-            # Un solo hilo a la vez por socket Modbus TCP: evita mezcla de transaction_id
-            # (p. ej. GET /status + connect en paralelo sobre la misma placa).
-            with modbus_io_lock:
+            # Un solo hilo a la vez por socket de esta placa: evita mezcla de transaction_id
+            # en la misma IP; otras placas usan su propio lock (_board_modbus_lock).
+            with _board_modbus_lock(board_id):
                 if clients[board_id]:
                     try:
                         clients[board_id].close()
@@ -490,7 +1014,7 @@ def _connect_board(board_id: int) -> bool:
                 )
             else:
                 try:
-                    with modbus_io_lock:
+                    with _board_modbus_lock(board_id):
                         c = clients.get(board_id)
                         if c is None:
                             add_event(
@@ -548,11 +1072,28 @@ def _read_holding_block_if_contiguous(client: Any, slave: int, channels: List[di
     return [bool(res.registers[i]) for i in range(n)]
 
 
+def _track_input_pulse_rising_edges(board_id: int, prev_inputs_raw: tuple[bool, ...]) -> None:
+    """Cuenta flancos OFF→ON en inputs_raw (pulsaciones físicas, sin override)."""
+    ins, _ = pms.get_channels_for_module(board_id)
+    st = io_state.get(board_id)
+    if not st:
+        return
+    if not st.get("pulse_baseline_set"):
+        st["pulse_baseline_set"] = True
+        return
+    current_raw = list(st.get("inputs_raw") or [])
+    for i, ch in enumerate(ins):
+        if i >= len(prev_inputs_raw) or i >= len(current_raw):
+            continue
+        if not prev_inputs_raw[i] and current_raw[i]:
+            pms.increment_channel_pulse_count(int(ch["id"]))
+
+
 def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: bool = False) -> None:
     """
     Lee OUT/IN (y opcionalmente relation_register) vía Modbus.
-    Si `_modbus_lock_held=True`, el caller ya tiene `modbus_io_lock` (p. ej. barrido global en GET /status)
-    para que ningún otro hilo meta peticiones entre placas y reducir errores de transaction_id en TCP.
+    Si `_modbus_lock_held=True`, el caller ya tiene `_board_modbus_lock(board_id)` para esta placa
+    (evita transaction_id mezclados en el mismo socket TCP).
     """
     client = clients.get(board_id)
     if not _client_is_open(client):
@@ -564,6 +1105,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
     cfg = _board_cfg(board_id)
     slave = cfg["slave_id"]
     ins, outs = pms.get_channels_for_module(board_id)
+    io_before = _io_tuple(board_id)
 
     def _run_bus_reads() -> None:
         out_batch = _read_holding_block_if_contiguous(client, slave, outs)
@@ -599,7 +1141,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
         if _modbus_lock_held:
             _run_bus_reads()
         else:
-            with modbus_io_lock:
+            with _board_modbus_lock(board_id):
                 _run_bus_reads()
 
         effective_inputs: List[bool] = []
@@ -609,10 +1151,14 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
             effective_inputs.append(raw if forced is None else forced)
         io_state[board_id]["inputs"] = effective_inputs
 
+        _track_input_pulse_rising_edges(board_id, io_before[0])
+
         io_state[board_id]["connected"] = True
         io_state[board_id]["last_update"] = datetime.now().isoformat()
         io_state[board_id]["error"] = None
         _read_io_fail_streak[board_id] = 0
+        if _io_tuple(board_id) != io_before:
+            _publish_panel_status_debounced()
     except Exception as e:  # noqa: BLE001
         # Reintento único tras reconexión cuando el equipo resetea socket (WinError 10054).
         if not retried and not _connect_backoff_active(board_id):
@@ -635,7 +1181,13 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
             io_state[board_id]["error"] = str(e)
             _reset_read_io_fail_streak(board_id)
             if not soft_ok and was_connected:
-                add_event("WARN", f"Lectura Modbus: placa {board_id} marcada desconectada tras {streak} fallo(s): {e}", board_id)
+                add_event(
+                    "WARN",
+                    f"Lectura Modbus: placa {board_id} marcada desconectada tras {streak} fallo(s): {e}",
+                    board_id,
+                    event_type="modbus_error",
+                    payload={"board_id": board_id, "error": str(e), "streak": streak},
+                )
 
 
 def _write_output(board_id: int, channel: int, state: bool) -> None:
@@ -649,7 +1201,7 @@ def _write_output(board_id: int, channel: int, state: bool) -> None:
     open_v = int(ch["open_cmd"]) if ch["open_cmd"] is not None else CMD_OPEN
     close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
     value = open_v if state else close_v
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=f"Error Modbus escribiendo OUT{channel} en módulo {board_id}: {result}")
@@ -679,23 +1231,78 @@ def _write_output_if_connected(
     return True
 
 
+def _apply_output_for_rule(
+    board_id: int,
+    channel: int,
+    state: bool,
+    *,
+    out_code: str,
+    origin: str,
+    apply_outputs_to_hardware: bool,
+) -> bool:
+    """
+    Aplica salida de regla/modo: hardware si la placa está conectada; si no, solo snapshot RAM
+    (permite cambiar de modo con una o varias placas offline).
+    Devuelve True si se escribió en hardware.
+    """
+    if apply_outputs_to_hardware:
+        if io_state.get(board_id, {}).get("connected"):
+            return _write_output_if_connected(
+                board_id, channel, state, out_code=out_code, origin=origin
+            )
+        _, outs = pms.get_channels_for_module(board_id)
+        if 1 <= channel <= len(outs):
+            io_state[board_id]["outputs"][channel - 1] = state
+        return False
+    _, outs = pms.get_channels_for_module(board_id)
+    if 1 <= channel <= len(outs):
+        io_state[board_id]["outputs"][channel - 1] = state
+    return False
+
+
+def _read_input_for_blocker(
+    code: str,
+    *,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
+    physical_inputs: bool = False,
+) -> bool:
+    """IN para bloqueos: sin intentar reconectar placas desconectadas (evita 503 en cambio de modo)."""
+    board_id, _ = _parse_in_code(code)
+    connected = bool(io_state.get(board_id, {}).get("connected"))
+    return _read_input_effective(
+        code,
+        use_hardware_if_no_override=use_hardware_if_no_override and connected,
+        use_overrides=use_overrides,
+        physical_inputs=physical_inputs if connected else False,
+    )
+
+
 def _parse_in_code(code: str) -> tuple[int, int]:
-    # Formato recomendado: IN_YY_ZZ (sin XX)
-    parts = code.split("_")
+    parsed = pms.parse_smcse_code(code)
+    if parsed:
+        kind, module_id, slot_index = parsed
+        if kind != "input":
+            raise HTTPException(status_code=400, detail=f"{code} no es una entrada (DI)")
+        return module_id, slot_index
+    parts = code.strip().upper().split("_")
     if len(parts) == 3 and parts[0] == "IN":
         return int(parts[1]), int(parts[2])
-    # Compatibilidad legado: DI_01_YY_ZZ
     if len(parts) == 4 and parts[0] == "DI":
         return int(parts[2]), int(parts[3])
     raise HTTPException(status_code=400, detail=f"Código de entrada inválido: {code}")
 
 
 def _parse_out_code(code: str) -> tuple[int, int]:
-    parts = code.split("_")
-    # Nuevo formato recomendado: OUT_YY_ZZ (sin XX)
+    parsed = pms.parse_smcse_code(code)
+    if parsed:
+        kind, module_id, slot_index = parsed
+        if kind != "output":
+            raise HTTPException(status_code=400, detail=f"{code} no es una salida (DO)")
+        return module_id, slot_index
+    parts = code.strip().upper().split("_")
     if len(parts) == 3 and parts[0] == "OUT":
         return int(parts[1]), int(parts[2])
-    # Compatibilidad legado: DO_01_YY_ZZ
     if len(parts) == 4 and parts[0] == "DO":
         return int(parts[2]), int(parts[3])
     raise HTTPException(status_code=400, detail=f"Código de salida inválido: {code}")
@@ -744,6 +1351,25 @@ def _read_input_effective(
     return io_state[board_id]["inputs"][idx]
 
 
+def _horario_blocker_suppressed_by_operative_mode(mode_key: str) -> bool:
+    """
+    Con un horario operativo distinto, no bloquear por cables «apagados» al activar ese modo
+    (p. ej. en Esclusa ignorar IN1 Automático aunque el bus siga alto).
+    En Automático sí cuentan los IN de otros horarios (p. ej. Esclusa) para bloquear radares.
+    """
+    if not current_mode or not mode_key:
+        return False
+    cur_rule = rules_config.get(current_mode) or {}
+    deact = cur_rule.get("deactivate_modes") or []
+    blocker_rule = rules_config.get(mode_key) or {}
+    blocker_trigger = blocker_rule.get("trigger")
+    if not isinstance(blocker_trigger, str) or blocker_trigger not in deact:
+        return False
+    if current_mode == "horario_automatico":
+        return False
+    return True
+
+
 def _blocked_signal_active(
     code: str,
     *,
@@ -751,7 +1377,7 @@ def _blocked_signal_active(
     use_overrides: bool = True,
     physical_inputs: bool = False,
 ) -> bool:
-    """True si la condición de bloqueo está activa: IN_* (físico o efectivo según flags); OUT_* leyendo salidas."""
+    """True si la condición de bloqueo está activa. IN: efectivo panel (override manda); OUT: salidas."""
     code = (code or "").strip()
     if not code:
         return False
@@ -769,7 +1395,19 @@ def _blocked_signal_active(
         if not 1 <= channel <= len(outs):
             return False
         return bool(outs[channel - 1])
-    return _read_input_effective(
+    mode_key = in_trigger_to_mode.get(code)
+    if mode_key is not None and _is_operative_mode_rule_key(mode_key):
+        if current_mode == mode_key:
+            return True
+        if _horario_blocker_suppressed_by_operative_mode(mode_key):
+            return False
+        return _read_input_for_blocker(
+            code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            physical_inputs=physical_inputs,
+        )
+    return _read_input_for_blocker(
         code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
@@ -784,10 +1422,202 @@ def _default_rule_runtime(rule_key: str) -> dict:
             "last_executed_at": None,
             "pulse_until": None,
             "last_follow_on": False,
+            "temp_deact_snapshot": {},
+            "temp_deact_restore_at": None,
         }
     rules_runtime[rule_key].setdefault("pulse_until", None)
     rules_runtime[rule_key].setdefault("last_follow_on", False)
+    rules_runtime[rule_key].setdefault("temp_deact_snapshot", {})
+    rules_runtime[rule_key].setdefault("temp_deact_restore_at", None)
+    rules_runtime[rule_key].setdefault("pulse_trigger_panel_override", False)
     return rules_runtime[rule_key]
+
+
+def _clear_pulse_trigger_override_after_panel_pulse(rule_key: str, rule: dict, runtime: dict) -> None:
+    """Tras un pulso temporizado disparado por override, libera el IN (null) para ver el estado real."""
+    if not runtime.pop("pulse_trigger_panel_override", False):
+        return
+    trigger_code = rule.get("trigger")
+    if not isinstance(trigger_code, str) or not trigger_code:
+        return
+    board_id, channel = _parse_in_code(trigger_code)
+    input_overrides[board_id][channel - 1] = None
+    _persist_overrides_to_db()
+    add_event("INFO", f"Pulso finalizado: override liberado en {trigger_code} ({rule_key})", 1)
+
+
+def _finish_timed_pulse(
+    rule: dict,
+    rule_key: str,
+    runtime: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    origin: str,
+) -> None:
+    """Apaga salidas del pulso, restaura desactivación temporal y limpia override del trigger si tocaba."""
+    _restore_temp_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware, origin=origin
+    )
+    _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
+    runtime["pulse_until"] = None
+    _clear_pulse_trigger_override_after_panel_pulse(rule_key, rule, runtime)
+
+
+def _rule_deactivate_outputs_temporary(rule: dict) -> bool:
+    """Si True, al soltar la regla se restauran solo los OUT que estaban ON antes de forzarlos a OFF."""
+    return bool(rule.get("deactivate_outputs_temporary"))
+
+
+def _cancel_pending_temp_deactivate_restore(rule_key: str) -> None:
+    runtime = rules_runtime.get(rule_key)
+    if runtime is not None:
+        runtime["temp_deact_restore_at"] = None
+
+
+def _read_output_cached(board_id: int, channel: int) -> bool:
+    outs = list(io_state.get(board_id, {}).get("outputs") or [])
+    if 1 <= channel <= len(outs):
+        return bool(outs[channel - 1])
+    return False
+
+
+def _snapshot_temp_deactivate_outputs(rule: dict, rule_key: str) -> None:
+    """Guarda en runtime qué OUT de deactivate_outputs estaban ON antes de apagarlos."""
+    if not _rule_deactivate_outputs_temporary(rule):
+        return
+    _cancel_pending_temp_deactivate_restore(rule_key)
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = {}
+    for do_code in rule.get("deactivate_outputs") or []:
+        try:
+            board_id, channel = _parse_out_code(do_code)
+        except HTTPException:
+            continue
+        if _read_output_cached(board_id, channel):
+            snap[do_code] = True
+    runtime["temp_deact_snapshot"] = snap
+
+
+def _clear_temp_deactivate_snapshot(rule_key: str) -> None:
+    if rule_key in rules_runtime:
+        rules_runtime[rule_key]["temp_deact_snapshot"] = {}
+
+
+def _restore_temp_deactivate_outputs(
+    rule: dict,
+    rule_key: str,
+    apply_outputs_to_hardware: bool,
+    *,
+    origin: str,
+    force_immediate: bool = False,
+) -> List[str]:
+    """Vuelve a ON los OUT que estaban ON en el snapshot (desactivación temporal)."""
+    if not _rule_deactivate_outputs_temporary(rule):
+        return []
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = dict(runtime.get("temp_deact_snapshot") or {})
+    if not any(snap.values()):
+        _cancel_pending_temp_deactivate_restore(rule_key)
+        return []
+    if not force_immediate:
+        try:
+            delay = int(settings.panel_temp_deactivate_restore_delay_seconds)
+        except (TypeError, ValueError):
+            delay = 0
+        delay = max(0, min(120, delay))
+        if delay > 0:
+            runtime["temp_deact_restore_at"] = (
+                datetime.now() + timedelta(seconds=delay)
+            ).isoformat()
+            return []
+    restored: List[str] = []
+    lock_codes: List[str] = []
+    for do_code, was_on in snap.items():
+        if not was_on:
+            continue
+        is_lock = False
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            is_lock = zo.is_door_lock_output(str(do_code))
+        except Exception:  # noqa: BLE001
+            is_lock = False
+        if is_lock:
+            lock_codes.append(str(do_code))
+            continue
+        board_id, channel = _parse_out_code(do_code)
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
+        restored.append(do_code)
+    if lock_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            deferred = zo.defer_lock_outputs_until_door_settled(lock_codes)
+            restored.extend(deferred)
+            add_event(
+                "INFO",
+                f"Bulones diferidos hasta IN4 OFF + settle: {', '.join(deferred)}",
+                1,
+            )
+        except Exception:  # noqa: BLE001
+            for do_code in lock_codes:
+                board_id, channel = _parse_out_code(do_code)
+                _apply_output_for_rule(
+                    board_id,
+                    channel,
+                    True,
+                    out_code=do_code,
+                    origin=origin,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                )
+                restored.append(do_code)
+    _clear_temp_deactivate_snapshot(rule_key)
+    _cancel_pending_temp_deactivate_restore(rule_key)
+    if restored:
+        add_event(
+            "INFO",
+            f"Restauradas salidas (estaban ON antes de la regla): {', '.join(restored)}",
+            1,
+        )
+        # Escritura Modbus actualiza io_state sin pasar por _read_all_io; el siguiente
+        # poll no ve delta y el dashboard no recibe panel_status hasta refrescar.
+        _publish_panel_status_debounced(force=True)
+    return restored
+
+
+def _process_pending_temp_deactivate_restores(
+    apply_outputs_to_hardware: bool = True,
+) -> int:
+    """Ejecuta restauraciones diferidas cuyo plazo ya venció."""
+    now = datetime.now()
+    done = 0
+    for rule_key, runtime in list(rules_runtime.items()):
+        at_str = runtime.get("temp_deact_restore_at")
+        if not at_str:
+            continue
+        at_dt = _parse_iso_datetime(at_str)
+        if at_dt is None or now < at_dt:
+            continue
+        rule = rules_config.get(rule_key)
+        if not rule:
+            runtime["temp_deact_restore_at"] = None
+            continue
+        _restore_temp_deactivate_outputs(
+            rule,
+            rule_key,
+            apply_outputs_to_hardware,
+            origin=f"restore_delayed:{rule_key}",
+            force_immediate=True,
+        )
+        done += 1
+    return done
 
 
 def _pulse_seconds(rule: dict) -> int:
@@ -825,22 +1655,34 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
+def _apply_deactivate_outputs(
+    rule: dict,
+    apply_outputs_to_hardware: bool,
+    *,
+    rule_key: str = "",
+    origin: str = "",
+) -> None:
+    """Apaga deactivate_outputs; si `deactivate_outputs_temporary`, guarda snapshot previo."""
+    tag = origin or (f"rule:{rule_key}" if rule_key else "rule")
+    if rule_key and _rule_deactivate_outputs_temporary(rule):
+        _snapshot_temp_deactivate_outputs(rule, rule_key)
+    for do_code in rule.get("deactivate_outputs", []):
+        board_id, channel = _parse_out_code(do_code)
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            False,
+            out_code=do_code,
+            origin=tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
+
+
 def _pulse_apply_deactivate_outputs(
     rule: dict, apply_outputs_to_hardware: bool, *, rule_key: str = ""
 ) -> None:
     tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
-    for do_code in rule.get("deactivate_outputs", []):
-        board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            _write_output_if_connected(
-                board_id, channel, False, out_code=do_code, origin=tag
-            )
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = False
+    _apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key, origin=tag)
 
 
 def _pulse_apply_activate_outputs(
@@ -849,20 +1691,14 @@ def _pulse_apply_activate_outputs(
     tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            _write_output_if_connected(
-                board_id, channel, state, out_code=do_code, origin=tag
-            )
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = state
-                if state:
-                    add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
-                else:
-                    add_event("INFO", f"SIMULADO {do_code} -> OFF (sin hardware)", board_id)
+        _apply_output_for_rule(
+            board_id,
+            channel,
+            state,
+            out_code=do_code,
+            origin=tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
 
 
 def _evaluate_pulse_5_sg_rule(
@@ -884,19 +1720,33 @@ def _evaluate_pulse_5_sg_rule(
 
     if not rule.get("enabled", True):
         if runtime.get("last_follow_on"):
+            _restore_temp_deactivate_outputs(
+                rule, rule_key, apply_outputs_to_hardware, origin=f"pulso_off:{rule_key}"
+            )
             _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["last_follow_on"] = False
         if runtime.get("pulse_until"):
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
-            runtime["pulse_until"] = None
+            _finish_timed_pulse(
+                rule,
+                rule_key,
+                runtime,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                origin=f"pulso_fin:{rule_key}",
+            )
+            add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
         return {"executed": False, "reason": "Regla deshabilitada"}
 
     if secs > 0:
         now = datetime.now()
         end_dt = _parse_iso_datetime(runtime.get("pulse_until"))
         if end_dt is not None and now >= end_dt:
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
-            runtime["pulse_until"] = None
+            _finish_timed_pulse(
+                rule,
+                rule_key,
+                runtime,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                origin=f"pulso_fin:{rule_key}",
+            )
             add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
 
         trigger_code = rule.get("trigger", "IN_01_01")
@@ -950,6 +1800,7 @@ def _evaluate_pulse_5_sg_rule(
             }
 
         if blocked_active_codes:
+            _clear_trigger_input_override(trigger_code)
             add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
             return {
                 "executed": False,
@@ -964,6 +1815,9 @@ def _evaluate_pulse_5_sg_rule(
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         until = now + timedelta(seconds=secs)
         runtime["pulse_until"] = until.isoformat()
+        runtime["pulse_trigger_panel_override"] = _trigger_activated_by_panel_override(
+            trigger_code, manual=manual
+        )
         runtime["last_executed_at"] = now.isoformat()
         add_event("OK", f"Pulso {secs}s iniciado: {rule_key}", 1)
         return {
@@ -1004,9 +1858,25 @@ def _evaluate_pulse_5_sg_rule(
     ]
     desired = bool(trigger_active) and not blocked_active_codes
     last = bool(runtime.get("last_follow_on"))
+    rising = bool(trigger_active) and not bool(runtime.get("last_trigger_active"))
+
+    if rising and blocked_active_codes:
+        _clear_trigger_input_override(trigger_code)
+        runtime["last_trigger_active"] = trigger_active
+        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        return {
+            "executed": False,
+            "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+            "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "follow_on": False,
+            "pulse_seconds": 0,
+            "follow_mode": True,
+        }
 
     if manual:
         if blocked_active_codes:
+            _clear_trigger_input_override(trigger_code)
             add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
             return {
                 "executed": False,
@@ -1056,6 +1926,9 @@ def _evaluate_pulse_5_sg_rule(
         }
 
     if not desired and last:
+        restored = _restore_temp_deactivate_outputs(
+            rule, rule_key, apply_outputs_to_hardware, origin=f"radar_off:{rule_key}"
+        )
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
         runtime["last_follow_on"] = False
         runtime["last_executed_at"] = datetime.now().isoformat()
@@ -1069,6 +1942,7 @@ def _evaluate_pulse_5_sg_rule(
             "follow_on": False,
             "pulse_seconds": 0,
             "follow_mode": True,
+            "outputs_restored": restored,
             "timestamp": runtime["last_executed_at"],
         }
 
@@ -1076,11 +1950,576 @@ def _evaluate_pulse_5_sg_rule(
         "executed": False,
         "reason": "Sin cambio de nivel",
         "trigger_input_active": trigger_active,
-        "blocked_inputs": blocked_active_codes,
         "follow_on": desired,
         "pulse_seconds": 0,
         "follow_mode": True,
     }
+
+
+def _trigger_activated_by_panel_override(trigger_code: str, *, manual: bool = False) -> bool:
+    """True si el modo se activó por panel (override ON en el trigger o ejecución manual)."""
+    if manual:
+        return True
+    board_id, channel = _parse_in_code(trigger_code)
+    return input_overrides[board_id][channel - 1] is True
+
+
+def _clear_trigger_input_override(trigger_code: str) -> None:
+    """Si el trigger tenía override (simulación), vuelve a REAL tras bloqueo o denegación."""
+    if not isinstance(trigger_code, str) or not trigger_code.strip():
+        return
+    board_id, channel = _parse_in_code(trigger_code)
+    if input_overrides[board_id][channel - 1] is not None:
+        input_overrides[board_id][channel - 1] = None
+        _persist_overrides_to_db()
+
+
+def _in_code_for_board_channel(board_id: int, channel: int) -> str:
+    return f"IN_{board_id:02d}_{channel:02d}"
+
+
+def _blocked_inputs_for_rule(
+    rule: dict,
+    *,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
+    physical_inputs: bool = False,
+) -> List[str]:
+    return [
+        code
+        for code in rule.get("blocked_if_active") or []
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            physical_inputs=physical_inputs,
+        )
+    ]
+
+
+def _override_request_blocked(board_id: int, channel: int, state: Optional[bool]) -> Optional[dict]:
+    """Si FORZADA ON dispararía una regla bloqueada, denegar (override queda null)."""
+    if state is not True:
+        return None
+    code = _in_code_for_board_channel(board_id, channel)
+    hits: List[dict] = []
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True) or not rule.get("auto_execute", True):
+            continue
+        if rule.get("trigger") != code:
+            continue
+        if not _rule_participates_in_auto_cycle(rk, rule):
+            continue
+        blocked = _blocked_inputs_for_rule(
+            rule,
+            use_hardware_if_no_override=False,
+            use_overrides=True,
+            physical_inputs=False,
+        )
+        if blocked:
+            hits.append(
+                {
+                    "rule_key": rk,
+                    "blocked_inputs": blocked,
+                    "reason": f"Bloqueado por entradas activas: {', '.join(blocked)}",
+                }
+            )
+    if not hits:
+        return None
+    return {"denied": True, "blocked_rules": hits}
+
+
+def _snapshot_rule_deactivate_outputs(rule: dict, rule_key: str) -> None:
+    """Guarda qué OUT de deactivate_outputs estaban ON antes de apagarlas (interruptores)."""
+    _cancel_pending_temp_deactivate_restore(rule_key)
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = {}
+    for do_code in rule.get("deactivate_outputs") or []:
+        try:
+            b, ch = _parse_out_code(do_code)
+        except HTTPException:
+            continue
+        if _read_output_cached(b, ch):
+            snap[do_code] = True
+    runtime["temp_deact_snapshot"] = snap
+
+
+def _restore_snapshotted_deactivate_outputs(
+    rule: dict,
+    rule_key: str,
+    *,
+    apply_outputs_to_hardware: bool,
+    origin: str,
+) -> List[str]:
+    """
+    Solo vuelve a ON las salidas que estaban ON en el snapshot (interruptor OFF).
+
+    Los bulones (OUT_x_01/02) no se echan al instante: se diferirán hasta que el
+    sensor de puerta (IN4) marque cerrada y pase el settle, para no pinzar la hoja
+    al salir de emergencia en oficina cerrada / modos con cierres activos.
+    """
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = dict(runtime.get("temp_deact_snapshot") or {})
+    if not snap:
+        return []
+    restored: List[str] = []
+    lock_codes: List[str] = []
+    for do_code, was_on in snap.items():
+        if not was_on:
+            continue
+        is_lock = False
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            is_lock = zo.is_door_lock_output(str(do_code))
+        except Exception:  # noqa: BLE001
+            is_lock = False
+        if is_lock:
+            lock_codes.append(str(do_code))
+            continue
+        b, ch = _parse_out_code(do_code)
+        _apply_output_for_rule(
+            b,
+            ch,
+            True,
+            out_code=do_code,
+            origin=origin,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
+        restored.append(do_code)
+    if lock_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            deferred = zo.defer_lock_outputs_until_door_settled(lock_codes)
+            restored.extend(deferred)
+            add_event(
+                "INFO",
+                f"Bulones diferidos hasta IN4 OFF + settle ({rule_key}): {', '.join(deferred)}",
+                1,
+            )
+        except Exception:  # noqa: BLE001
+            # Fallback: usar el mismo retardo configurable que la desactivación temporal.
+            for do_code in lock_codes:
+                b, ch = _parse_out_code(do_code)
+                _apply_output_for_rule(
+                    b,
+                    ch,
+                    True,
+                    out_code=do_code,
+                    origin=origin,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                )
+                restored.append(do_code)
+    _clear_temp_deactivate_snapshot(rule_key)
+    _cancel_pending_temp_deactivate_restore(rule_key)
+    if restored:
+        add_event(
+            "INFO",
+            f"Restauradas salidas (estaban ON antes de {rule_key}): {', '.join(restored)}",
+            1,
+        )
+        _publish_panel_status_debounced(force=True)
+    return restored
+
+
+def _mark_toggle_suppress_auto_rising(rule_key: str) -> None:
+    """Evita que el ciclo automático interprete un flanco espurio tras clic en el lateral."""
+    _default_rule_runtime(rule_key)["suppress_auto_rising"] = True
+
+
+def _apply_rule_also_triggers_on(
+    rule: dict,
+    trigger_code: str,
+    *,
+    activated_by_panel_override: bool = True,
+) -> None:
+    for linked in _rule_also_triggers(rule):
+        if linked == trigger_code:
+            continue
+        _apply_linked_in_override(
+            linked,
+            active=True,
+            activated_by_panel_override=activated_by_panel_override,
+        )
+
+
+def _deactivate_also_linked_rules(
+    parent_rule_key: str,
+    rule: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    linked_stack: Optional[set] = None,
+) -> List[dict]:
+    """Apaga reglas vinculadas (also_execute_rules) al desactivar la regla padre."""
+    results: List[dict] = []
+    stack = set(linked_stack or set())
+    stack.add(parent_rule_key)
+    for linked_key in _rule_also_execute_rules(rule):
+        if linked_key in stack or linked_key not in rules_config:
+            continue
+        linked_rule = rules_config[linked_key]
+        try:
+            if _is_toggle_enclavamiento_rule(linked_key, linked_rule):
+                if linked_key not in active_toggle_rules:
+                    continue
+                result = _apply_toggle_enclavamiento_off(
+                    linked_key,
+                    linked_rule,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                    linked_stack=stack,
+                )
+            else:
+                result = _execute_rule_forced(
+                    linked_key,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                    linked_stack=stack,
+                )
+            results.append({"rule": linked_key, **result})
+        except Exception as e:  # noqa: BLE001
+            results.append({"rule": linked_key, "executed": False, "error": str(e)})
+    return results
+
+
+def _apply_toggle_enclavamiento_on(
+    rule_key: str,
+    rule: dict,
+    trigger_code: str,
+    *,
+    apply_outputs_to_hardware: bool,
+    blocked_active_codes: List[str],
+    linked_stack: Optional[set] = None,
+) -> dict:
+    """Enciende salidas de una actuación tipo interruptor y la registra en `active_toggle_rules`."""
+    global active_toggle_rules
+    origin_tag = f"toggle_on:{rule_key}"
+    _snapshot_rule_deactivate_outputs(rule, rule_key)
+    skipped_disconnected: List[str] = []
+    for do_code in rule.get("activate_outputs", []):
+        board_id, channel = _parse_out_code(do_code)
+        if not _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin_tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        ):
+            skipped_disconnected.append(do_code)
+    _apply_deactivate_outputs(
+        rule, apply_outputs_to_hardware, rule_key=rule_key, origin=origin_tag
+    )
+    active_toggle_rules.add(rule_key)
+    _notify_toggle_rules_changed()
+    rt = rules_runtime.setdefault(
+        rule_key,
+        {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        },
+    )
+    rt["last_executed_at"] = datetime.now().isoformat()
+    rt["last_trigger_active"] = True
+    _mark_toggle_suppress_auto_rising(rule_key)
+    _apply_rule_also_triggers_on(rule, trigger_code, activated_by_panel_override=True)
+    linked_extra = _finalize_linked_rule_actions(
+        rule_key,
+        rule,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+        linked_stack=linked_stack,
+    )
+    _persist_overrides_to_db()
+    add_event("OK", f"Actuación interruptor ON: {rule_key}", 1)
+    return {
+        "executed": True,
+        "toggle_active": True,
+        "toggle_action": "on",
+        "mode": current_mode,
+        "trigger_input_active": True,
+        "blocked_inputs": blocked_active_codes,
+        "outputs_activated": rule.get("activate_outputs", []),
+        "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "outputs_skipped_disconnected": skipped_disconnected,
+        "timestamp": rt["last_executed_at"],
+        **linked_extra,
+    }
+
+
+def _apply_toggle_enclavamiento_off(
+    rule_key: str,
+    rule: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    blocked_active_codes: Optional[List[str]] = None,
+    linked_stack: Optional[set] = None,
+) -> dict:
+    """Apaga solo las salidas que encendió la regla; no re-activa las que apagó al encender."""
+    global active_toggle_rules
+    origin_tag = f"toggle_off:{rule_key}"
+    linked_off = _deactivate_also_linked_rules(
+        rule_key,
+        rule,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+        linked_stack=linked_stack,
+    )
+    _restore_snapshotted_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware=apply_outputs_to_hardware, origin=origin_tag
+    )
+    for out_code in rule.get("activate_outputs", []):
+        b, ch = _parse_out_code(out_code)
+        _apply_output_for_rule(
+            b,
+            ch,
+            False,
+            out_code=out_code,
+            origin=origin_tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
+    trigger_code = rule.get("trigger")
+    if isinstance(trigger_code, str) and trigger_code:
+        _clear_rule_trigger_overrides(rule, include_main_trigger=True)
+    active_toggle_rules.discard(rule_key)
+    _persist_overrides_to_db()
+    _notify_toggle_rules_changed()
+    rt = rules_runtime.setdefault(
+        rule_key,
+        {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        },
+    )
+    rt["last_executed_at"] = datetime.now().isoformat()
+    rt["last_trigger_active"] = False
+    _mark_toggle_suppress_auto_rising(rule_key)
+    add_event("OK", f"Actuación interruptor OFF: {rule_key}", 1)
+    out = {
+        "executed": True,
+        "toggle_active": False,
+        "toggle_action": "off",
+        "mode": current_mode,
+        "blocked_inputs": blocked_active_codes or [],
+        "outputs_activated": [],
+        "outputs_deactivated": [],
+        "timestamp": rt["last_executed_at"],
+    }
+    if linked_off:
+        out["also_deactivate_results"] = linked_off
+    return out
+
+
+def _evaluate_toggle_enclavamiento_rule(
+    rule_key: str,
+    rule: dict,
+    *,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
+    apply_outputs_to_hardware: bool = True,
+) -> dict:
+    """Interruptor por flanco: 1ª pulsación ON, 2ª OFF (sin soltar = mantener estado)."""
+    phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
+    runtime = rules_runtime.setdefault(
+        rule_key,
+        {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        },
+    )
+    runtime.setdefault("pulse_until", None)
+    runtime.setdefault("last_follow_on", False)
+    trigger_code = rule.get("trigger", "IN_01_01")
+    trigger_active = _read_input_effective(
+        trigger_code,
+        use_hardware_if_no_override=use_hardware_if_no_override,
+        use_overrides=use_overrides,
+        physical_inputs=phy_in,
+    )
+    blocked_active_codes = [
+        code
+        for code in rule.get("blocked_if_active", [])
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            physical_inputs=phy_in,
+        )
+    ]
+    if runtime.pop("suppress_auto_rising", False):
+        runtime["last_trigger_active"] = trigger_active
+        return {
+            "executed": False,
+            "reason": "Flanco ignorado tras acción en panel",
+            "trigger_input_active": trigger_active,
+            "toggle_active": rule_key in active_toggle_rules,
+        }
+    rising_edge = trigger_active and not runtime["last_trigger_active"]
+    runtime["last_trigger_active"] = trigger_active
+    if not rising_edge:
+        return {
+            "executed": False,
+            "reason": "Sin flanco de subida en interruptor",
+            "trigger_input_active": trigger_active,
+            "toggle_active": rule_key in active_toggle_rules,
+        }
+    if blocked_active_codes:
+        _clear_trigger_input_override(trigger_code)
+        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        return {
+            "executed": False,
+            "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+            "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "toggle_active": rule_key in active_toggle_rules,
+        }
+    if rule_key in active_toggle_rules:
+        return _apply_toggle_enclavamiento_off(
+            rule_key,
+            rule,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+            blocked_active_codes=blocked_active_codes,
+        )
+    return _apply_toggle_enclavamiento_on(
+        rule_key,
+        rule,
+        trigger_code,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+        blocked_active_codes=blocked_active_codes,
+    )
+
+
+def _normalize_string_list(raw: object) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    out: List[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            t = item.strip()
+            if t and t not in out:
+                out.append(t)
+    return out
+
+
+def _rule_also_triggers(rule: dict) -> List[str]:
+    return _normalize_string_list(rule.get("also_triggers"))
+
+
+def _rule_also_execute_rules(rule: dict) -> List[str]:
+    return _normalize_string_list(rule.get("also_execute_rules"))
+
+
+def _apply_linked_in_override(
+    in_code: str,
+    *,
+    active: bool,
+    activated_by_panel_override: bool,
+) -> None:
+    board_id, channel = _parse_in_code(in_code)
+    mode_latches.setdefault(in_code, False)
+    mode_latches[in_code] = active
+    if activated_by_panel_override:
+        input_overrides[board_id][channel - 1] = True if active else False
+    else:
+        input_overrides[board_id][channel - 1] = None
+
+
+def _clear_rule_trigger_overrides(rule: dict, *, include_main_trigger: bool = True) -> None:
+    codes: List[str] = []
+    if include_main_trigger:
+        trigger = rule.get("trigger")
+        if isinstance(trigger, str) and trigger.strip():
+            codes.append(trigger.strip())
+    for code in _rule_also_triggers(rule):
+        if code not in codes:
+            codes.append(code)
+    for code in codes:
+        mode_latches[code] = False
+        _clear_trigger_input_override(code)
+
+
+def _execute_also_linked_rules(
+    parent_rule_key: str,
+    rule: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    linked_stack: Optional[set] = None,
+) -> List[dict]:
+    results: List[dict] = []
+    stack = set(linked_stack or set())
+    stack.add(parent_rule_key)
+    for linked_key in _rule_also_execute_rules(rule):
+        if linked_key in stack or linked_key not in rules_config:
+            continue
+        try:
+            linked_result = _execute_rule_forced(
+                linked_key,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                linked_stack=stack,
+            )
+            results.append({"rule": linked_key, **linked_result})
+        except Exception as e:  # noqa: BLE001
+            results.append({"rule": linked_key, "executed": False, "error": str(e)})
+    return results
+
+
+def _finalize_linked_rule_actions(
+    parent_rule_key: str,
+    rule: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    linked_stack: Optional[set] = None,
+) -> dict:
+    linked_exec = _execute_also_linked_rules(
+        parent_rule_key,
+        rule,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+        linked_stack=linked_stack,
+    )
+    extra: dict = {}
+    if linked_exec:
+        extra["also_execute_results"] = linked_exec
+    if _rule_also_triggers(rule):
+        extra["also_triggers"] = _rule_also_triggers(rule)
+    return extra
+
+
+def _apply_enclavamiento_mode_activation(
+    rule: dict,
+    trigger_code: str,
+    *,
+    activated_by_panel_override: bool,
+) -> None:
+    """
+    Tras activar un modo enclavamiento (prioridad = último current_mode asignado):
+    - hardware: override null en trigger y deactivate_modes (estado real en panel).
+    - panel: override ON en trigger y OFF en deactivate_modes.
+    """
+    tb, tch = _parse_in_code(trigger_code)
+    mode_latches.setdefault(trigger_code, False)
+    mode_latches[trigger_code] = True
+    if activated_by_panel_override:
+        input_overrides[tb][tch - 1] = True
+    else:
+        input_overrides[tb][tch - 1] = None
+    for code in rule.get("deactivate_modes", []):
+        mode_latches.setdefault(code, False)
+        mode_latches[code] = False
+        board_id, channel = _parse_in_code(code)
+        input_overrides[board_id][channel - 1] = (
+            False if activated_by_panel_override else None
+        )
+    for linked in _rule_also_triggers(rule):
+        if linked == trigger_code:
+            continue
+        _apply_linked_in_override(
+            linked,
+            active=True,
+            activated_by_panel_override=activated_by_panel_override,
+        )
 
 
 def _evaluate_trigger_rule(
@@ -1095,6 +2534,13 @@ def _evaluate_trigger_rule(
     rule = rules_config.get(rule_key)
     if not rule:
         return {"executed": False, "reason": f"Regla no encontrada: {rule_key}"}
+    if not manual and not _rule_participates_in_auto_cycle(rule_key, rule):
+        return {
+            "executed": False,
+            "reason": "Regla no aplica al modo operativo actual",
+            "current_mode": current_mode,
+            "rule_key": rule_key,
+        }
     if rule.get("type") == PULSE_5_SG_TYPE:
         return _evaluate_pulse_5_sg_rule(
             rule_key,
@@ -1103,6 +2549,14 @@ def _evaluate_trigger_rule(
             use_overrides=use_overrides,
             apply_outputs_to_hardware=apply_outputs_to_hardware,
             physical_inputs=phy_in,
+        )
+    if _is_toggle_enclavamiento_rule(rule_key, rule) and not manual:
+        return _evaluate_toggle_enclavamiento_rule(
+            rule_key,
+            rule,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
         )
     if rule_key not in rules_runtime:
         rules_runtime[rule_key] = {
@@ -1147,59 +2601,60 @@ def _evaluate_trigger_rule(
         return {"executed": False, "reason": f"No se ejecuta: {trigger_code} no está activa", "trigger_input_active": False}
 
     if blocked_active_codes:
+        _clear_trigger_input_override(trigger_code)
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
         return {
             "executed": False,
             "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
             "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
         }
 
-    mode_latches.setdefault(trigger_code, False)
-    mode_latches[trigger_code] = True
-    for code in rule.get("deactivate_modes", []):
-        mode_latches.setdefault(code, False)
-        mode_latches[code] = False
-        board_id, channel = _parse_in_code(code)
-        input_overrides[board_id][channel - 1] = False
-    if _rule_owns_operational_mode(rule):
+    by_panel = _trigger_activated_by_panel_override(trigger_code, manual=manual)
+    _apply_enclavamiento_mode_activation(
+        rule, trigger_code, activated_by_panel_override=by_panel
+    )
+    linked_extra = _finalize_linked_rule_actions(
+        rule_key,
+        rule,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+    )
+    if _rule_owns_operational_mode(rule, rule_key):
+        if _rule_is_emergency_operational(rule_key):
+            _stash_operational_mode_before_emergency()
         current_mode = rule_key
         _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": current_mode})
+        _zaguan_mode_changed(current_mode)
+        add_event(
+            "OK",
+            f"Modo → {rule_key}",
+            1,
+            event_type="mode_change",
+            payload={"rule_key": rule_key, "current_mode": current_mode},
+        )
     _persist_overrides_to_db()
 
     origin_tag = f"enclavamiento:{rule_key}"
     skipped_disconnected: List[str] = []
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            if not _write_output_if_connected(
-                board_id, channel, True, out_code=do_code, origin=origin_tag
-            ):
-                skipped_disconnected.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = True
-                add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
-    for do_code in rule.get("deactivate_outputs", []):
-        board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            if not _write_output_if_connected(
-                board_id, channel, False, out_code=do_code, origin=origin_tag
-            ):
-                skipped_disconnected.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = False
-                add_event("INFO", f"SIMULADO {do_code} -> OFF (sin hardware)", board_id)
+        if not _apply_output_for_rule(
+            board_id,
+            channel,
+            True,
+            out_code=do_code,
+            origin=origin_tag,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        ):
+            skipped_disconnected.append(do_code)
+    _apply_deactivate_outputs(
+        rule, apply_outputs_to_hardware, rule_key=rule_key, origin=origin_tag
+    )
 
     runtime["last_executed_at"] = datetime.now().isoformat()
     add_event("OK", f"Regla ejecutada: {rule_key}", 1)
-    return {
+    result = {
         "executed": True,
         "mode": current_mode,
         "trigger_input_active": trigger_active,
@@ -1207,9 +2662,12 @@ def _evaluate_trigger_rule(
         "deactivated_modes": rule.get("deactivate_modes", []),
         "outputs_activated": rule.get("activate_outputs", []),
         "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "deactivate_outputs_temporary": _rule_deactivate_outputs_temporary(rule),
         "outputs_skipped_disconnected": skipped_disconnected,
         "timestamp": runtime["last_executed_at"],
     }
+    result.update(linked_extra)
+    return result
 
 
 def _evaluate_horario_automatico(
@@ -1236,6 +2694,8 @@ def _evaluate_auto_rules(*, use_hardware_if_no_override: bool = True) -> None:
             continue
         if rule.get("type") not in AUTO_RULE_TYPES:
             continue
+        if not _rule_participates_in_auto_cycle(rk, rule):
+            continue
         try:
             _evaluate_trigger_rule(
                 rk,
@@ -1260,6 +2720,8 @@ def _deactivate_rule_on_fall(
         return False
     if rule.get("type") != "enclavamiento" or not rule.get("enabled", True):
         return False
+    if _is_toggle_enclavamiento_rule(rule_key, rule):
+        return False
     runtime = rules_runtime.setdefault(
         rule_key,
         {"last_trigger_active": False, "last_executed_at": None, "pulse_until": None, "last_follow_on": False},
@@ -1281,48 +2743,131 @@ def _deactivate_rule_on_fall(
     if current_mode != rule_key:
         return False
 
-    mode_latches[trigger_code] = False
-    current_mode = None
-    _persist_current_mode_to_db()
+    _clear_rule_trigger_overrides(rule, include_main_trigger=True)
+
+    if _rule_is_emergency_operational(rule_key):
+        _restore_operational_mode_after_emergency()
+    else:
+        current_mode = None
+        _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": None})
+        _zaguan_mode_changed(None)
+
+    _restore_temp_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware, origin=f"desactiva_flanco:{rule_key}"
+    )
 
     # Al desactivar por flanco OFF, soltamos las salidas que activó esta regla.
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            _write_output_if_connected(
-                b, ch, False, out_code=out_code, origin=f"desactiva_flanco:{rule_key}"
-            )
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = False
+        _apply_output_for_rule(
+            b,
+            ch,
+            False,
+            out_code=out_code,
+            origin=f"desactiva_flanco:{rule_key}",
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
 
-    add_event("INFO", f"Modo desactivado por trigger OFF: {rule_key}", 1)
+    add_event(
+        "INFO",
+        f"Modo desactivado por trigger OFF: {rule_key}",
+        1,
+        event_type="mode_change",
+        payload={"rule_key": rule_key, "current_mode": current_mode, "action": "deactivate"},
+    )
     return True
 
 
-def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
-    """
-    Ciclo autónomo de backend:
-    - refresca IO real de placas conectadas (un barrido Modbus bajo lock)
-    - evalúa reglas usando ese snapshot (`use_hardware_if_no_override=False`) para no repetir
-      `_read_all_io` por cada regla (en RTU multiplica tráfico serie y satura el bus / CPU).
-    - opcional: desactiva regla activa al caer su trigger
-    """
-    global background_auto_rules_last_run_at
-    global background_auto_rules_last_result
-    global background_auto_rules_last_error
-    checked = 0
-    executed = 0
-    deactivated = 0
-    errors = 0
-    error_messages: List[str] = []
-    with modbus_io_lock:
-        for board_id in _module_ids():
-            if board_id in io_state and io_state[board_id]["connected"]:
-                _read_all_io(board_id, _modbus_lock_held=True)
+def _raw_inputs_tuple(board_id: int) -> tuple[bool, ...]:
+    st = io_state.get(board_id)
+    if not st:
+        return ()
+    return tuple(bool(v) for v in (st.get("inputs_raw") or []))
+
+
+def _evaluate_rules_for_input(
+    board_id: int,
+    channel: int,
+    *,
+    deactivate_on_fall: bool = True,
+) -> dict:
+    """Evalúa solo reglas cuyo trigger es este IN (snapshot ya actualizado)."""
+    code = _in_code_for_board_channel(board_id, channel)
+    return _evaluate_auto_rule_keys(
+        _rule_keys_for_in_code(code),
+        deactivate_on_fall=deactivate_on_fall,
+        use_hardware_if_no_override=False,
+    )
+
+
+def _read_board_and_eval_input_edges(
+    board_id: int,
+    *,
+    deactivate_on_fall: bool,
+) -> None:
+    """Lee una placa; si cambió un IN físico (inputs_raw), evalúa sus reglas al instante."""
+    before = _raw_inputs_tuple(board_id)
+    with _board_modbus_lock(board_id):
+        _read_all_io(board_id, _modbus_lock_held=True)
+    after = _raw_inputs_tuple(board_id)
+    n = min(len(before), len(after))
+    for i in range(n):
+        if before[i] != after[i]:
+            try:
+                _evaluate_rules_for_input(
+                    board_id,
+                    i + 1,
+                    deactivate_on_fall=deactivate_on_fall,
+                )
+            except Exception as e:  # noqa: BLE001
+                add_event(
+                    "ERR",
+                    f"Evaluación rápida IN{i + 1} placa {board_id}: {e}",
+                    board_id,
+                )
+
+
+def _refresh_connected_boards_snapshot(
+    *,
+    board_ids: Optional[List[int]] = None,
+    eval_on_edge: bool = False,
+    deactivate_on_fall: bool = True,
+) -> None:
+    """Una lectura Modbus por placa. En TCP, placas en paralelo (evita N×timeout en serie)."""
+    targets = board_ids if board_ids is not None else _module_ids()
+    connected = [
+        bid
+        for bid in targets
+        if bid in io_state and io_state[bid].get("connected")
+    ]
+    if not connected:
+        return
+
+    def _read_one(board_id: int) -> None:
+        if eval_on_edge:
+            _read_board_and_eval_input_edges(
+                board_id,
+                deactivate_on_fall=deactivate_on_fall,
+            )
+            return
+        with _board_modbus_lock(board_id):
+            _read_all_io(board_id, _modbus_lock_held=True)
+
+    if _is_rtu_mode() or len(connected) == 1:
+        for board_id in connected:
+            _read_one(board_id)
+        return
+
+    workers = min(len(connected), 4)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_read_one, bid) for bid in connected]
+        for fut in as_completed(futures):
+            fut.result()
+
+
+def _rule_keys_for_in_code(code: str) -> List[str]:
+    keys: List[str] = []
     for rk, rule in rules_config.items():
         if not rule.get("enabled", True):
             continue
@@ -1330,39 +2875,178 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             continue
         if rule.get("type") not in AUTO_RULE_TYPES:
             continue
-        checked += 1
-        try:
-            result = _evaluate_trigger_rule(
-                rk,
-                manual=False,
-                use_hardware_if_no_override=False,
-                use_overrides=True,
-                apply_outputs_to_hardware=True,
-            )
-            if result.get("executed"):
-                executed += 1
-            if deactivate_on_fall and _deactivate_rule_on_fall(
-                rk,
-                use_hardware_if_no_override=False,
-                use_overrides=True,
-                apply_outputs_to_hardware=True,
-            ):
-                deactivated += 1
-        except Exception as e:  # noqa: BLE001
-            errors += 1
-            error_messages.append(f"{rk}: {e}")
-            add_event("ERR", f"Error ciclo auto background {rk}: {e}", 1)
+        if rule.get("trigger") != code:
+            continue
+        keys.append(rk)
+    return keys
+
+
+def _all_auto_rule_keys() -> List[str]:
+    keys: List[str] = []
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True):
+            continue
+        if not rule.get("auto_execute", True):
+            continue
+        if rule.get("type") not in AUTO_RULE_TYPES:
+            continue
+        keys.append(rk)
+    return keys
+
+
+def _evaluate_auto_rule_keys(
+    rule_keys: List[str],
+    *,
+    deactivate_on_fall: bool,
+    use_hardware_if_no_override: bool = False,
+) -> dict:
+    with _auto_rules_eval_lock:
+        checked = 0
+        executed = 0
+        deactivated = 0
+        errors = 0
+        error_messages: List[str] = []
+        blocked_rules: List[dict] = []
+        for rk in rule_keys:
+            rule = rules_config.get(rk)
+            if not rule:
+                continue
+            if not rule.get("enabled", True):
+                continue
+            if not rule.get("auto_execute", True):
+                continue
+            if rule.get("type") not in AUTO_RULE_TYPES:
+                continue
+            if not _rule_participates_in_auto_cycle(rk, rule):
+                continue
+            checked += 1
+            try:
+                result = _evaluate_trigger_rule(
+                    rk,
+                    manual=False,
+                    use_hardware_if_no_override=use_hardware_if_no_override,
+                    use_overrides=True,
+                    apply_outputs_to_hardware=True,
+                )
+                if result.get("executed"):
+                    executed += 1
+                    _zaguan_rule_executed(rk, result)
+                elif result.get("blocked_inputs") and "Bloqueado" in (
+                    result.get("reason") or ""
+                ):
+                    blocked_rules.append(
+                        {
+                            "rule_key": rk,
+                            "blocked_inputs": list(result.get("blocked_inputs") or []),
+                            "reason": result.get("reason"),
+                        }
+                    )
+                if deactivate_on_fall and _deactivate_rule_on_fall(
+                    rk,
+                    use_hardware_if_no_override=use_hardware_if_no_override,
+                    use_overrides=True,
+                    apply_outputs_to_hardware=True,
+                ):
+                    deactivated += 1
+            except Exception as e:  # noqa: BLE001
+                errors += 1
+                error_messages.append(f"{rk}: {e}")
+                add_event("ERR", f"Error ciclo auto background {rk}: {e}", 1)
+        return {
+            "checked_rules": checked,
+            "executed_rules": executed,
+            "deactivated_rules": deactivated,
+            "errors": errors,
+            "error_messages": error_messages[:10],
+            "blocked_rules": blocked_rules[:20],
+        }
+
+
+def _auto_rules_for_input(
+    board_id: int,
+    channel: int,
+    *,
+    deactivate_on_fall: bool = True,
+) -> dict:
+    """
+    Tras cambio en un IN (override o lectura focalizada): refresca solo esa placa y
+    evalúa únicamente reglas cuyo trigger es ese IN (radar, modo, etc.).
+    """
+    t0 = time.perf_counter()
+    code = _in_code_for_board_channel(board_id, channel)
+    _refresh_connected_boards_snapshot(board_ids=[board_id])
+    pending_restores = _process_pending_temp_deactivate_restores(
+        apply_outputs_to_hardware=True
+    )
+    pending_mode_result = _try_execute_pending_manual_enclavamiento(
+        apply_outputs_to_hardware=True
+    )
+    eval_result = _evaluate_rules_for_input(
+        board_id,
+        channel,
+        deactivate_on_fall=deactivate_on_fall,
+    )
     result = {
-        "checked_rules": checked,
-        "executed_rules": executed,
-        "deactivated_rules": deactivated,
-        "errors": errors,
-        "error_messages": error_messages[:10],
+        **eval_result,
+        "trigger_code": code,
+        "pending_temp_restores": pending_restores,
+        "pending_mode_executed": bool(
+            pending_mode_result and pending_mode_result.get("executed")
+        ),
+        "pending_manual_mode": pending_manual_enclavamiento_mode,
         "timestamp": datetime.now().isoformat(),
+        "duration_ms": int((time.perf_counter() - t0) * 1000),
     }
     background_auto_rules_last_run_at = result["timestamp"]
     background_auto_rules_last_result = result
-    background_auto_rules_last_error = error_messages[0] if error_messages else None
+    background_auto_rules_last_error = (
+        eval_result["error_messages"][0] if eval_result["error_messages"] else None
+    )
+    return result
+
+
+def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
+    """
+    Ciclo autónomo de backend:
+    - refresca IO real de placas conectadas (lectura Modbus con lock por placa en TCP)
+    - evalúa reglas usando ese snapshot (`use_hardware_if_no_override=False`) para no repetir
+      `_read_all_io` por cada regla (en RTU multiplica tráfico serie y satura el bus / CPU).
+    - opcional: desactiva regla activa al caer su trigger
+    """
+    global background_auto_rules_last_run_at
+    global background_auto_rules_last_result
+    global background_auto_rules_last_error
+    t0 = time.perf_counter()
+    _refresh_connected_boards_snapshot(
+        eval_on_edge=True,
+        deactivate_on_fall=deactivate_on_fall,
+    )
+    pending_restores = _process_pending_temp_deactivate_restores(
+        apply_outputs_to_hardware=True
+    )
+    pending_mode_result = _try_execute_pending_manual_enclavamiento(
+        apply_outputs_to_hardware=True
+    )
+    eval_result = _evaluate_auto_rule_keys(
+        _all_auto_rule_keys(),
+        deactivate_on_fall=deactivate_on_fall,
+        use_hardware_if_no_override=False,
+    )
+    result = {
+        **eval_result,
+        "pending_temp_restores": pending_restores,
+        "pending_mode_executed": bool(
+            pending_mode_result and pending_mode_result.get("executed")
+        ),
+        "pending_manual_mode": pending_manual_enclavamiento_mode,
+        "timestamp": datetime.now().isoformat(),
+        "duration_ms": int((time.perf_counter() - t0) * 1000),
+    }
+    background_auto_rules_last_run_at = result["timestamp"]
+    background_auto_rules_last_result = result
+    background_auto_rules_last_error = (
+        eval_result["error_messages"][0] if eval_result["error_messages"] else None
+    )
     return result
 
 
@@ -1370,7 +3054,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
 def get_background_auto_rules_state():
     return {
         "enabled": bool(settings.auto_rules_background_enabled),
-        "interval_seconds": int(settings.auto_rules_background_interval_seconds),
+        "interval_seconds": float(settings.auto_rules_background_interval_seconds),
         "deactivate_on_fall": bool(settings.auto_rules_deactivate_on_fall),
         "last_run_at": background_auto_rules_last_run_at,
         "last_result": background_auto_rules_last_result,
@@ -1379,7 +3063,12 @@ def get_background_auto_rules_state():
     }
 
 
-def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) -> dict:
+def _execute_rule_forced(
+    rule_key: str,
+    apply_outputs_to_hardware: bool = True,
+    *,
+    linked_stack: Optional[set] = None,
+) -> dict:
     """
     Ejecuta una regla JSON de forma forzada:
     - trigger por override=True
@@ -1387,6 +3076,14 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     - aplica salidas de activate_outputs/deactivate_outputs
     """
     global current_mode
+    stack = set(linked_stack or set())
+    if rule_key in stack:
+        return {
+            "executed": False,
+            "reason": "Ciclo detectado en reglas vinculadas",
+            "rule": rule_key,
+        }
+    stack.add(rule_key)
     rule = rules_config.get(rule_key)
     if not rule:
         raise HTTPException(status_code=404, detail=f"Regla no encontrada: {rule_key}")
@@ -1394,19 +3091,67 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         return {"executed": False, "reason": "Regla deshabilitada", "rule": rule_key}
 
     # Incluso en ejecución forzada, respetar bloqueos por entradas activas (IN según panel_rules_triggers_use_physical_inputs).
-    blocked_codes = rule.get("blocked_if_active", [])
-    blocked_active_codes = [
-        code
-        for code in blocked_codes
-        if _blocked_signal_active(
-            code,
-            use_hardware_if_no_override=True,
-            use_overrides=True,
-            physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
+    # Excepción: horario_cerrado fuerza cierre de puertas + settle de bulones (no encola).
+    blocked_active_codes = _blocked_active_codes_for_rule(rule)
+    closed_transition: Optional[dict] = None
+    if blocked_active_codes and rule_key == "horario_cerrado":
+        add_event(
+            "WARN",
+            f"{rule_key} con bloqueos {', '.join(blocked_active_codes)}; forzando cierre de puertas",
+            1,
         )
-    ]
-    if blocked_active_codes:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            closed_transition = zo.prepare_closed_mode_transition()
+        except Exception as e:  # noqa: BLE001
+            closed_transition = {
+                "ok": False,
+                "timed_out": False,
+                "reason": str(e),
+            }
+        if not closed_transition.get("ok"):
+            reason = str(
+                closed_transition.get("reason")
+                or "No se pudieron cerrar las puertas para oficina cerrada"
+            )
+            add_event("ERR", f"{rule_key} transición a cerrado fallida: {reason}", 1)
+            return {
+                "executed": False,
+                "queued": False,
+                "rule": rule_key,
+                "reason": reason,
+                "blocked_inputs": blocked_active_codes,
+                "closing_doors": True,
+                "closed_transition": closed_transition,
+            }
+        blocked_active_codes = _blocked_active_codes_for_rule(rule)
+        if blocked_active_codes:
+            reason = (
+                f"Tras forzar cierre, siguen activos: {', '.join(blocked_active_codes)}"
+            )
+            add_event("ERR", f"{rule_key} {reason}", 1)
+            return {
+                "executed": False,
+                "queued": False,
+                "rule": rule_key,
+                "reason": reason,
+                "blocked_inputs": blocked_active_codes,
+                "closing_doors": True,
+                "closed_transition": closed_transition,
+            }
+    elif blocked_active_codes:
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        if _rule_eligible_for_manual_queue(rule_key, rule):
+            _set_pending_manual_enclavamiento(rule_key, blocked_active_codes)
+            return {
+                "executed": False,
+                "queued": True,
+                "pending_manual_mode": rule_key,
+                "rule": rule_key,
+                "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+                "blocked_inputs": blocked_active_codes,
+            }
         return {
             "executed": False,
             "rule": rule_key,
@@ -1414,11 +3159,19 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             "blocked_inputs": blocked_active_codes,
         }
 
+    _clear_pending_manual_enclavamiento()
+
     if rule.get("type") == PULSE_5_SG_TYPE:
-        for in_code in rule.get("deactivate_modes", []):
-            b, ch = _parse_in_code(in_code)
-            input_overrides[b][ch - 1] = False
-            mode_latches[in_code] = False
+        trigger_code = rule.get("trigger") or "IN_01_01"
+        _apply_enclavamiento_mode_activation(
+            rule, trigger_code, activated_by_panel_override=True
+        )
+        linked_extra = _finalize_linked_rule_actions(
+            rule_key,
+            rule,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+            linked_stack=stack,
+        )
         _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         rt = _default_rule_runtime(rule_key)
@@ -1428,6 +3181,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         rt["last_executed_at"] = datetime.now().isoformat()
         if secs > 0:
             rt["pulse_until"] = (datetime.now() + timedelta(seconds=secs)).isoformat()
+            rt["pulse_trigger_panel_override"] = True
             _persist_overrides_to_db()
             add_event("OK", f"Pulso forzado {secs}s: {rule_key}", 1)
             return {
@@ -1442,6 +3196,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
                 "pulse_until": rt["pulse_until"],
                 "follow_mode": False,
                 "mode": current_mode,
+                **linked_extra,
             }
         _persist_overrides_to_db()
         add_event("OK", f"Seguimiento radar forzado ON: {rule_key}", 1)
@@ -1457,56 +3212,88 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             "follow_on": True,
             "follow_mode": True,
             "mode": current_mode,
+            **linked_extra,
         }
 
-    trigger_code = rule.get("trigger")
-    if trigger_code:
-        b, ch = _parse_in_code(trigger_code)
-        input_overrides[b][ch - 1] = True
-        mode_latches[trigger_code] = True
+    if _is_toggle_enclavamiento_rule(rule_key, rule):
+        if rule_key in active_toggle_rules:
+            result = _apply_toggle_enclavamiento_off(
+                rule_key, rule, apply_outputs_to_hardware=apply_outputs_to_hardware,
+                linked_stack=stack,
+            )
+        else:
+            trigger_code = rule.get("trigger") or "IN_01_01"
+            result = _apply_toggle_enclavamiento_on(
+                rule_key,
+                rule,
+                trigger_code,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                blocked_active_codes=blocked_active_codes,
+                linked_stack=stack,
+            )
+        result["rule"] = rule_key
+        result["trigger"] = rule.get("trigger")
+        if closed_transition is not None:
+            result["closing_doors"] = bool(closed_transition.get("closing_doors"))
+            result["closed_transition"] = closed_transition
+            result["bolt_settle_s"] = closed_transition.get("bolt_settle_s")
+        return result
 
-    for in_code in rule.get("deactivate_modes", []):
-        b, ch = _parse_in_code(in_code)
-        input_overrides[b][ch - 1] = False
-        mode_latches[in_code] = False
+    trigger_code = rule.get("trigger") or "IN_01_01"
+    _apply_enclavamiento_mode_activation(
+        rule, trigger_code, activated_by_panel_override=True
+    )
+    linked_extra = _finalize_linked_rule_actions(
+        rule_key,
+        rule,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+        linked_stack=stack,
+    )
 
     skipped_disconnected: List[str] = []
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            if not _write_output_if_connected(
-                b, ch, True, out_code=out_code, origin=f"forzado:{rule_key}"
-            ):
-                skipped_disconnected.append(out_code)
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = True
+        if not _apply_output_for_rule(
+            b,
+            ch,
+            True,
+            out_code=out_code,
+            origin=f"forzado:{rule_key}",
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        ):
+            skipped_disconnected.append(out_code)
 
-    for out_code in rule.get("deactivate_outputs", []):
-        b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            if not _write_output_if_connected(
-                b, ch, False, out_code=out_code, origin=f"forzado:{rule_key}"
-            ):
-                skipped_disconnected.append(out_code)
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = False
+    _apply_deactivate_outputs(
+        rule, apply_outputs_to_hardware, rule_key=rule_key, origin=f"forzado:{rule_key}"
+    )
 
-    if _rule_owns_operational_mode(rule):
+    if _rule_owns_operational_mode(rule, rule_key):
+        if _rule_is_emergency_operational(rule_key):
+            _stash_operational_mode_before_emergency()
         current_mode = rule_key
         _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": current_mode})
+        _zaguan_mode_changed(current_mode)
+        add_event(
+            "OK",
+            f"Modo → {rule_key}",
+            1,
+            event_type="mode_change",
+            payload={"rule_key": rule_key, "current_mode": current_mode},
+        )
     _persist_overrides_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
+    if skipped_disconnected:
+        add_event(
+            "INFO",
+            f"Modo {rule_key}: salidas omitidas en placas desconectadas (estado en RAM): "
+            f"{', '.join(skipped_disconnected)}",
+            1,
+        )
+        _publish_panel_status_debounced(force=True)
     add_event("OK", f"Regla forzada ejecutada: {rule_key}", 1)
-    return {
+    out = {
         "executed": True,
         "rule": rule_key,
         "trigger": trigger_code,
@@ -1515,7 +3302,14 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         "outputs_deactivated": rule.get("deactivate_outputs", []),
         "outputs_skipped_disconnected": skipped_disconnected,
         "mode": current_mode,
+        **linked_extra,
     }
+    if closed_transition is not None:
+        out["closing_doors"] = bool(closed_transition.get("closing_doors"))
+        out["closed_transition"] = closed_transition
+        out["bolt_settle_s"] = closed_transition.get("bolt_settle_s")
+    _zaguan_rule_executed(rule_key, out)
+    return out
 
 
 class BoardConfig(BaseModel):
@@ -1568,6 +3362,7 @@ class ChannelCreateBody(BaseModel):
     address: int
     slot_index: Optional[int] = None
     label: Optional[str] = None
+    channel_name: Optional[str] = None
     open_cmd: Optional[int] = None
     close_cmd: Optional[int] = None
 
@@ -1575,9 +3370,11 @@ class ChannelCreateBody(BaseModel):
 class ChannelPatchBody(BaseModel):
     slot_index: Optional[int] = None
     label: Optional[str] = None
+    channel_name: Optional[str] = None
     address: Optional[int] = None
     open_cmd: Optional[int] = None
     close_cmd: Optional[int] = None
+    pulse_limit: Optional[int] = None
 
 
 class BulkCommandPair(BaseModel):
@@ -1620,6 +3417,221 @@ def root():
     return {"service": "ETD8A12 Panel API", "status": "running", "timestamp": datetime.now().isoformat()}
 
 
+@router.get("/coce-messages", summary="Historial mensajes COCE (panel web, solo lectura)")
+def list_coce_messages(limit: int = Query(100, ge=1, le=200)) -> dict:
+    # Si SEND_WEB=false, el mensaje no debe mostrarse en el dashboard (sí puede ir a tablets).
+    if not settings.coce_message_send_web:
+        return {"messages": [], "disabled": True}
+    return {"messages": coce_message_store.list_messages(limit=limit)}
+
+
+@router.get("/stats", summary="Resumen operativo (pulsaciones + eventos tipados)")
+def get_panel_stats(
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    export: Optional[str] = Query(None, description="csv para exportar detalle de eventos"),
+):
+    modules = pms.get_full_config_for_api()
+    channels: List[dict] = []
+    pulse_total = 0
+    for mod in modules:
+        for ch in mod.get("inputs") or []:
+            pc = int(ch.get("pulse_count") or 0)
+            pulse_total += pc
+            channels.append(
+                {
+                    "module_id": mod.get("id"),
+                    "module_name": mod.get("name"),
+                    "channel_id": ch.get("id"),
+                    "io_code": ch.get("io_code"),
+                    "label": ch.get("label") or ch.get("name"),
+                    "pulse_count": pc,
+                    "pulse_limit": ch.get("pulse_limit"),
+                }
+            )
+
+    def _count(event_type: str) -> int:
+        total, _ = ses.list_events(
+            from_date=from_date,
+            to_date=to_date,
+            event_type_filter=event_type,
+            limit=1,
+            offset=0,
+        )
+        return int(total)
+
+    def _sev(severity: str) -> int:
+        total, _ = ses.list_events(
+            from_date=from_date,
+            to_date=to_date,
+            severity_filter=severity,
+            limit=1,
+            offset=0,
+        )
+        return int(total)
+
+    events_summary = {
+        "mode_change": _count("mode_change"),
+        "mode_set_blocked": _count("mode_set_blocked"),
+        "door_open": _count("door_open"),
+        "door_open_blocked": _count("door_open_blocked"),
+        "zaguan_door_closed": _count("zaguan_door_closed"),
+        "zaguan_pulsacion": _count("zaguan_pulsacion"),
+        "zaguan_pulsacion_rejected": _count("zaguan_pulsacion_rejected"),
+        "modbus_error": _count("modbus_error"),
+        "warn": _sev("WARN"),
+        "err": _sev("ERR"),
+    }
+
+    pending_mode = pending_manual_enclavamiento_mode
+
+    payload = {
+        "current_mode": current_mode,
+        "pending_mode": pending_mode,
+        "from": from_date,
+        "to": to_date,
+        "pulse_total": pulse_total,
+        "channels": channels,
+        "events": events_summary,
+        "kpis": {
+            "pulse_total": pulse_total,
+            "door_openings": events_summary["door_open"],
+            "mode_activations": events_summary["mode_change"],
+            "mode_blocked": events_summary["mode_set_blocked"],
+            "door_closed_cycles": events_summary["zaguan_door_closed"],
+            "incidents": events_summary["modbus_error"]
+            + events_summary["warn"]
+            + events_summary["err"],
+            "queued_modes": 1 if pending_mode else 0,
+        },
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    if (export or "").lower() == "csv":
+        from fastapi.responses import PlainTextResponse
+
+        csv_body = ses.export_csv(
+            from_date=from_date,
+            to_date=to_date,
+            limit=50_000,
+        )
+        # Prefijo con resumen de pulsaciones
+        pulse_lines = ["io_code,label,module,pulse_count"]
+        for ch in channels:
+            pulse_lines.append(
+                f"{ch.get('io_code') or ''},"
+                f"\"{str(ch.get('label') or '').replace(chr(34), '')}\","
+                f"\"{str(ch.get('module_name') or '').replace(chr(34), '')}\","
+                f"{ch.get('pulse_count') or 0}"
+            )
+        text = (
+            "# pulses\n"
+            + "\n".join(pulse_lines)
+            + "\n# events\n"
+            + csv_body
+        )
+        return PlainTextResponse(
+            text,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="panel-stats.csv"'
+            },
+        )
+    return payload
+
+
+class CoceMessageAckBody(BaseModel):
+    message_ids: List[str] = Field(default_factory=list)
+    channel: str = "web"
+
+
+@router.post("/coce-messages/ack", summary="Confirmar lectura de mensajes COCE")
+def ack_coce_messages(body: CoceMessageAckBody) -> dict:
+    ids = [str(i).strip() for i in (body.message_ids or []) if str(i).strip()]
+    if not ids:
+        return {"ok": True, "acked": []}
+    newly = coce_message_store.mark_seen(ids)
+    channel = (body.channel or "web").strip() or "web"
+    now = datetime.now().astimezone().isoformat()
+    for mid in newly:
+        try:
+            from app.coce.notify import emit_coce_event
+
+            emit_coce_event(
+                "message_ack",
+                {
+                    "id": mid,
+                    "message_id": mid,
+                    "read_by": channel,
+                    "read_at": now,
+                    "channel": channel,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {"ok": True, "acked": newly}
+
+
+@router.get("/software-update", summary="Estado de actualización pendiente (COCE)")
+def get_software_update_state() -> dict:
+    from app.db import software_update_store as sus
+
+    return sus.get_state()
+
+
+@router.post("/software-update/apply", summary="Aplicar actualización de panel pendiente")
+def apply_software_update() -> dict:
+    from app.services import software_updater
+
+    try:
+        return software_updater.apply_panel_update()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/software-update/apk", summary="Descargar APK pendiente (para instalar en Akuvox)")
+def download_pending_apk():
+    from fastapi.responses import StreamingResponse
+    from urllib.parse import quote
+
+    from app.db import software_update_store as sus
+    from app.services import software_updater
+
+    state = sus.get_state()
+    pending = state.get("pending") or {}
+    if pending.get("kind") != "tablet_apk":
+        raise HTTPException(status_code=404, detail="No hay APK pendiente")
+    version = str(pending.get("version") or "update")
+    filename = f"tablet-{version}.apk"
+    try:
+        stream = software_updater.stream_apk_download(pending)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.android.package-archive",
+        headers={
+            "Content-Disposition": f'attachment; filename="{quote(filename)}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/software-update/dismiss", summary="Marcar aviso de update como visto")
+def dismiss_software_update() -> dict:
+    from app.db import software_update_store as sus
+
+    state = sus.get_state()
+    pending = state.get("pending") or {}
+    kind = pending.get("kind")
+    version = str(pending.get("version") or "")
+    if kind == "tablet_apk" and version:
+        sus.mark_apk_seen(version, str(pending.get("published_at") or "") or None)
+    else:
+        sus.clear_pending()
+    return {"ok": True}
+
+
 @router.get("/status")
 def get_status(
     run_auto_rules: bool = False,
@@ -1630,38 +3642,19 @@ def get_status(
 ):
     cfg_map = pms.get_boards_config_map()
     if refresh_hardware:
-        # Un solo tramo bajo lock: evita que otro hilo (p. ej. otro GET /status o reglas) intercale
-        # Modbus TCP entre placa A y B y reduzca "transaction_id … Skipping".
-        with modbus_io_lock:
-            for board_id in _module_ids():
-                if board_id in io_state and io_state[board_id]["connected"]:
+        # Lectura por placa con lock independiente (TCP): una placa lenta no bloquea las demás.
+        for board_id in _module_ids():
+            if board_id in io_state and io_state[board_id]["connected"]:
+                with _board_modbus_lock(board_id):
                     _read_all_io(board_id, _modbus_lock_held=True)
     if run_auto_rules:
         # Si ya se refrescó hardware arriba, no repetir Modbus por cada regla (RTU).
         _evaluate_auto_rules(use_hardware_if_no_override=not refresh_hardware)
-    return {
-        "boards": {
-            str(bid): {
-                "id": bid,
-                "config": {
-                    "name": cfg_map[bid]["name"],
-                    "host": cfg_map[bid]["host"],
-                    "port": cfg_map[bid]["port"],
-                    "slave_id": cfg_map[bid]["slave_id"],
-                    "modbus_mode": _modbus_mode(),
-                    "serial_port": settings.modbus_serial_port if _is_rtu_mode() else None,
-                },
-                **io_state.get(bid, {}),
-                "input_overrides": input_overrides.get(bid, []),
-            }
-            for bid in _module_ids()
-            if bid in cfg_map
-        },
-        "modules_config": pms.get_full_config_for_api(),
-        "current_mode": current_mode,
-        "auto_rules_executed": run_auto_rules,
-        "timestamp": datetime.now().isoformat(),
-    }
+    elif refresh_hardware:
+        _try_execute_pending_manual_enclavamiento(apply_outputs_to_hardware=True)
+    payload = _build_status_payload()
+    payload["auto_rules_executed"] = run_auto_rules
+    return payload
 
 
 @router.post("/boards/{board_id}/connect")
@@ -1671,8 +3664,12 @@ def connect_board(board_id: int):
     ok = _connect_board(board_id)
     if ok:
         _read_all_io(board_id)
-    # "connected" refleja el estado real final (tras handshake/poll), no solo apertura TCP.
-    return {"board_id": board_id, "connected": io_state[board_id]["connected"], "state": io_state[board_id]}
+    connected = io_state[board_id]["connected"]
+    _coce_notify(
+        "board_connected",
+        {"board_id": board_id, "connected": connected},
+    )
+    return {"board_id": board_id, "connected": connected, "state": io_state[board_id]}
 
 
 @router.get("/diagnostics/rtu-ping")
@@ -1805,7 +3802,7 @@ def disconnect_board(board_id: int):
                 _reset_read_io_fail_streak(mid)
         add_event("WARN", "RTU desconectado manualmente (bus completo)", board_id)
     else:
-        with modbus_io_lock:
+        with _board_modbus_lock(board_id):
             client = clients.get(board_id)
             if client:
                 try:
@@ -1816,6 +3813,7 @@ def disconnect_board(board_id: int):
         io_state[board_id]["connected"] = False
         _reset_read_io_fail_streak(board_id)
         add_event("WARN", "Desconectado manualmente", board_id)
+    _coce_notify("board_disconnected", {"board_id": board_id, "connected": False})
     return {"board_id": board_id, "connected": False}
 
 
@@ -1846,10 +3844,49 @@ def update_board_config(board_id: int, config: BoardConfig):
 
 
 @router.post("/boards/{board_id}/output")
-def set_output(board_id: int, action: ChannelAction):
+def set_output(
+    board_id: int,
+    action: ChannelAction,
+    force: bool = Query(
+        False,
+        description="Si true y la placa está offline, actualiza solo el estado en RAM (sin Modbus).",
+    ),
+):
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
     _, outs = pms.get_channels_for_module(board_id)
     if not 1 <= action.channel <= len(outs):
         raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(outs)}")
+
+    connected = bool(io_state.get(board_id, {}).get("connected"))
+    if not connected:
+        if not force:
+            raise HTTPException(status_code=503, detail=f"Módulo {board_id} no conectado")
+        io_state[board_id]["outputs"][action.channel - 1] = action.state
+        add_event(
+            "WARN",
+            f"CH{action.channel:02d} -> {'ON' if action.state else 'OFF'} "
+            f"(force RAM, placa {board_id} sin Modbus)",
+            board_id,
+        )
+        _coce_notify(
+            "output_changed",
+            {
+                "board_id": board_id,
+                "channel": action.channel,
+                "state": action.state,
+                "forced_ram": True,
+            },
+        )
+        _publish_panel_status_debounced(force=True)
+        return {
+            "board_id": board_id,
+            "channel": action.channel,
+            "state": action.state,
+            "hardware_written": False,
+            "forced_ram": True,
+        }
+
     client = get_client(board_id)
     cfg = _board_cfg(board_id)
     ch = outs[action.channel - 1]
@@ -1858,13 +3895,28 @@ def set_output(board_id: int, action: ChannelAction):
     close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
     value = open_v if action.state else close_v
     try:
-        with modbus_io_lock:
+        with _board_modbus_lock(board_id):
             result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
         if result.isError():
             raise HTTPException(status_code=502, detail=f"Error Modbus: {result}")
         io_state[board_id]["outputs"][action.channel - 1] = action.state
         add_event("OK", f"CH{action.channel:02d} -> {'ON' if action.state else 'OFF'}", board_id)
-        return {"board_id": board_id, "channel": action.channel, "state": action.state}
+        _coce_notify(
+            "output_changed",
+            {
+                "board_id": board_id,
+                "channel": action.channel,
+                "state": action.state,
+            },
+        )
+        _publish_panel_status_debounced(force=True)
+        return {
+            "board_id": board_id,
+            "channel": action.channel,
+            "state": action.state,
+            "hardware_written": True,
+            "forced_ram": False,
+        }
     except ModbusException as e:
         raise HTTPException(status_code=502, detail=f"Error Modbus: {e}")
 
@@ -1877,7 +3929,7 @@ def all_outputs_on(board_id: int):
     if "all_on" not in bulk:
         raise HTTPException(status_code=400, detail="No hay comando all_on configurado para este módulo")
     addr, val = bulk["all_on"]
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
@@ -1895,7 +3947,7 @@ def all_outputs_off(board_id: int):
     if "all_off" not in bulk:
         raise HTTPException(status_code=400, detail="No hay comando all_off configurado para este módulo")
     addr, val = bulk["all_off"]
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
@@ -1926,7 +3978,7 @@ def set_input_output_association(board_id: int, body: InOutAssociationBody):
     sid = int(cfg["slave_id"])
     addr = int(rel)
     try:
-        with modbus_io_lock:
+        with _board_modbus_lock(board_id):
             result = client.write_register(address=addr, value=value, device_id=sid)
         if hasattr(result, "isError") and result.isError():
             add_event(
@@ -1962,7 +4014,7 @@ def set_outputs_bitmask(board_id: int, action: BitmaskAction):
     bitmask = 0
     for ch in action.channels_on:
         bitmask |= 1 << (ch - 1)
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=int(bm_addr), value=bitmask, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
@@ -1979,15 +4031,17 @@ def read_inputs(board_id: int):
     ins, _ = pms.get_channels_for_module(board_id)
     slave = cfg["slave_id"]
     values_raw: List[bool] = []
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         for ch in ins:
             res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
             if res.isError() or not res.registers:
                 raise HTTPException(status_code=502, detail="Error leyendo entradas")
             values_raw.append(bool(res.registers[0]))
+    prev_raw = tuple(io_state[board_id].get("inputs_raw") or [])
     io_state[board_id]["inputs_raw"] = values_raw
     values_effective = [values_raw[i] if input_overrides[board_id][i] is None else input_overrides[board_id][i] for i in range(len(values_raw))]
     io_state[board_id]["inputs"] = values_effective
+    _track_input_pulse_rising_edges(board_id, prev_raw)
     return {
         "board_id": board_id,
         "inputs_raw": {f"IN{i+1}": values_raw[i] for i in range(len(values_raw))},
@@ -2003,7 +4057,7 @@ def read_outputs(board_id: int):
     _, outs = pms.get_channels_for_module(board_id)
     slave = cfg["slave_id"]
     values: List[bool] = []
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         for ch in outs:
             res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
             if res.isError() or not res.registers:
@@ -2014,11 +4068,18 @@ def read_outputs(board_id: int):
 
 
 @router.get("/events")
-def get_events(limit: int = 300, type_filter: Optional[str] = None):
+def get_events(
+    from_date: Optional[str] = Query(None, description="ISO 8601 fecha/hora inicial"),
+    to_date: Optional[str] = Query(None, description="ISO 8601 fecha/hora final"),
+    type_filter: Optional[str] = Query(None, alias="type"),
+    limit: int = Query(500, ge=1, le=2000),
+):
     sev = type_filter.strip().upper() if type_filter and type_filter.strip() else None
     total, rows = ses.list_events(
+        from_date=from_date,
+        to_date=to_date,
         severity_filter=sev,
-        limit=min(limit, 2000),
+        limit=limit,
         offset=0,
     )
     return {"total": total, "events": rows}
@@ -2051,10 +4112,50 @@ def set_input_override(action: InputOverrideAction):
     if not 1 <= action.channel <= len(ins):
         raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(ins)}")
     idx = action.channel - 1
+    denial = _override_request_blocked(action.board_id, action.channel, action.state)
+    if denial:
+        input_overrides[action.board_id][idx] = None
+        _persist_overrides_to_db()
+        for hit in denial.get("blocked_rules") or []:
+            rk = hit.get("rule_key", "regla")
+            ins = ", ".join(hit.get("blocked_inputs") or [])
+            add_event("WARN", f"Override IN{action.channel:02d} denegado: {rk} bloqueado por {ins}", action.board_id)
+        return {
+            "board_id": action.board_id,
+            "channel": action.channel,
+            "override": None,
+            "denied": True,
+            "blocked_rules": denial.get("blocked_rules"),
+            "active_toggle_rules": sorted(active_toggle_rules),
+        }
     input_overrides[action.board_id][idx] = action.state
     _persist_overrides_to_db()
     add_event("INFO", f"Override IN{action.channel:02d} = {action.state}", action.board_id)
-    return {"board_id": action.board_id, "channel": action.channel, "override": action.state}
+    _coce_notify(
+        "input_override",
+        {
+            "board_id": action.board_id,
+            "channel": action.channel,
+            "override": action.state,
+        },
+    )
+    auto_rules: Optional[dict] = None
+    if settings.auto_rules_background_enabled:
+        try:
+            auto_rules = _auto_rules_for_input(
+                action.board_id,
+                action.channel,
+                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "board_id": action.board_id,
+        "channel": action.channel,
+        "override": action.state,
+        "auto_rules": auto_rules,
+        "active_toggle_rules": sorted(active_toggle_rules),
+    }
 
 
 @router.delete("/inputs/override")
@@ -2068,13 +4169,35 @@ def clear_input_override(board_id: int, channel: int):
     input_overrides[board_id][idx] = None
     _persist_overrides_to_db()
     add_event("INFO", f"Override IN{channel:02d} limpiado", board_id)
-    return {"board_id": board_id, "channel": channel, "override": None}
+    _coce_notify(
+        "input_override",
+        {"board_id": board_id, "channel": channel, "override": None},
+    )
+    auto_rules: Optional[dict] = None
+    if settings.auto_rules_background_enabled:
+        try:
+            auto_rules = _auto_rules_for_input(
+                board_id,
+                channel,
+                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "board_id": board_id,
+        "channel": channel,
+        "override": None,
+        "auto_rules": auto_rules,
+        "active_toggle_rules": sorted(active_toggle_rules),
+    }
 
 
 @router.get("/rules/state")
 def get_rules_state():
     return {
         "current_mode": current_mode,
+        "active_toggle_rules": sorted(active_toggle_rules),
+        "pending_manual_enclavamiento_mode": pending_manual_enclavamiento_mode,
         "mode_latches": mode_latches,
         "rules": rules_config,
         "runtime": rules_runtime,
@@ -2145,13 +4268,14 @@ def delete_module_api(module_id: int):
     if not _board_exists(module_id):
         raise HTTPException(status_code=404, detail="Módulo no encontrado")
     c = None
-    with modbus_io_lock:
+    with _board_modbus_lock(module_id):
         c = clients.pop(module_id, None)
-    if c:
-        try:
-            c.close()
-        except Exception:
-            pass
+        if c:
+            try:
+                c.close()
+            except Exception:
+                pass
+    _drop_board_modbus_lock(module_id)
     pms.delete_module(module_id)
     _sync_runtime_from_db()
     add_event("WARN", "Módulo eliminado de la configuración", module_id)
@@ -2168,6 +4292,7 @@ def add_channel_api(module_id: int, body: ChannelCreateBody):
         body.address,
         slot_index=body.slot_index,
         label=body.label,
+        channel_name=body.channel_name,
         open_cmd=body.open_cmd,
         close_cmd=body.close_cmd,
     )
@@ -2182,21 +4307,48 @@ def patch_channel_api(module_id: int, channel_id: int, body: ChannelPatchBody):
         raise HTTPException(status_code=404, detail="Módulo no encontrado")
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT module_id FROM panel_module_channels WHERE id = ?",
+            "SELECT module_id, kind FROM panel_module_channels WHERE id = ?",
             (channel_id,),
         ).fetchone()
     if not row or row[0] != module_id:
         raise HTTPException(status_code=404, detail="Canal no pertenece a este módulo")
+    patch = body.model_dump(exclude_unset=True)
+    if "pulse_limit" in patch and row[1] != "input":
+        raise HTTPException(status_code=400, detail="pulse_limit solo aplica a entradas (IN)")
+    if "pulse_limit" in patch:
+        pl = patch["pulse_limit"]
+        if pl is not None and pl < 1:
+            raise HTTPException(status_code=400, detail="pulse_limit debe ser >= 1 o null")
     pms.update_channel(
         channel_id,
-        slot_index=body.slot_index,
-        label=body.label,
-        address=body.address,
-        open_cmd=body.open_cmd,
-        close_cmd=body.close_cmd,
+        slot_index=patch.get("slot_index"),
+        label=patch["label"] if "label" in patch else ...,
+        channel_name=patch["channel_name"] if "channel_name" in patch else ...,
+        address=patch.get("address"),
+        open_cmd=patch["open_cmd"] if "open_cmd" in patch else ...,
+        close_cmd=patch["close_cmd"] if "close_cmd" in patch else ...,
+        pulse_limit=patch["pulse_limit"] if "pulse_limit" in patch else ...,
     )
     _sync_runtime_from_db()
     return {"ok": True, "channel_id": channel_id}
+
+
+@router.post("/modules/{module_id}/channels/{channel_id}/reset-pulses")
+def reset_channel_pulses_api(module_id: int, channel_id: int):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT module_id, kind FROM panel_module_channels WHERE id = ?",
+            (channel_id,),
+        ).fetchone()
+    if not row or row[0] != module_id:
+        raise HTTPException(status_code=404, detail="Canal no pertenece a este módulo")
+    if row[1] != "input":
+        raise HTTPException(status_code=400, detail="Solo entradas (IN) tienen contador de pulsaciones")
+    if not pms.reset_channel_pulse_count(channel_id):
+        raise HTTPException(status_code=404, detail="Canal no encontrado")
+    return {"ok": True, "channel_id": channel_id, "pulse_count": 0}
 
 
 @router.delete("/modules/{module_id}/channels/{channel_id}")
@@ -2284,6 +4436,7 @@ def api_v1_list_modes_from_rules() -> List[Dict[str, Any]]:
                 "enabled": bool(rule.get("enabled", True)),
                 "type": rule.get("type"),
                 "auto_execute": rule.get("auto_execute"),
+                "color": rule.get("color"),
             }
         )
     return items
@@ -2293,22 +4446,190 @@ def api_v1_get_current_mode() -> Optional[str]:
     return current_mode
 
 
+def api_v1_get_pending_mode() -> Optional[str]:
+    return pending_manual_enclavamiento_mode
+
+
+def api_v1_get_mode_status() -> dict:
+    return {
+        "current_mode": current_mode,
+        "pending_mode": pending_manual_enclavamiento_mode,
+        "active_toggle_rules": sorted(active_toggle_rules),
+    }
+
+
+def api_v1_deactivate_rule_for_tablet(rule_key: str) -> dict:
+    """
+    Desactiva una regla desde la tablet:
+    - Interruptor (toggle) activo → OFF + reglas vinculadas.
+    - Modo operativo actual (horario / incendio) → clear_mode + restaurar horario si aplica.
+    """
+    rule = rules_config.get(rule_key)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Regla no encontrada: {rule_key}")
+
+    toggle_result: Optional[dict] = None
+    toggle_off = False
+    if _is_toggle_enclavamiento_rule(rule_key, rule) and rule_key in active_toggle_rules:
+        toggle_result = _apply_toggle_enclavamiento_off(
+            rule_key, rule, apply_outputs_to_hardware=True
+        )
+        toggle_off = bool(toggle_result.get("executed"))
+
+    if current_mode == rule_key:
+        cleared = api_v1_clear_current_mode_if_match(rule_key)
+        cleared["toggle_off"] = toggle_off
+        if toggle_result:
+            cleared["toggle_result"] = toggle_result
+        cleared["deactivated"] = bool(cleared.get("cleared")) or toggle_off
+        return cleared
+
+    if toggle_off:
+        add_event("INFO", f"Actuación interruptor OFF vía API tablet: {rule_key}", 1)
+        return {
+            "deactivated": True,
+            "cleared": False,
+            "toggle_off": True,
+            "current_mode": current_mode,
+            "toggle_result": toggle_result,
+        }
+
+    return {
+        "deactivated": False,
+        "cleared": False,
+        "toggle_off": False,
+        "current_mode": current_mode,
+        "reason": "Regla no activa en el panel",
+    }
+
+
 def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:
     """Pone `current_mode` en null solo si coincide con el modo indicado."""
     global current_mode
     if current_mode != rule_key:
         return {"cleared": False, "current_mode": current_mode}
-    current_mode = None
-    _persist_current_mode_to_db()
-    add_event("INFO", f"Modo desactivado vía API tablet: {rule_key}", 1)
-    return {"cleared": True, "current_mode": None}
+    rule = rules_config.get(rule_key) or {}
+    was_emergency = _rule_is_emergency_operational(rule_key)
+    activate_outputs = list(rule.get("activate_outputs") or []) if rule else []
+
+    if rule:
+        _clear_rule_deactivate_mode_overrides(rule)
+        _clear_rule_trigger_overrides(rule, include_main_trigger=True)
+        _persist_overrides_to_db()
+
+    restored_mode: Optional[str] = None
+    reapply_after_clear: Optional[str] = None
+    if was_emergency:
+        restored_mode = _restore_operational_mode_after_emergency(
+            require_trigger_on=False,
+            reapply_outputs=False,
+        )
+        reapply_after_clear = restored_mode
+    else:
+        current_mode = None
+        _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": None})
+        _zaguan_mode_changed(None)
+    add_event(
+        "INFO",
+        f"Modo desactivado vía API tablet: {rule_key}",
+        1,
+        event_type="mode_change",
+        payload={"rule_key": rule_key, "current_mode": current_mode, "action": "deactivate"},
+    )
+
+    if rule:
+
+        def _finish_clear_hardware() -> None:
+            try:
+                _restore_temp_deactivate_outputs(
+                    rule, rule_key, True, origin=f"clear_mode:{rule_key}"
+                )
+                for out_code in activate_outputs:
+                    b, ch = _parse_out_code(out_code)
+                    if io_state.get(b, {}).get("connected"):
+                        _write_output_if_connected(
+                            b, ch, False, out_code=out_code, origin=f"clear_mode:{rule_key}"
+                        )
+                if reapply_after_clear:
+                    _reapply_operational_mode_outputs(reapply_after_clear)
+                _persist_overrides_to_db()
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=_finish_clear_hardware, daemon=True).start()
+
+    return {
+        "cleared": True,
+        "current_mode": current_mode,
+        "restored_mode": restored_mode,
+        "outputs_restored": [],
+    }
+
+
+def api_v1_read_input_by_code(code: str) -> bool:
+    """Lectura efectiva de un IN del panel (override + snapshot IO)."""
+    return _read_input_effective(
+        code,
+        use_hardware_if_no_override=False,
+        use_overrides=True,
+        physical_inputs=False,
+    )
+
+
+def api_v1_read_output_by_code(code: str, *, refresh: bool = True) -> bool:
+    """Estado ON/OFF de una salida del panel (snapshot IO, opcional refresh Modbus)."""
+    board_id, channel = _parse_out_code(code)
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
+    if refresh:
+        if not io_state.get(board_id, {}).get("connected"):
+            _connect_board(board_id)
+        if io_state.get(board_id, {}).get("connected"):
+            try:
+                _read_all_io(board_id)
+            except Exception:  # noqa: BLE001
+                pass
+    return _read_output_cached(board_id, channel)
+
+
+def api_v1_refresh_board_io(board_id: int) -> bool:
+    """Refresca entradas/salidas Modbus de una placa (p. ej. antes de leer bulones)."""
+    if not _board_exists(board_id):
+        return False
+    if not io_state.get(board_id, {}).get("connected"):
+        _connect_board(board_id)
+    if not io_state.get(board_id, {}).get("connected"):
+        return False
+    try:
+        _read_all_io(board_id)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def api_v1_execute_rule_for_tablet(rule_key: str) -> dict:
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        special = zo.execute_tablet_door_open_sync(rule_key)
+        if special is not None:
+            _zaguan_rule_executed(rule_key, special)
+            return special
+    except Exception:  # noqa: BLE001
+        pass
     return _execute_rule_forced(rule_key, apply_outputs_to_hardware=True)
 
 
 def api_v1_set_output_by_code(code: str, on: bool) -> dict:
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        special = zo.execute_tablet_door_output_sync(code, on)
+        if special is not None:
+            return special
+    except Exception:  # noqa: BLE001
+        pass
     board_id, channel = _parse_out_code(code)
     if not _board_exists(board_id):
         raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
@@ -2320,4 +4641,22 @@ def api_v1_set_output_by_code(code: str, on: bool) -> dict:
         raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {board_id}")
     _write_output(board_id, channel, on)
     add_event("OK", f"Salida (API tablet v1) {code} -> {'ON' if on else 'OFF'}", board_id)
-    return {"code": code, "on": on, "board_id": board_id, "channel": channel}
+    _coce_notify(
+        "output_changed",
+        {"board_id": board_id, "channel": channel, "state": on, "code": code},
+    )
+    result: dict = {"code": code, "on": on, "board_id": board_id, "channel": channel}
+    if not on:
+        try:
+            from app.services import zaguan_orchestrator as zo
+
+            door = zo.door_for_hold_output(code)
+            if door is not None:
+                zo.on_tablet_hold_output_released(door)
+                api_v1_refresh_board_io(zo.DOOR_BOARD_ID[door])
+        except Exception:  # noqa: BLE001
+            pass
+        pending = _try_execute_pending_manual_enclavamiento(apply_outputs_to_hardware=True)
+        if pending:
+            result["pending_mode_result"] = pending
+    return result

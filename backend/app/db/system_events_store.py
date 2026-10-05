@@ -109,7 +109,7 @@ def _row_to_api_dict(row: Tuple[Any, ...]) -> Dict[str, Any]:
         dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        ts = dt.astimezone().strftime("%H:%M:%S")
+        ts = dt.astimezone().strftime("%d/%m/%Y %H:%M:%S")
     except Exception:  # noqa: BLE001
         ts = str(created_at)[:8] if created_at else ""
     out: Dict[str, Any] = {

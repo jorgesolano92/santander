@@ -323,7 +323,7 @@
     "activate_outputs": [
       "OUT_02_01",
       "OUT_02_02",
-      "OUT_03_04"
+      "OUT_03_07"
     ],
     "deactivate_outputs": [
       "OUT_02_03",
@@ -341,7 +341,6 @@
       "OUT_03_03",
       "OUT_03_05",
       "OUT_03_06",
-      "OUT_03_07",
       "OUT_03_08",
       "OUT_03_09",
       "OUT_03_10",
@@ -358,7 +357,8 @@
       "OUT_01_09",
       "OUT_01_10",
       "OUT_01_11",
-      "OUT_01_12"
+      "OUT_01_12",
+      "OUT_03_04"
     ]
   },
   "horario_manual": {
@@ -530,19 +530,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_03_01",
     "blocked_if_active": [
-      "OUT_02_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_02_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_03_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "radares_exterior_puerta_oficina_esclusa": {
     "enabled": true,
@@ -550,19 +551,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_03_02",
     "blocked_if_active": [
-      "OUT_02_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_02_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_03_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "radares_interior_puerta_calle_esclusa": {
     "enabled": true,
@@ -570,19 +572,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_02_01",
     "blocked_if_active": [
-      "OUT_03_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_03_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_02_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "radares_exterior_puerta_calle_esclusa": {
     "enabled": true,
@@ -590,23 +593,25 @@
     "type": "pulso_5_sg",
     "trigger": "IN_02_02",
     "blocked_if_active": [
-      "OUT_03_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_03_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_02_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "pulsador_emergencia_verde_puerta_oficina": {
     "enabled": true,
     "auto_execute": true,
+    "color": "#6b7280",
     "type": "enclavamiento",
     "trigger": "IN_03_06",
     "blocked_if_active": [],
@@ -617,11 +622,16 @@
     "deactivate_outputs": [
       "OUT_03_01",
       "OUT_03_02"
-    ]
+    ],
+    "also_execute_rules": [
+      "pulsador_emergencia_verde_puerta_calle"
+    ],
+    "deactivate_outputs_temporary": true
   },
   "pulsador_emergencia_verde_puerta_calle": {
     "enabled": true,
     "auto_execute": true,
+    "color": "#6b7280",
     "type": "enclavamiento",
     "trigger": "IN_02_06",
     "blocked_if_active": [],
@@ -632,7 +642,11 @@
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02"
-    ]
+    ],
+    "also_execute_rules": [
+      "pulsador_emergencia_verde_puerta_oficina"
+    ],
+    "deactivate_outputs_temporary": true
   },
   "cierres_mecanicos_puerta_oficina": {
     "enabled": true,
@@ -707,14 +721,18 @@
     "deactivate_outputs": [
       "OUT_03_01",
       "OUT_03_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 2
   },
   "interfono_puerta_oficina_exterior": {
     "enabled": true,
     "auto_execute": true,
     "type": "pulso_5_sg",
     "trigger": "IN_03_08",
-    "blocked_if_active": [],
+    "blocked_if_active": [
+      "IN_01_05"
+    ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_03_07"
@@ -722,7 +740,9 @@
     "deactivate_outputs": [
       "OUT_03_01",
       "OUT_03_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 2
   },
   "interfono_puerta_calle_interior": {
     "enabled": true,
@@ -737,14 +757,18 @@
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 2
   },
   "interfono_puerta_calle_exterior": {
     "enabled": true,
     "auto_execute": true,
     "type": "pulso_5_sg",
     "trigger": "IN_02_08",
-    "blocked_if_active": [],
+    "blocked_if_active": [
+      "IN_01_05"
+    ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_02_07"
@@ -752,7 +776,9 @@
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 2
   },
   "llave_emergencia_puerta_oficina": {
     "enabled": true,
@@ -788,7 +814,6 @@
     "enabled": true,
     "auto_execute": true,
     "type": "enclavamiento",
-    "hold_while_trigger": true,
     "trigger": "IN_01_12",
     "blocked_if_active": [],
     "deactivate_modes": [],
@@ -804,7 +829,6 @@
     "enabled": true,
     "auto_execute": true,
     "type": "enclavamiento",
-    "hold_while_trigger": true,
     "trigger": "IN_01_08",
     "blocked_if_active": [],
     "deactivate_modes": [],

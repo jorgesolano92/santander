@@ -1,0 +1,148 @@
+export const ESTADOS_VALIDOS = ["libre", "ocupado", "abriendo", "apagado"];
+
+/**
+ * IP Panphone por canal lógico.
+ * Solo hay 2 placas: .80 = puerta P1, .70 = puerta P2 (cada una con botones locales p1/p2).
+ * Canales lógicos 3/4 = botón/LED interior de la misma placa (no son ESP ni otro Panphone).
+ */
+export const CANAL_DEFAULT_IPS = {
+  1: "192.168.1.80",
+  2: "192.168.1.70",
+  3: "192.168.1.80",
+  4: "192.168.1.70",
+};
+
+export const CANAL_INFO = {
+  1: {
+    corto: "C1",
+    puerta: "P1",
+    rol: "Videoportero",
+    ubicacion: "Exterior · botón local p1",
+    nombre: "P1 — videoportero exterior (.80)",
+    ip: CANAL_DEFAULT_IPS[1],
+    gpioLed: 2,
+    gpioBtn: 15,
+  },
+  2: {
+    corto: "C2",
+    puerta: "P2",
+    rol: "Videoportero",
+    ubicacion: "Exterior · botón local p1",
+    nombre: "P2 — videoportero exterior (.70)",
+    ip: CANAL_DEFAULT_IPS[2],
+    gpioLed: 4,
+    gpioBtn: 16,
+  },
+  3: {
+    corto: "C3",
+    puerta: "P1",
+    rol: "Pulsador",
+    ubicacion: "Interior · botón local p2",
+    nombre: "P1 — pulsador interior (.80)",
+    ip: CANAL_DEFAULT_IPS[3],
+    gpioLed: 5,
+    gpioBtn: 17,
+  },
+  4: {
+    corto: "C4",
+    puerta: "P2",
+    rol: "Pulsador",
+    ubicacion: "Interior · botón local p2",
+    nombre: "P2 — pulsador interior (.70)",
+    ip: CANAL_DEFAULT_IPS[4],
+    gpioLed: 6,
+    gpioBtn: 18,
+  },
+};
+
+export const ESTADO_META = {
+  libre: { label: "Libre", desc: "Se puede entrar" },
+  ocupado: { label: "Ocupado", desc: "Esperar" },
+  abriendo: { label: "Abriendo", desc: "Apertura en curso" },
+  apagado: { label: "Apagado", desc: "Fuera de servicio" },
+};
+
+export const TWEAK_DEFAULTS = {
+  tema: "claro",
+  densidad: "normal",
+  halo: true,
+  intervaloPing: 10,
+};
+
+/** Parpadeo verde en libre durante ventana WinHose (debe coincidir con backend). */
+export const WINHOSE_LIBRE_PARPADEO_MS = 1000;
+
+export function withWinhoseParpadeo(canal, estado, baseCfg, winhoseParpadeo) {
+  if (estado !== "libre" || !winhoseParpadeo?.[`p${canal}`]) {
+    return baseCfg;
+  }
+  return {
+    ...baseCfg,
+    color: [0, 200, 0],
+    animacion: "parpadeo",
+    velocidad: WINHOSE_LIBRE_PARPADEO_MS,
+  };
+}
+
+/**
+ * Simulación POST /api/zaguan/pulsacion/pN.
+ * Hardware: 2 Panphones (.80=P1, .70=P2), cada uno con botones locales p1/p2.
+ */
+export const ZAGUAN_PULSADOR_CANALES = [
+  {
+    canal: 1,
+    puerta: "P1 (calle)",
+    dispositivo: "Videoportero exterior · .80 botón p1",
+    ubicacion: "Exterior",
+    led: "C1",
+    ip: CANAL_DEFAULT_IPS[1],
+    inModbus: "IN_02_08",
+  },
+  {
+    canal: 2,
+    puerta: "P2 (oficina)",
+    dispositivo: "Videoportero exterior · .70 botón p1",
+    ubicacion: "Exterior",
+    led: "C2",
+    ip: CANAL_DEFAULT_IPS[2],
+    inModbus: "IN_03_08",
+  },
+  {
+    canal: 3,
+    puerta: "P1 (calle)",
+    dispositivo: "Pulsador interior · .80 botón p2",
+    ubicacion: "Interior",
+    led: "C3",
+    ip: CANAL_DEFAULT_IPS[3],
+    inModbus: "IN_02_07",
+  },
+  {
+    canal: 4,
+    puerta: "P2 (oficina)",
+    dispositivo: "Pulsador interior · .70 botón p2",
+    ubicacion: "Interior",
+    led: "C4",
+    ip: CANAL_DEFAULT_IPS[4],
+    inModbus: "IN_03_07",
+  },
+];
+
+/** WinHose: inductivo llave echada (cerrado=ON, abierto=OFF → flanco ON→OFF). */
+export const ZAGUAN_LLAVE_ECHADA = [
+  {
+    id: 1,
+    label: "Llave echada 1",
+    puerta: "P1 (calle)",
+    code: "IN_02_03",
+    placa: 2,
+    canalIn: 3,
+  },
+  {
+    id: 2,
+    label: "Llave echada 2",
+    puerta: "P2 (oficina)",
+    code: "IN_03_03",
+    placa: 3,
+    canalIn: 3,
+  },
+];
