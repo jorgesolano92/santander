@@ -184,6 +184,10 @@ def _coce_sync_branch_alerts() -> None:
 
 def _zaguan_mode_changed(mode: Optional[str]) -> None:
     try:
+        _sync_lock_toggle_rules_with_mode(mode)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         from app.services import zaguan_orchestrator as zo
 
         zo.on_mode_changed(mode)
@@ -338,6 +342,59 @@ def _is_toggle_enclavamiento_rule(rule_key: str, rule: Optional[dict] = None) ->
     if _rule_is_emergency_operational(rule_key):
         return False
     return True
+
+
+def _lock_toggle_outputs(rule: dict) -> List[str]:
+    """OUT de bulones si la regla interruptor solo maneja cierres mecánicos (llave IN_0x_03)."""
+    outs = [str(c) for c in rule.get("activate_outputs") or []]
+    if not outs:
+        return []
+    try:
+        from app.services import zaguan_orchestrator as zo
+    except Exception:  # noqa: BLE001
+        return []
+    return outs if all(zo.is_door_lock_output(c) for c in outs) else []
+
+
+def _toggle_rule_is_on(rule_key: str, rule: dict) -> bool:
+    """
+    Cierres mecánicos: los modos echan/quitan bulones sin pasar por la llave, así que el
+    siguiente flanco decide por el estado real de OUT_x_01/02 (echados → quitar, quitados → echar).
+    """
+    lock_outs = _lock_toggle_outputs(rule)
+    if not lock_outs:
+        return rule_key in active_toggle_rules
+    for code in lock_outs:
+        board_id, channel = _parse_out_code(code)
+        if _read_output_cached(board_id, channel):
+            return True
+    return False
+
+
+def _sync_lock_toggle_rules_with_mode(mode: Optional[str]) -> None:
+    """El interruptor de cierres mecánicos refleja si el modo nuevo echa o quita los bulones."""
+    mode_rule = rules_config.get(mode or "") or {}
+    mode_on = set(mode_rule.get("activate_outputs") or [])
+    mode_off = set(mode_rule.get("deactivate_outputs") or [])
+    if not mode_on and not mode_off:
+        return
+    changed = False
+    for key, rule in rules_config.items():
+        if not _is_toggle_enclavamiento_rule(key, rule):
+            continue
+        lock_outs = _lock_toggle_outputs(rule)
+        if not lock_outs:
+            continue
+        if all(c in mode_on for c in lock_outs):
+            if key not in active_toggle_rules:
+                active_toggle_rules.add(key)
+                changed = True
+        elif all(c in mode_off for c in lock_outs):
+            if key in active_toggle_rules:
+                active_toggle_rules.discard(key)
+                changed = True
+    if changed:
+        _notify_toggle_rules_changed()
 
 
 def _pymodbus_client_kwargs() -> Dict[str, Any]:
@@ -2376,7 +2433,7 @@ def _evaluate_toggle_enclavamiento_rule(
             "blocked_inputs": blocked_active_codes,
             "toggle_active": rule_key in active_toggle_rules,
         }
-    if rule_key in active_toggle_rules:
+    if _toggle_rule_is_on(rule_key, rule):
         return _apply_toggle_enclavamiento_off(
             rule_key,
             rule,
@@ -3216,7 +3273,7 @@ def _execute_rule_forced(
         }
 
     if _is_toggle_enclavamiento_rule(rule_key, rule):
-        if rule_key in active_toggle_rules:
+        if _toggle_rule_is_on(rule_key, rule):
             result = _apply_toggle_enclavamiento_off(
                 rule_key, rule, apply_outputs_to_hardware=apply_outputs_to_hardware,
                 linked_stack=stack,
