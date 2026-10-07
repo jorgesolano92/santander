@@ -11,6 +11,14 @@ import { getCoceApiBase, getCoceToken } from '../api/coceClient';
 import type { SucursalEstado } from '../types';
 import { parseBranchAlerts, type BranchAlertsMap } from '../utils/branchAlerts';
 
+export type LiveTablet = {
+  clientId: string;
+  ip: string | null;
+  username: string;
+  /** Epoch en ms. */
+  connectedSince: number | null;
+};
+
 export type LiveBranchInfo = {
   installationId: string;
   nombre: string;
@@ -22,11 +30,12 @@ export type LiveBranchInfo = {
   modbus?: boolean;
   boardsConnected?: number;
   boardsTotal?: number;
+  tablets?: LiveTablet[];
   lastEventTs?: number | null;
   lastMessage?: { type: string; payload: Record<string, unknown> };
 };
 
-type CoceLiveContextValue = {
+export type CoceLiveContextValue = {
   connected: boolean;
   getLiveStatus: (installationId: string) => SucursalEstado | undefined;
   getLiveBranch: (installationId: string) => LiveBranchInfo | undefined;
@@ -41,6 +50,19 @@ function wsLiveUrl(): string | null {
   if (!base || !token) return null;
   const wsBase = base.replace(/^http/i, (m) => (m.toLowerCase() === 'https' ? 'wss' : 'ws'));
   return `${wsBase}/api/coce/ws/live?token=${encodeURIComponent(token)}`;
+}
+
+/** undefined: la sucursal aún no reporta tablets (backend sin actualizar). */
+function parseTablets(raw: unknown): LiveTablet[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw
+    .filter((t): t is Record<string, unknown> => Boolean(t) && typeof t === 'object')
+    .map((t) => ({
+      clientId: String(t.client_id ?? ''),
+      ip: t.ip != null ? String(t.ip) : null,
+      username: String(t.username ?? ''),
+      connectedSince: t.connected_since != null ? Number(t.connected_since) * 1000 : null,
+    }));
 }
 
 function parseBranch(raw: Record<string, unknown>): LiveBranchInfo {
@@ -60,6 +82,7 @@ function parseBranch(raw: Record<string, unknown>): LiveBranchInfo {
     modbus: Boolean(raw.modbus),
     boardsConnected: Number(raw.boardsConnected ?? 0),
     boardsTotal: Number(raw.boardsTotal ?? 0),
+    tablets: parseTablets(raw.tablets),
     lastEventTs:
       raw.lastEventTs != null ? Number(raw.lastEventTs) : null,
   };

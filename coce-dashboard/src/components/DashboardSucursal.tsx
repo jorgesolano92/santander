@@ -242,7 +242,8 @@ export function DashboardSucursal() {
     icon: ReactNode;
     statusLabel: string;
     statusVariant: "operativo" | "no_operativo" | "apagado";
-    version: string;
+    version?: string;
+    rows?: Array<{ label: string; value: string }>;
     updateAvailable?: boolean;
     availableVersion?: string;
     showRestart?: boolean;
@@ -255,6 +256,7 @@ export function DashboardSucursal() {
     statusLabel,
     statusVariant,
     version,
+    rows,
     updateAvailable = false,
     availableVersion,
     showRestart = false,
@@ -305,10 +307,18 @@ export function DashboardSucursal() {
                 </span>
               </dd>
             </div>
-            <div className="device-card-row">
-              <dt>Versión software</dt>
-              <dd className="device-card-version">{version}</dd>
-            </div>
+            {rows?.map((row) => (
+              <div className="device-card-row" key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+            {version !== undefined && (
+              <div className="device-card-row">
+                <dt>Versión software</dt>
+                <dd className="device-card-version">{version}</dd>
+              </div>
+            )}
           </dl>
         </div>
       </article>
@@ -522,6 +532,7 @@ export function DashboardSucursal() {
   const tabletUpdateAvailable = true;
   const panelReachable = !!data && !error;
   const tabletConnected = panelReachable;
+  const liveTablets = live.connected ? liveBranch?.tablets : undefined;
 
   return (
     <div className="content-view">
@@ -656,27 +667,55 @@ export function DashboardSucursal() {
                 }
               }}
             />
-            <DeviceCard
-              title="Tablet"
-              icon={<TabletIcon />}
-              statusLabel={
-                loading && !data
-                  ? "Comprobando…"
-                  : tabletConnected
-                    ? "Operativo"
-                    : "No operativo"
-              }
-              statusVariant={
-                loading && !data
-                  ? "no_operativo"
-                  : tabletConnected
-                    ? "operativo"
-                    : "no_operativo"
-              }
-              version={tabletConnected ? TABLET_SOFTWARE_VERSION : "—"}
-              updateAvailable={tabletUpdateAvailable}
-              availableVersion={TABLET_AVAILABLE_VERSION}
-            />
+            {liveTablets === undefined ? (
+              <DeviceCard
+                title="Tablet"
+                icon={<TabletIcon />}
+                statusLabel={
+                  loading && !data
+                    ? "Comprobando…"
+                    : tabletConnected
+                      ? "Operativo"
+                      : "No operativo"
+                }
+                statusVariant={
+                  loading && !data
+                    ? "no_operativo"
+                    : tabletConnected
+                      ? "operativo"
+                      : "no_operativo"
+                }
+                version={tabletConnected ? TABLET_SOFTWARE_VERSION : "—"}
+                updateAvailable={tabletUpdateAvailable}
+                availableVersion={TABLET_AVAILABLE_VERSION}
+              />
+            ) : liveTablets.length === 0 ? (
+              <DeviceCard
+                title="Tablets"
+                icon={<TabletIcon />}
+                statusLabel="Ninguna conectada"
+                statusVariant="no_operativo"
+              />
+            ) : (
+              liveTablets.map((tablet, index) => (
+                <DeviceCard
+                  key={tablet.clientId || index}
+                  title={`Tablet ${index + 1}`}
+                  icon={<TabletIcon />}
+                  statusLabel="Conectada"
+                  statusVariant="operativo"
+                  rows={[
+                    { label: "IP", value: tablet.ip ?? "—" },
+                    {
+                      label: "Conectada desde",
+                      value: tablet.connectedSince
+                        ? new Date(tablet.connectedSince).toLocaleString("es-ES")
+                        : "—",
+                    },
+                  ]}
+                />
+              ))
+            )}
           </div>
 
           <section className="doors-section ">

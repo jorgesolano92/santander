@@ -1,4 +1,4 @@
-import type { BranchKpiMetrics } from '../data/mockKpiMetrics';
+import type { BranchKpiMetrics } from '../data/branchKpiMetrics';
 
 type Props = {
   metrics: BranchKpiMetrics;
@@ -8,7 +8,7 @@ type Props = {
 };
 
 const KPI_ITEMS: Array<{
-  key: keyof BranchKpiMetrics | 'camaras';
+  key: keyof BranchKpiMetrics | 'dispositivos';
   label: string;
   accent: string;
   format: (m: BranchKpiMetrics) => string;
@@ -20,10 +20,10 @@ const KPI_ITEMS: Array<{
     format: (m) => String(m.modosConfigurados),
   },
   {
-    key: 'camaras',
-    label: 'Cámaras activas',
+    key: 'dispositivos',
+    label: 'Dispositivos conectados',
     accent: 'var(--ok)',
-    format: (m) => `${m.camarasActivas} / ${m.camarasTotales}`,
+    format: (m) => `${m.dispositivosConectados ?? '—'} / ${m.dispositivosTotales}`,
   },
   {
     key: 'alertasCriticas',

@@ -38,7 +38,8 @@ async def ws_tablet_calls(
 
     await websocket.accept()
     client_id = uuid.uuid4().hex
-    await tablet_call_hub.register(client_id, websocket, username)
+    client_ip = websocket.client.host if websocket.client else None
+    await tablet_call_hub.register(client_id, websocket, username, ip=client_ip)
     await websocket.send_json({"type": "registered", "client_id": client_id, "username": username})
 
     try:

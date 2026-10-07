@@ -28,6 +28,8 @@ class TabletClient:
     ws: WebSocket
     username: str
     connected_at: float = field(default_factory=time.monotonic)
+    ip: Optional[str] = None
+    connected_since_ts: float = field(default_factory=time.time)
 
 
 @dataclass
@@ -184,6 +186,28 @@ def connected_client_count() -> int:
     return len(_clients)
 
 
+def connected_tablets() -> list[dict[str, Any]]:
+    """Tablets con WS abierto, para el heartbeat COCE."""
+    return [
+        {
+            "client_id": c.client_id,
+            "ip": c.ip,
+            "username": c.username,
+            "connected_since": c.connected_since_ts,
+        }
+        for c in sorted(_clients.values(), key=lambda c: c.connected_since_ts)
+    ]
+
+
+def _notify_coce_tablets_changed() -> None:
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event("tablets_changed", {"tablets": connected_tablets()})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def notify_coce_message(message: dict[str, Any]) -> None:
     """Push a tablets por el mismo WS que modos/llamadas (no pasa por el browser del panel)."""
     publish_sync(
@@ -198,13 +222,18 @@ def notify_coce_message(message: dict[str, Any]) -> None:
     )
 
 
-async def register(client_id: str, ws: WebSocket, username: str) -> None:
+async def register(
+    client_id: str, ws: WebSocket, username: str, ip: Optional[str] = None
+) -> None:
     async with _lock:
         old = _clients.get(client_id)
         if old is not None and old.ws is not ws:
             _clients.pop(client_id, None)
-        _clients[client_id] = TabletClient(client_id=client_id, ws=ws, username=username)
-    log.info("Tablet WS registrada id=%s user=%s (total=%s)", client_id, username, len(_clients))
+        _clients[client_id] = TabletClient(client_id=client_id, ws=ws, username=username, ip=ip)
+    log.info(
+        "Tablet WS registrada id=%s user=%s ip=%s (total=%s)", client_id, username, ip, len(_clients)
+    )
+    _notify_coce_tablets_changed()
     await _purge_stale_active_call()
     await _send_to_client(client_id, _intercom_status_message())
     try:
@@ -249,6 +278,7 @@ async def unregister(client_id: str) -> None:
             _intercom_holder_username = None
             _intercom_door = None
     log.info("Tablet WS desconectada id=%s (total=%s)", client_id, len(_clients))
+    _notify_coce_tablets_changed()
     await _broadcast_intercom_status()
 
 

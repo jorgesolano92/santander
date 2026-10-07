@@ -6,6 +6,7 @@ from typing import Any
 
 def build_heartbeat_payload() -> dict[str, Any]:
     from app.api.routes import panel as panel_mod
+    from app.services import tablet_call_hub
 
     boards_map = panel_mod.pms.get_boards_config_map()
     total = len(boards_map)
@@ -19,4 +20,5 @@ def build_heartbeat_payload() -> dict[str, Any]:
         "boards_connected": connected,
         "boards_total": total,
         "current_mode": panel_mod.current_mode,
+        "tablets": tablet_call_hub.connected_tablets(),
     }

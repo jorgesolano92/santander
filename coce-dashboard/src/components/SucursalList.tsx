@@ -31,7 +31,7 @@ import { SucursalKpiBar } from "./SucursalKpiBar";
 
 import { ErrorBoundary } from "./ErrorBoundary";
 
-import { resolveKpiMetrics } from "../data/mockKpiMetrics";
+import { resolveKpiMetrics } from "../data/branchKpiMetrics";
 
 import { hasMapCoords } from "../utils/googleMaps";
 import { resolveBranchModeDisplay } from "../utils/ruleModeColors";

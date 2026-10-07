@@ -27,6 +27,7 @@ class BranchLiveState:
     boards_connected: int = 0
     boards_total: int = 0
     current_mode: Optional[str] = None
+    tablets: list[dict[str, Any]] = field(default_factory=list)
     partial: dict[str, Any] = field(default_factory=dict)
     last_broadcast_status: Optional[BranchStatus] = None
 
@@ -40,6 +41,7 @@ class BranchLiveState:
             "boardsConnected": self.boards_connected,
             "boardsTotal": self.boards_total,
             "currentMode": self.current_mode,
+            "tablets": self.tablets,
             "lastHeartbeatTs": self.last_heartbeat_ts or None,
             "lastEventTs": self.last_event_ts or None,
             "partial": self.partial or None,
@@ -80,6 +82,7 @@ class LiveHub:
         st.modbus = False
         st.boards_connected = 0
         st.boards_total = 0
+        st.tablets = []
         st.partial = {}
 
     async def ensure_branch(self, installation_id: str, nombre: str = "") -> BranchLiveState:
@@ -151,6 +154,10 @@ class LiveHub:
                 st.boards_total = int(payload.get("boards_total") or 0)
                 if "current_mode" in payload:
                     st.current_mode = payload.get("current_mode")
+                if isinstance(payload.get("tablets"), list):
+                    st.tablets = payload["tablets"]
+            elif msg_type == "tablets_changed":
+                st.tablets = payload.get("tablets") if isinstance(payload.get("tablets"), list) else []
             elif msg_type == "mode_changed":
                 st.current_mode = payload.get("current_mode")
                 st.partial = {
