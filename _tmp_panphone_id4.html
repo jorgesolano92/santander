@@ -1,0 +1,651 @@
+﻿<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="es">
+    <head>
+        <title> Panphone IP - Multimedia</title>       
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /> 
+	    <!-- <link href='http://fonts.googleapis.com/css?family=Ubuntu' rel='stylesheet' type='text/css'></link>
+        <script type="text/javascript" src="lib/jquery.min.js"></script>-->
+		<script type="text/javascript" src="js/jquery-1.7.2.min.js"></script>
+        <script type="text/javascript" src="js/cambiarPestanna.js"></script>
+		<link rel="stylesheet" type="text/css" href="common.css" />
+        <style type="text/css">
+
+            #wrapper{
+                width:980px;
+                min-height:730px;
+                height:auto;
+                border: none;   
+                margin: 10px;
+                float: right;
+                position: relative; 
+                border-radius:9px;
+                background-color:rgba(255,255,255,0.8);	
+                overflow-y:auto;
+                overflow-x:hidden;
+
+            }
+			.inputfondo{
+                background-color: #dddddd;
+                
+            }            
+            .redondeada{
+                border-radius: 9px; 
+            }            
+            .solo{
+				float:right;
+				font-size: 16px;
+				margin-right: 90px;
+            }          
+
+            fieldset{
+                font-family: 'Ubuntu', sans-serif;
+                width: 810px;
+                margin: 20px auto;
+                padding: 10px;
+                background-color: rgba(255,255,255,0.5);
+                border-radius: 9px;
+                color: gray;
+            }
+
+            .field{
+                font-family: 'Ubuntu', sans-serif;
+                width: 770px;
+                margin: 10px;
+                padding: 5px;
+                background-color: rgba(155,155,255,0.1);
+                border:none;
+                color: black;
+            }
+			#number {
+			  width: 7em;
+			}
+			
+			//pestanas
+			.contenedor{
+			width: 770px;
+			margin: auto;
+			//background: black;
+			color: bisque;
+			
+			padding: 10px 10px 40px 40px;
+			border-radius: 10px;
+			//box-shadow: 0 10px 10px 0px rgba(0, 0, 0, 0.8);
+			}
+
+			.contenedor .titulo{
+			font-size: 2.5ex;
+			font-weight: bold;
+			margin-left: 5px;
+			margin-bottom: 5px;
+			}
+
+			#pestanas {
+			float: top;
+			font-size: 2ex;
+			font-weight: bold;
+			}
+
+			#pestanas ul{
+				margin-left: -40px;    
+			}
+
+			#pestanas li{
+				list-style-type: none;
+				float: left;
+				text-align: center;
+				margin: 0px 1px -2px -0px;
+				background: rgba(42,192,42,0.8);
+				border-top-left-radius: 5px;
+				border-top-right-radius: 5px;
+				border: 2px  grey;
+				border-bottom: black;
+				padding: 5px 25px 0px 20px;
+			}
+
+			#pestanas a:link{
+				text-decoration: none;
+				color: black;
+			}
+
+			#contenidopestanas{
+				clear: both;  
+				//background: dimgray;
+				background: rgba(155,155,255,0.1);
+				padding: 1px 0px 20px 20px;
+				border-radius: 5px;
+				border-top-left-radius: 0px;
+				border: 2px solid grey;
+				width: 800px;
+				max-height: 600px;
+				overflow-y: auto;
+				overflow-x: hidden;
+			}
+ 		.right { text-align: right; }
+		.center { text-align: center; }
+
+
+        </style>
+	<script>
+		function myFunction() {
+		alert("Cambios almacenados correctamente");
+		}
+		
+				
+		if (top != self) top.location.href = location.href;
+	</script>
+
+    </head>
+	<body onload="javascript:cambiarPestanna(pestanas,pestana1);">		
+		<span id="timer">
+		<script type="text/javascript">
+			if (typeof countDown === 'function') {
+				countDown();
+			}
+		</script>
+		</span>
+        <div id="wrapperbox">
+            <div id="menu">
+                <a href="main.php?id=1"  class="ico"><img id="casa" src="/img/home.png" title="Inicio"></img>  </a>
+                <a href="main.php?id=2"  class="ico"> <img id="exit" src="/img/address_book.png" title="Cuentas SIP"></img> </a> 
+				<a href="main.php?id=3"  class="ico"> <img id="log" src="/img/site_map.png" title="Conectividad"></img> </a> 
+                <a href="main.php?id=4"  class="ico"> <img id="planta" src="/img/media.png" title="Multimedia"> </a>
+                <a href="main.php?id=5"  class="ico"> <img id="keys" src="/img/lock.png" title="Relés" > </a>
+                <a href="main.php?id=6"  class="ico"> <img id="webcam" src="/img/keyboard.png" title="Teclado / Pulsador"> </a>
+                <a href="main.php?id=7"  class="ico"> <img id="list" src="/img/key.png" title="Módulos y licencias "> </a>
+               	<a href="main.php?id=8"  class="ico"> <img id="test" src="/img/gear.png" title="Herramientas"> </a>
+				<a href="main.php?id=9"  class="ico"><img  id="conexion" src="/img/protected.png"  title="Usuarios" ></img></a>  
+            </div>
+			
+
+ <div id="wrapper"> 
+				<h1>Multimedia</h1>
+                <fieldset>
+ 				<div class="contenedor">
+						<div id="pestanas">
+							<ul id=lista>
+								<li id="pestana1"><a href='javascript:cambiarPestanna(pestanas,pestana1);'><img src="/sel icons/music.png" height="15" ></img>   &nbsp;&nbsp;&nbsp;Audio</a></li>
+								<li id="pestana2"><a href='javascript:cambiarPestanna(pestanas,pestana2);'><img src="/sel icons/webcam.png" height="15" ></img>   &nbsp;&nbsp;&nbsp;Vídeo</a></li>
+								<li id="pestana3"><a href='javascript:cambiarPestanna(pestanas,pestana3);'><img src="/sel icons/expand_arrow.png" height="15" ></img>   &nbsp;&nbsp;&nbsp;Grabaciones</a></li>
+								<li id="pestana4"><a href='javascript:cambiarPestanna(pestanas,pestana4);'><img src="/sel icons/entry_feed.png" height="15" ></img>   &nbsp;&nbsp;&nbsp;Streaming RTSP</a></li>
+								<li id="pestana5"><a href='javascript:cambiarPestanna(pestanas,pestana5);'><img src="/sel icons/safe.png" height="15" ></img>   &nbsp;&nbsp;&nbsp;LCD</a></li>
+							</ul>
+						</div>
+                        
+						<div id="contenidopestanas">
+							<div id="cpestana1">
+							<form method="post" action="">   
+								<fieldset class="field">
+									<legend>&emsp; Niveles de audio &emsp;</legend>
+								<table>
+									<tr>
+										<td>Altavoz:</td>
+										<td><input class="redondeada" type="number" name="volumenSpeaker" size="2" maxlength="1" min="0" max="10" value="10"></td>
+										<td rowspan="3" style="vertical-align:top; padding-left:30px;">
+											<label for="audio_buffer">Audio Buffer: </label>
+											<select name="audio_buffer" id="audio_buffer">
+																									<option value="5" >5 ms</option>
+																									<option value="10" >10 ms</option>
+																									<option value="20" >20 ms</option>
+																									<option value="30" >30 ms</option>
+																									<option value="40" >40 ms</option>
+																									<option value="50" >50 ms</option>
+																									<option value="60" >60 ms</option>
+																									<option value="80" >80 ms</option>
+																									<option value="3-10" >3-10 ms</option>
+																									<option value="3-15" >3-15 ms</option>
+																									<option value="3-20" >3-20 ms</option>
+																									<option value="3-30" >3-30 ms</option>
+																									<option value="5-15" >5-15 ms</option>
+																									<option value="5-30" >5-30 ms</option>
+																									<option value="5-50" >5-50 ms</option>
+																									<option value="5-80" >5-80 ms</option>
+																									<option value="8-40" >8-40 ms</option>
+																									<option value="10-50" >10-50 ms</option>
+																									<option value="10-100" >10-100 ms</option>
+																									<option value="15-60" >15-60 ms</option>
+																									<option value="15-120" >15-120 ms</option>
+																									<option value="20-80" >20-80 ms</option>
+																									<option value="20-100" >20-100 ms</option>
+																									<option value="20-120" >20-120 ms</option>
+																									<option value="20-160" selected>20-160 ms</option>
+																									<option value="25-100" >25-100 ms</option>
+																									<option value="30-120" >30-120 ms</option>
+																									<option value="30-160" >30-160 ms</option>
+																									<option value="40-160" >40-160 ms</option>
+																									<option value="40-200" >40-200 ms</option>
+																							</select>
+											<small style="margin-left:10px; color:#888;">(20-160)</small>
+											<br><br>
+											<label for="jitter_buffer">Jitter Buffer: </label>
+											<select name="jitter_buffer" id="jitter_buffer">
+																									<option value="1" >1 frames</option>
+																									<option value="2" >2 frames</option>
+																									<option value="3" >3 frames</option>
+																									<option value="5" >5 frames</option>
+																									<option value="10" >10 frames</option>
+																									<option value="15" >15 frames</option>
+																									<option value="20" >20 frames</option>
+																									<option value="25" >25 frames</option>
+																									<option value="30" >30 frames</option>
+																									<option value="40" >40 frames</option>
+																									<option value="50" >50 frames</option>
+																									<option value="1-5" >1-5 frames</option>
+																									<option value="2-10" >2-10 frames</option>
+																									<option value="2-25" >2-25 frames</option>
+																									<option value="3-15" >3-15 frames</option>
+																									<option value="3-30" >3-30 frames</option>
+																									<option value="5-10" selected>5-10 frames</option>
+																									<option value="5-20" >5-20 frames</option>
+																									<option value="5-40" >5-40 frames</option>
+																									<option value="8-25" >8-25 frames</option>
+																									<option value="10-20" >10-20 frames</option>
+																									<option value="10-50" >10-50 frames</option>
+																									<option value="15-25" >15-25 frames</option>
+																									<option value="15-60" >15-60 frames</option>
+																									<option value="20-50" >20-50 frames</option>
+																									<option value="25-70" >25-70 frames</option>
+																									<option value="30-60" >30-60 frames</option>
+																									<option value="40-80" >40-80 frames</option>
+																							</select>
+											<small style="margin-left:10px; color:#888;">(5-10 ms)</small>
+										</td>
+									</tr>
+									<tr>
+										<td>Micrófono:</td>
+										<td><input class="redondeada" type="number" name="volumenMicro" size="2" maxlength="1" min="0" max="10" value="6"></td>
+									</tr>
+									<tr>
+										<td>Cancelación de eco:</td>
+										<td><input class="redondeada" type="checkbox" name="ecocancel" checked></td>
+									</tr>
+								</table>                            
+								<input type="hidden" value="" name="datosAudio" />
+								<br><input class="boton" type="submit" value="Guardar" >
+								</fieldset> 
+							</form>
+			   
+						
+							<fieldset class="field"><legend>&emsp; Test de audio &emsp;</legend> 
+							<form method="post" action="">
+								<table>
+									<tr>
+										<td>         		
+											Tolerancia :
+										</td>
+										<td>        
+																					<select name="tolerancia">
+												<option  value="5" > 1 </option>
+												<option  value="6" > 2 </option>
+												<option  value="7" > 3 </option>
+												<option  value="8" > 4 </option>
+												<option  value="9" > 5 </option>
+											</select>
+		<!--
+															<input class="redondeada" type="number" name="tolerancia" size="4" maxlength="2" min="1" max="10"  value=""  list="defaultNumbers"></input><br>
+															
+															<span class="validity"></span>
+
+															<datalist id="defaultNumbers">
+															  <option value="5">
+															  <option value="10">
+															  <option value="15">
+															
+														
+															</datalist>
+															-->
+										</td>	
+												
+										<td>         		
+															Resultado: 
+																														
+										</td>		
+										
+									</tr>
+								</table>	
+
+								<input type="hidden" value="" name="testspeakermic" />
+								<input class="boton" type="submit"  value="Realizar test" >
+							</form>            
+
+						</fieldset>  
+						
+						<form method="post" action="">   
+								<fieldset class="field">
+									<legend>&emsp; Idioma de locuciones &emsp;</legend>
+														
+								<table>
+									<tr>
+										<td>         		
+											Selecccione su idioma de audio : 
+										</td>
+										<td> 
+											<select name="audio" >
+												<option value='--'  > Sin locuciones - Sin sonidos </option><option value='**' selected > Sin locuciones - Solo sonidos </option><option value='EN'  > English </option><option value='PT'  > Português </option><option value='ES'  > Español </option><option value='EU'  > Euskera </option><option value='CA'  > Catalá </option>											
+											</select>
+										</td>
+									</tr>
+									
+								</table>							
+								
+								<input class="boton" type="submit" value="Cambiar" >
+							</fieldset> 
+								
+							</form>
+						
+						
+						
+ 						</div>
+									
+					<div id="cpestana2" align="center">
+						 <form method="post" action="" id="videoControlsForm">
+							<fieldset class="field">
+								<legend>&emsp; Vídeo &emsp;</legend>
+								<table style="width:100%;">
+									<tr>
+										<td valign="top" style="width:300px; text-align:center;">
+																						<span style="display:inline-block; padding:8px; background:#f2f2f2; border:1px solid #bbb; border-radius:8px; min-width:260px; min-height:210px;">
+												<img src="camara.php?ts=1790678830" id="reloader" height="200" style="display:block; margin:0 auto; border:0; max-width:100%; background:#dcdcdc;" onload="if (typeof window.scheduleVideoImageRefresh === 'function') { window.scheduleVideoImageRefresh(); }" onerror="this.onerror=null; this.src='bash/picture.jpg_bk?ts=' + new Date().getTime();" alt="Vista previa de vídeo" />
+											</span>
+											<br><small>Vista previa en directo (refresco aprox. 1 s)</small>
+										</td>
+										<td valign="top">
+																						<p style="margin:0 0 12px 0; text-align:left;">
+												<input type="hidden" name="video_controls" value="1" />
+											</p>
+											<table style="font-size:12px;">
+												<tr>
+													<td style="white-space:nowrap;">Brillo:</td>
+													<td><input class="video-range" type="range" name="brightness" min="0" max="255" value="128" oninput="document.getElementById('brightness_val').innerHTML=this.value; scheduleVideoPreviewAjax();" onchange="scheduleVideoPreviewAjax();" ></td>
+													<td style="width:36px;"><span id="brightness_val">128</span></td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Contraste:</td>
+													<td><input class="video-range" type="range" name="contrast" min="0" max="127" value="36" oninput="document.getElementById('contrast_val').innerHTML=this.value; scheduleVideoPreviewAjax();" onchange="scheduleVideoPreviewAjax();" ></td>
+													<td style="width:36px;"><span id="contrast_val">36</span></td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Saturación:</td>
+													<td><input class="video-range" type="range" name="saturation" min="0" max="127" value="38" oninput="document.getElementById('saturation_val').innerHTML=this.value; scheduleVideoPreviewAjax();" onchange="scheduleVideoPreviewAjax();" ></td>
+													<td style="width:36px;"><span id="saturation_val">38</span></td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Tono:</td>
+													<td><input class="video-range" type="range" name="hue" min="-15" max="15" value="0" oninput="document.getElementById('hue_val').innerHTML=this.value; scheduleVideoPreviewAjax();" onchange="scheduleVideoPreviewAjax();" ></td>
+													<td style="width:36px;"><span id="hue_val">0</span></td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Resolución:</td>
+													<td colspan="2">
+														<select class="redondeada" name="resolution" style="width:190px;" onchange="scheduleVideoPreviewAjax();" >
+																															<option value="320x240" >320x240 (QVGA)</option>
+																															<option value="640x480" selected="selected">640x480 (VGA)</option>
+																															<option value="800x600" >800x600 (SVGA)</option>
+																													</select>
+													</td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Balance de blancos automático:</td>
+													<td colspan="2"><input type="checkbox" name="white_balance_temperature_auto" value="1" checked="checked" onclick="var wb=document.getElementById('wb_temp'); if (wb) wb.disabled=this.checked; scheduleVideoPreviewAjax();" onchange="scheduleVideoPreviewAjax();" ></td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Temperatura de blancos:</td>
+													<td colspan="2"><input class="redondeada" id="wb_temp" type="number" name="white_balance_temperature" min="2800" max="6500" step="100" value="6500" style="width:110px;" onchange="scheduleVideoPreviewAjax();" disabled></td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Compensación de contraluz:</td>
+													<td colspan="2">
+														<select class="redondeada" name="backlight_compensation" style="width:190px;" onchange="scheduleVideoPreviewAjax();" >
+															<option value="0" >Off</option>
+															<option value="1" selected="selected">On</option>
+														</select>
+													</td>
+												</tr>
+												<tr>
+													<td style="white-space:nowrap;">Frecuencia de línea:</td>
+													<td colspan="2">
+														<select class="redondeada" name="power_line_frequency" style="width:190px;" onchange="scheduleVideoPreviewAjax();" >
+															<option value="0" >Desactivada</option>
+															<option value="1" selected="selected">50 Hz</option>
+															<option value="2" >60 Hz</option>
+														</select>
+													</td>
+												</tr>
+											</table>
+												<p style="margin:12px 0 0 0; text-align:left;">
+													<input type="submit" name="video_reset_defaults" value="Restaurar valores por defecto" style="display:inline-block; background:#e8f5e9; color:#2f6f2f; border:1px solid #6daa6d; border-radius:5px; padding:6px 14px; font-size:14px; cursor:pointer; margin:0 0 6px 0;" onclick="return confirm('¿Restaurar los valores de vídeo por defecto?');" >
+													<br><span id="videoAjaxStatus" style="margin-top:4px; font-size:12px; color:#555;">Se guarda y autoaplica al mover un control</span>
+												</p>
+										</td>
+									</tr>
+								</table>
+								<script type="text/javascript">
+								if (typeof window.refreshVideoPreview === 'undefined') {
+									window.videoPreviewLoopTimer = null;
+									window.refreshVideoPreview = function(force) {
+										var tab = document.getElementById('cpestana2');
+										var img = document.getElementById('reloader');
+										if (!img) return;
+										if (!force && tab && tab.style.display === 'none') return;
+										img.src = 'camara.php?ts=' + new Date().getTime();
+									};
+									window.scheduleVideoImageRefresh = function() {
+										if (window.videoPreviewLoopTimer) clearTimeout(window.videoPreviewLoopTimer);
+										window.videoPreviewLoopTimer = setTimeout(function(){
+											window.refreshVideoPreview(false);
+										}, 1500);
+									};
+								}
+								if (typeof window.scheduleVideoPreviewAjax === 'undefined') {
+									window.videoAjaxTimer = null;
+									window.scheduleVideoPreviewAjax = function() {
+										if (window.videoAjaxTimer) clearTimeout(window.videoAjaxTimer);
+										window.videoAjaxTimer = setTimeout(function(){
+											var $form = $('#videoControlsForm');
+											if (!$form.length) return;
+											$('#videoAjaxStatus').css('color', '#666').text('Aplicando...');
+											$.ajax({
+												url: 'audiovideo.php',
+												type: 'POST',
+												dataType: 'text',
+												cache: false,
+												data: $form.serialize() + '&ajax_video_preview=1',
+												success: function(resp) {
+													try { resp = $.parseJSON(resp); } catch (e) {
+														$('#videoAjaxStatus').css('color', 'red').text('Error aplicando vista previa');
+														return;
+													}
+													if (resp && resp.ok) {
+														$('#videoAjaxStatus').css('color', 'green').text(resp.message ? resp.message : 'Vista previa aplicada');
+														setTimeout(function(){ refreshVideoPreview(true); }, 250);
+														setTimeout(function(){ refreshVideoPreview(true); }, 900);
+													} else {
+														$('#videoAjaxStatus').css('color', 'red').text(resp && resp.message ? resp.message : 'No se pudo aplicar la vista previa');
+														setTimeout(function(){ refreshVideoPreview(true); }, 400);
+													}
+												},
+												error: function() {
+													$('#videoAjaxStatus').css('color', 'red').text('No se pudo guardar la configuración de vídeo');
+													setTimeout(function(){ refreshVideoPreview(true); }, 400);
+												}
+											});
+										}, 350);
+										return true;
+									};
+								}
+								</script>
+							</fieldset>
+						</form>
+    				</div> 
+						<div id="cpestana3" align="center">
+							
+						 <form method="post" action="">
+							<fieldset class="field">
+								<legend>&emsp; Grabaciones &emsp;</legend>
+								<table>
+									<tr>
+										<td colspan="2">
+											<label for="grabaciones_days">Días a conservar grabaciones (0 desactiva):</label>
+										</td>
+									</tr>
+									<tr>
+										<td>
+											<input class="redondeada" type="number" id="grabaciones_days" name="grabaciones_days" min="0" max="365" value="0" />
+										</td>
+										<td>
+											<input class="boton" type="submit" name="grabaciones" value="Guardar" />
+										</td>
+									</tr>
+								</table>
+							</fieldset>
+							<fieldset class="field">
+										<legend>&emsp; Grabaciones &emsp;</legend>
+									
+									<table class="tabla" style="width:100%;">
+										<tr>
+											<th style="width:170px; white-space:nowrap;">
+												Fecha / Hora											</th>
+											<th>Destino</th>
+											<th style="width:48px; text-align:center;">
+												Tipo											</th>
+											<th>Duración</th>
+											<th>Acciones</th>
+										</tr>
+										<tr><td colspan="5" style="text-align:left; font-size:12px; color:#444;">Mostrando 0-0 de 0 grabaciones</td></tr><tr><td colspan="5">No hay grabaciones disponibles.</td></tr>								</table>
+										<style>
+										.delete-btn-peq, .download-btn-peq {
+											padding: 0;
+											min-width: 0;
+											min-height: 0;
+											border: none;
+											background: none;
+											box-shadow: none;
+											margin: 0 4px 0 0;
+											display: inline;
+											align-items: unset;
+											justify-content: unset;
+											border-radius: 0;
+										}
+										.delete-btn-peq img, .download-btn-peq img {
+											filter: contrast(1.1);
+										}
+										.rec-pagination {
+											text-align: center;
+											padding: 10px 0;
+										}
+										.rec-pagination .page-btn {
+											display: inline-block;
+											padding: 6px 10px;
+											margin: 0 4px;
+											background: #f0f0f0;
+											border: 1px solid #ccc;
+											border-radius: 4px;
+											color: #333;
+											text-decoration: none;
+										}
+										.rec-pagination .page-btn.disabled {
+											pointer-events: none;
+											opacity: 0.5;
+										}
+										.rec-pagination .page-link.current {
+											background: #d0d0d0;
+											font-weight: bold;
+										}
+										.rec-pagination .page-info {
+											margin: 0 8px;
+											display: inline-block;
+										}
+										</style>
+
+							</fieldset>
+						 </form>
+
+						</div>
+
+						<div id="cpestana4" align="center">
+							<form method="post" action="">
+								<fieldset class="field">
+									<legend>&emsp; Streaming RTSP &emsp;</legend>
+									<table>
+										<tr>
+											<td><b>Streaming RTSP </b>:</td>
+											<td>
+																																								<input type="radio" name="rtsp" value="On" checked="checked" > On &nbsp; &nbsp;
+												<input type="radio" name="rtsp" value="Off" > Off											</td>
+										</tr>
+										<tr>
+											<td>Usuario:</td>
+											<td><input class="redondeada" type="text" name="rtspuser" size="10" maxlength="8" pattern="[a-z]{4,8}" value="admin" title="Sólo letras de 4 a 8 caracteres"></input> (a-z)</td>
+										</tr>
+										<tr>
+											<td>Clave:</td>
+											<td><input class="redondeada" type="text" name="rtsppass" size="10" maxlength="8" pattern="[a-z]{4,8}" value="panphone" title="Sólo letras de 4 a 8 caracteres"></input> (a-z)</td>
+										</tr>
+										<tr>
+											<td>Puerto:</td>
+											<td><input class="redondeada" type="number" name="rtspport" size="5" maxlength="5" value="554" title="Sólo números"></input></td>
+										</tr>
+										<tr>
+											<td colspan="2"><input class="boton" type="submit" value="Guardar"></td>
+										</tr>
+										<tr>
+											<td colspan="2">rtsp://admin:panphone@192.168.1.70:554/video1</td>
+										</tr>
+									</table>
+								</fieldset>
+							</form>
+						</div>
+
+						<div id="cpestana5" align="center" style="display:none;">
+							<form id="lcdTabForm">
+								<fieldset class="field">
+									<legend>&emsp; LCD &emsp;</legend>
+									<table>
+										<tr>
+											<td>Activar pantalla:</td>
+											<td>
+												<select name="backlight" id="lcd_backlight">
+													<option value="">(sin cambio)</option>
+													<option value="on">On</option>
+													<option value="off">Off</option>
+												</select>
+											</td>
+										</tr>
+										<tr>
+											<td>Linea 1:</td>
+											<td><input class="redondeada" type="text" name="line1" maxlength="16" size="20"></td>
+										</tr>
+										<tr>
+											<td>Linea 2:</td>
+											<td><input class="redondeada" type="text" name="line2" maxlength="16" size="20"></td>
+										</tr>
+										<tr>
+											<td colspan="2">
+												<input class="boton" type="submit" value="Enviar">
+												<button type="button" id="lcd_clear" class="boton">Clear</button>
+											</td>
+										</tr>
+									</table>
+									<div style="margin-top:12px"><pre id="lcd_resp">Aquí aparecerá la respuesta</pre></div>
+								</fieldset>
+							</form>
+							<script>
+							document.getElementById('lcdTabForm').addEventListener('submit', function(e){
+								e.preventDefault();
+								const fd = new FormData(e.target);
+								fetch('./lcd_form.php', { method: 'POST', body: fd }).then(r=>r.json()).then(j=>{
+									document.getElementById('lcd_resp').textContent = JSON.stringify(j, null, 2);
+								}).catch(err=>{ document.getElementById('lcd_resp').textContent = 'Error: '+err; });
+							});
+							document.getElementById('lcd_clear').addEventListener('click', ()=>{
+								const fd = new FormData(); fd.append('clear','1');
+								fetch('./lcd_form.php',{method:'POST', body: fd}).then(r=>r.json()).then(j=>{document.getElementById('lcd_resp').textContent = JSON.stringify(j,null,2);}).catch(e=>{document.getElementById('lcd_resp').textContent='Error:'+e});
+							});
+							</script>
+						</div>
+			 </div> 
+	      </div> 
+		</fieldset>   	 
+</div>
+        </div>
+    </body>
+</html>
+

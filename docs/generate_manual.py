@@ -102,7 +102,7 @@ def build():
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = meta.add_run(
         f"Sistema local (panel de oficina) · Centro de Control (COCE) · App Android (tablet)\n"
-        f"Versión documental: 1.0 — {date.today().strftime('%d/%m/%Y')}"
+        f"Versión documental: 1.1 — {date.today().strftime('%d/%m/%Y')}"
     )
     set_run_font(r, size=11)
 
@@ -366,8 +366,17 @@ def build():
     )
 
     add_heading_styled(doc, "5.1 Obtención / descarga", 2)
-    add_bullet(doc, "Mismo repositorio santander: carpetas coce-api/ y coce-dashboard/.")
+    add_bullet(doc, "Mismo repositorio santander (rama main): carpetas coce-api/ y coce-dashboard/.")
     add_bullet(doc, "Se despliega en la máquina del Centro de Control (IP conocida por las oficinas).")
+    add_para(doc, "Linux (Ubuntu):", bold=True)
+    add_code(
+        doc,
+        "sudo apt update\n"
+        "sudo apt install -y git python3 python3-venv python3-pip\n"
+        "cd ~\n"
+        "git clone -b main https://github.com/jorgesolano92/santander.git\n"
+        "cd santander",
+    )
 
     add_heading_styled(doc, "5.2 Requisitos", 2)
     add_bullet(doc, "Python 3.9+ y Node.js 18+.")
@@ -375,6 +384,27 @@ def build():
     add_bullet(doc, "Secretos fuertes: COCE_JWT_SECRET y COCE_SECRETS_KEY (Fernet).")
 
     add_heading_styled(doc, "5.3 Instalación — API", 2)
+    add_para(
+        doc,
+        "La configuración de la API está en el archivo coce-api/.env. Ese archivo no viene en el "
+        "repositorio (contiene secretos): se crea copiando la plantilla coce-api/.env.example que "
+        "está en la misma carpeta, y después se editan en él las variables COCE_JWT_SECRET, "
+        "COCE_SECRETS_KEY y COCE_CORS_ORIGINS.",
+    )
+
+    add_para(doc, "Linux (Ubuntu):", bold=True)
+    add_code(
+        doc,
+        "cd ~/santander/coce-api\n"
+        "python3 -m venv .venv\n"
+        "source .venv/bin/activate\n"
+        "pip install -r requirements.txt\n"
+        "cp .env.example .env\n"
+        "nano .env          # editar variables (ver tabla y comandos de abajo)\n"
+        "python -m app.main",
+    )
+
+    add_para(doc, "Windows:", bold=True)
     add_code(
         doc,
         "cd coce-api\n"
@@ -382,18 +412,68 @@ def build():
         ".venv\\Scripts\\activate\n"
         "pip install -r requirements.txt\n"
         "copy .env.example .env\n"
-        "# Editar: COCE_JWT_SECRET, COCE_SECRETS_KEY, COCE_CORS_ORIGINS\n"
+        "notepad .env       # editar variables (ver tabla y comandos de abajo)\n"
         "python -m app.main",
     )
-    add_para(doc, "Escucha por defecto en http://0.0.0.0:9000 — Health: http://<host>:9000/health")
 
-    add_para(doc, "Generar clave Fernet:", bold=True)
-    add_code(
+    add_para(doc, "Variables a editar en coce-api/.env:", bold=True)
+    add_table(
         doc,
-        'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"',
+        ["Variable", "Qué poner"],
+        [
+            ["COCE_JWT_SECRET", "Cadena larga aleatoria para firmar las sesiones del dashboard (comando abajo)."],
+            ["COCE_SECRETS_KEY", "Clave Fernet para cifrar credenciales guardadas de las sucursales (comando abajo)."],
+            [
+                "COCE_CORS_ORIGINS",
+                "URL desde la que se abre el dashboard, p.ej. http://<IP-COCE>:5174. "
+                "Varias URLs separadas por comas, sin espacios.",
+            ],
+            ["COCE_SETUP_TOKEN", "Opcional. Permite registrar usuarios cuando ya existe alguno (ver 5.5)."],
+        ],
     )
 
+    add_para(
+        doc,
+        "Generar los valores (con el entorno .venv activado; el mismo comando sirve en Linux y Windows) "
+        "y pegar cada resultado en su variable:",
+        bold=True,
+    )
+    add_code(
+        doc,
+        "# COCE_JWT_SECRET\n"
+        'python -c "import secrets; print(secrets.token_urlsafe(48))"\n'
+        "\n"
+        "# COCE_SECRETS_KEY\n"
+        'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"',
+    )
+    add_para(doc, "Ejemplo de líneas resultantes en coce-api/.env:")
+    add_code(
+        doc,
+        "COCE_JWT_SECRET=<resultado del primer comando>\n"
+        "COCE_SECRETS_KEY=<resultado del segundo comando>\n"
+        "COCE_CORS_ORIGINS=http://192.168.1.50:5174,http://localhost:5174",
+    )
+    add_para(
+        doc,
+        "Importante: no cambiar COCE_SECRETS_KEY una vez el COCE esté en servicio; las credenciales "
+        "de sucursal ya guardadas dejarían de poder descifrarse. Cambiar COCE_JWT_SECRET solo obliga "
+        "a volver a iniciar sesión en el dashboard.",
+    )
+    add_para(doc, "Escucha por defecto en http://0.0.0.0:9000 — Health: http://<host>:9000/health")
+    add_para(doc, "Comprobación rápida en Linux:")
+    add_code(doc, "curl http://localhost:9000/health")
+
     add_heading_styled(doc, "5.4 Instalación — Dashboard", 2)
+    add_para(doc, "Linux (Ubuntu):", bold=True)
+    add_code(
+        doc,
+        "cd ~/santander/coce-dashboard\n"
+        "npm install\n"
+        "cp .env.example .env\n"
+        "nano .env          # VITE_COCE_API_URL=http://<IP-COCE>:9000\n"
+        "npm run dev -- --host 0.0.0.0",
+    )
+    add_para(doc, "Windows:", bold=True)
     add_code(
         doc,
         "cd coce-dashboard\n"
@@ -433,8 +513,16 @@ def build():
     )
 
     add_heading_styled(doc, "5.7 Actualización del propio COCE", 2)
-    add_bullet(doc, "En la máquina COCE: git pull del repositorio.")
+    add_bullet(doc, "En la máquina COCE: git pull origin main del repositorio.")
     add_bullet(doc, "Actualizar dependencias; reiniciar coce-api.")
+    add_para(doc, "Linux (Ubuntu):", bold=True)
+    add_code(
+        doc,
+        "cd ~/santander\n"
+        "git pull origin main\n"
+        "cd coce-api && source .venv/bin/activate && pip install -r requirements.txt\n"
+        "cd ../coce-dashboard && npm install && npm run build",
+    )
     add_bullet(doc, "Rebuild del dashboard (npm run build) y redesplegar estáticos.")
     add_bullet(doc, "No hay auto-update del COCE desde fuera; es el origen de los paquetes hacia sucursales.")
 
@@ -779,7 +867,7 @@ def build():
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = footer.add_run(
         "— Fin del documento —\n"
-        "Control de Accesos Santander / SAIMA · Manual de operación e instalación v1.0"
+        "Control de Accesos Santander / SAIMA · Manual de operación e instalación v1.1"
     )
     set_run_font(r, size=10, color=RGBColor(0x66, 0x66, 0x66))
 

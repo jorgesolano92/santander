@@ -162,6 +162,12 @@ def _remap_notify_canal(request: Request, plate_button: str) -> tuple[str, Optio
             host or "?",
         )
     elif not plate_id:
+        if settings.device_webhook_known_hosts_only:
+            log.warning("CSIP notify rechazado: IP %s no es un Panphone configurado", host or "?")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Origen no autorizado: la IP no corresponde a ningún Panphone configurado",
+            )
         log.warning(
             "CSIP notify sin placa por IP (%s); uso botón local %s sin remap",
             host or "?",

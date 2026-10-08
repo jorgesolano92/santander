@@ -119,6 +119,8 @@ export const DEFAULT_TABLET_PANEL_CONFIG = {
   network: { consoleIP: "192.168.1.155", netmask: "255.255.255.0", gateway: "0.0.0.0" },
   api: {
     port: 8000,
+    secure: true,
+    tlsPort: 8443,
     username: "ceroideas",
     password: "12345678",
     urlToken: "/api/v1/auth/token",
@@ -300,15 +302,32 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
   const [updatedAt, setUpdatedAt] = useState(null);
   const [doorIndex, setDoorIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [tablets, setTablets] = useState([]);
+  const [target, setTarget] = useState("common");
+  const [inherited, setInherited] = useState(false);
+
+  const isCommon = target === "common";
+  const selectedTablet = isCommon ? null : tablets.find((t) => t.id === target) || null;
+  const configUrl = isCommon ? "/api/config/tablet" : `/api/config/tablets/${target}/config`;
+
+  const loadTablets = async () => {
+    try {
+      const data = await apiFetch("/api/config/tablets");
+      setTablets(Array.isArray(data?.items) ? data.items : []);
+    } catch (e) {
+      onNotify?.("Error", "No se pudo cargar la lista de tablets: " + e.message);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch("/api/config/tablet");
+      const data = await apiFetch(configUrl);
       const cfg = mergeWithDefaults(data?.config || {});
       setDraft(cfg);
       setRevision(data?.revision || "builtin");
       setUpdatedAt(data?.updated_at || null);
+      setInherited(!!data?.inherited);
     } catch (e) {
       onNotify?.("Error", "No se pudo cargar configuración tablet: " + e.message);
     } finally {
@@ -317,8 +336,12 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
   };
 
   useEffect(() => {
-    void load();
+    void loadTablets();
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [target]);
 
   const patch = (path, value) => {
     setDraft((prev) => {
@@ -363,15 +386,37 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
 
   const save = async () => {
     try {
-      const res = await apiFetch("/api/config/tablet", {
+      const res = await apiFetch(configUrl, {
         method: "PUT",
         body: JSON.stringify(draft),
       });
       setRevision(res?.revision || revision);
       setUpdatedAt(res?.updated_at || new Date().toISOString());
-      onNotify?.("OK", "Configuración tablet guardada (defaults de sucursal)");
+      setInherited(!!res?.inherited);
+      onNotify?.(
+        "OK",
+        isCommon
+          ? "Configuración común de la sucursal guardada"
+          : `Configuración de ${selectedTablet?.name || "la tablet"} guardada`
+      );
+      if (!isCommon) void loadTablets();
     } catch (e) {
       onNotify?.("Error", "No se pudo guardar: " + e.message);
+    }
+  };
+
+  const resetToCommon = async () => {
+    if (isCommon) return;
+    const name = selectedTablet?.name || "esta tablet";
+    if (!window.confirm(`¿Descartar la configuración propia de ${name} y usar la común de la sucursal?`)) {
+      return;
+    }
+    try {
+      await apiFetch(configUrl, { method: "DELETE" });
+      onNotify?.("OK", `${name} vuelve a usar la configuración común`);
+      await Promise.all([load(), loadTablets()]);
+    } catch (e) {
+      onNotify?.("Error", e.message);
     }
   };
 
@@ -383,12 +428,64 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
   const door = draft.doors?.[doorIndex] || draft.doors[0];
   const intercom = door?.intercom || {};
 
+  const targetSelector = (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <span style={{ fontSize: 12, color: "#6b7280", marginRight: 4 }}>Configurar:</span>
+      {[{ id: "common", name: "Común sucursal" }, ...tablets].map((t) => {
+        const active = target === t.id;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTarget(t.id)}
+            title={t.android_id ? `Android ID ${t.android_id}${t.last_ip ? ` · IP ${t.last_ip}` : ""}` : undefined}
+            style={{
+              ...btnSecondary,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: active ? "#1e3a5f" : "#fff",
+              color: active ? "#fff" : "#111",
+              borderColor: active ? "#1e3a5f" : "#d1d5db",
+            }}
+          >
+            {t.id !== "common" && (
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: t.connected ? "#16a34a" : "#9ca3af",
+                }}
+              />
+            )}
+            {t.name}
+            {t.label ? ` · ${t.label}` : ""}
+            {t.pending && <span style={{ fontSize: 11, color: active ? "#fde68a" : "#b45309" }}>pendiente</span>}
+            {t.id !== "common" && t.has_own_config && (
+              <span style={{ fontSize: 11, opacity: 0.75 }}>propia</span>
+            )}
+          </button>
+        );
+      })}
+      <button type="button" onClick={() => void loadTablets()} style={{ ...btnSecondary, padding: "6px 10px" }}>
+        ↻
+      </button>
+    </div>
+  );
+
   if (loading) {
-    return <div style={{ padding: 24, color: "#6b7280" }}>Cargando configuración tablet…</div>;
+    return (
+      <div style={{ display: "grid", gap: 12 }}>
+        {targetSelector}
+        <div style={{ padding: 24, color: "#6b7280" }}>Cargando configuración tablet…</div>
+      </div>
+    );
   }
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      {targetSelector}
       <div
         style={{
           display: "flex",
@@ -399,27 +496,55 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
         }}
       >
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>Configuración tablet (defaults sucursal)</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>
+            {isCommon
+              ? "Configuración común de la sucursal"
+              : `Configuración de ${selectedTablet?.name || "tablet"}${selectedTablet?.label ? ` · ${selectedTablet.label}` : ""}`}
+          </div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
             Revisión: {revision}
             {updatedAt ? ` · Actualizado: ${updatedAt}` : " · Sin guardar en panel aún"}
           </div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-            Las tablets importan estos valores con «Restaurar datos por defecto». Los horarios (schedules) se configurarán después desde el panel.
+            {isCommon
+              ? "Punto de partida de todas las tablets. Las que no tienen configuración propia la reciben al guardar."
+              : "Ajustes exclusivos de esta tablet. Se envían a la tablet al guardar."}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={resetBuiltin} style={btnSecondary}>
             Restaurar fábrica
           </button>
+          {!isCommon && !inherited && (
+            <button type="button" onClick={() => void resetToCommon()} style={btnSecondary}>
+              Volver a la común
+            </button>
+          )}
           <button type="button" onClick={() => void load()} style={btnSecondary}>
             Recargar
           </button>
           <button type="button" onClick={() => void save()} style={btnPrimary}>
-            Guardar defaults
+            {isCommon ? "Guardar común" : `Guardar ${selectedTablet?.name || "tablet"}`}
           </button>
         </div>
       </div>
+
+      {!isCommon && (
+        <div
+          style={{
+            background: inherited ? "#eff6ff" : "#f0fdf4",
+            border: `1px solid ${inherited ? "#93c5fd" : "#86efac"}`,
+            borderRadius: 8,
+            padding: "10px 12px",
+            fontSize: 13,
+            color: inherited ? "#1e3a8a" : "#166534",
+          }}
+        >
+          {inherited
+            ? "Esta tablet usa la configuración común de la sucursal. Al guardar aquí pasará a tener su propia configuración."
+            : "Esta tablet tiene configuración propia: los cambios en la común no le afectan."}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {SUB_TABS.map((t) => (
@@ -455,7 +580,20 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
               <Field label="IP consola (consoleIP)">
                 <input style={inputStyle()} value={draft.network?.consoleIP || ""} onChange={(e) => patch("network.consoleIP", e.target.value)} />
               </Field>
-              <Field label="Puerto API">
+              <Field label="Cifrado HTTPS/WSS (CA de la instalación)">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, paddingTop: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.api?.secure !== false}
+                    onChange={(e) => patch("api.secure", e.target.checked)}
+                  />
+                  {draft.api?.secure !== false ? "Activado" : "Desactivado (tráfico en claro)"}
+                </label>
+              </Field>
+              <Field label="Puerto HTTPS">
+                <input style={inputStyle()} type="number" value={draft.api?.tlsPort ?? 8443} onChange={(e) => patch("api.tlsPort", Number(e.target.value))} />
+              </Field>
+              <Field label="Puerto HTTP (solo sin cifrado)">
                 <input style={inputStyle()} type="number" value={draft.api?.port ?? 8000} onChange={(e) => patch("api.port", Number(e.target.value))} />
               </Field>
               <Field label="Usuario API">
@@ -917,7 +1055,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
         )}
 
         {subTab === "autorizadas" && (
-          <AuthorizedTabletsSection apiFetch={apiFetch} onNotify={onNotify} />
+          <AuthorizedTabletsSection apiFetch={apiFetch} onNotify={onNotify} onChanged={loadTablets} />
         )}
       </div>
     </div>

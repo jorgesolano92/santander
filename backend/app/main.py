@@ -21,6 +21,7 @@ from app.services import panel_live_hub, tablet_call_hub
 from app.db import system_events_store as ses
 from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
+from app.middleware.tablet_tls_only import TabletTlsOnlyMiddleware
 from zaguan_esp32 import registrar_callback_pulsacion, router as zaguan_esp32_router
 from app.services import zaguan_orchestrator
 from app.services.schedule_runner import schedule_background_loop
@@ -82,6 +83,12 @@ async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
 async def lifespan(app: FastAPI):
     """Inicio y cierre: conexión BD, polling Modbus, etc."""
     log.info("Iniciando servicio Control de Accesos")
+    for name, value in (
+        ("TABLET_JWT_SECRET", settings.tablet_jwt_secret),
+        ("PANEL_JWT_SECRET", settings.panel_jwt_secret),
+    ):
+        if value.startswith("cambiar-"):
+            log.warning("SEGURIDAD: %s tiene el valor por defecto; cualquiera podría firmar tokens. Defínelo en .env", name)
     zaguan_orchestrator.bind_async_loop(asyncio.get_running_loop())
     panel_live_pump = asyncio.create_task(panel_live_hub.pump_loop())
     tablet_ws_pump = asyncio.create_task(tablet_call_hub.pump_loop())
@@ -165,6 +172,7 @@ app.add_middleware(
 )
 app.add_middleware(PanelApiAuthMiddleware)
 app.add_middleware(TabletActorContextMiddleware)
+app.add_middleware(TabletTlsOnlyMiddleware)
 
 # Rutas bajo /api (ver API_SPEC.md)
 app.include_router(health.router, prefix=settings.api_prefix, tags=["Salud"])

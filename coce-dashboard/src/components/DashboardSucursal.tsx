@@ -700,11 +700,12 @@ export function DashboardSucursal() {
               liveTablets.map((tablet, index) => (
                 <DeviceCard
                   key={tablet.clientId || index}
-                  title={`Tablet ${index + 1}`}
+                  title={tablet.name ?? `Tablet ${index + 1}`}
                   icon={<TabletIcon />}
                   statusLabel="Conectada"
                   statusVariant="operativo"
                   rows={[
+                    ...(tablet.label ? [{ label: "Ubicación", value: tablet.label }] : []),
                     { label: "IP", value: tablet.ip ?? "—" },
                     {
                       label: "Conectada desde",

@@ -1,0 +1,664 @@
+﻿<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="es">
+    <head>
+        <title> Panphone IP - Herramientas</title>       
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /> 
+	    <!-- <link href='http://fonts.googleapis.com/css?family=Ubuntu' rel='stylesheet' type='text/css'></link>
+        <script type="text/javascript" src="lib/jquery.min.js"></script>-->
+		<script type="text/javascript" src="js/jquery-1.7.2.min.js"></script>
+        <script type="text/javascript" src="js/cambiarPestanna.js"></script>
+		<link rel="stylesheet" type="text/css" href="common.css" />
+        <style type="text/css">
+
+            #wrapper{
+                width:980px;
+                min-height:730px;
+                height:auto;
+                border: none;   
+                margin: 10px;
+                float: right;
+                position: relative; 
+                border-radius:9px;
+                background-color:rgba(255,255,255,0.8);	
+                overflow-y:auto;
+                overflow-x:hidden;
+
+            }
+			.inputfondo{
+                background-color: #dddddd;
+                
+            }            
+            .redondeada{
+                border-radius: 9px; 
+            }            
+            .solo{
+				float:right;
+				font-size: 16px;
+				margin-right: 90px;
+            }          
+
+            fieldset{
+                font-family: 'Ubuntu', sans-serif;
+                width: 810px;
+                margin: 20px auto;
+                padding: 10px;
+                background-color: rgba(255,255,255,0.5);
+                border-radius: 9px;
+                color: gray;
+            }
+
+            .field{
+                font-family: 'Ubuntu', sans-serif;
+                width: 770px;
+                margin: 10px;
+                padding: 5px;
+                background-color: rgba(155,155,255,0.1);
+                border:none;
+                color: black;
+            }
+			#number {
+			  width: 7em;
+			}
+			
+			//pestanas
+			.contenedor{
+			width: 770px;
+			margin: auto;
+			//background: black;
+			color: bisque;
+			
+			padding: 10px 10px 40px 40px;
+			border-radius: 10px;
+			//box-shadow: 0 10px 10px 0px rgba(0, 0, 0, 0.8);
+			}
+
+			.contenedor .titulo{
+			font-size: 2.5ex;
+			font-weight: bold;
+			margin-left: 5px;
+			margin-bottom: 5px;
+			}
+
+			#pestanas {
+			float: top;
+			font-size: 2ex;
+			font-weight: bold;
+			}
+
+			#pestanas ul{
+				margin-left: -40px;    
+			}
+
+			#pestanas li{
+				list-style-type: none;
+				float: left;
+				text-align: center;
+				margin: 0px 1px -2px -0px;
+				background: rgba(42,192,42,0.8);
+				border-top-left-radius: 5px;
+				border-top-right-radius: 5px;
+				border: 2px  grey;
+				border-bottom: black;
+				padding: 5px 25px 0px 20px;
+			}
+
+			#pestanas a:link{
+				text-decoration: none;
+				color: black;
+			}
+
+			#contenidopestanas{
+				clear: both;  
+				//background: dimgray;
+				background: rgba(155,155,255,0.1);
+				padding: 1px 0px 20px 20px;
+				border-radius: 5px;
+				border-top-left-radius: 0px;
+				border: 2px solid grey;
+				width: 800px;
+				max-height: 600px;
+				overflow-y: auto;
+				overflow-x: hidden;
+			}
+ 		.right { text-align: right; }
+		.center { text-align: center; }
+
+
+        </style>
+	<script>
+		function myFunction() {
+		alert("Cambios almacenados correctamente");
+		}
+		
+				
+		if (top != self) top.location.href = location.href;
+	</script>
+
+    </head>
+	<body onload="javascript:cambiarPestanna(pestanas,pestana1);">		
+		<span id="timer">
+		<script type="text/javascript">
+			if (typeof countDown === 'function') {
+				countDown();
+			}
+		</script>
+		</span>
+        <div id="wrapperbox">
+            <div id="menu">
+                <a href="main.php?id=1"  class="ico"><img id="casa" src="/img/home.png" title="Inicio"></img>  </a>
+                <a href="main.php?id=2"  class="ico"> <img id="exit" src="/img/address_book.png" title="Cuentas SIP"></img> </a> 
+				<a href="main.php?id=3"  class="ico"> <img id="log" src="/img/site_map.png" title="Conectividad"></img> </a> 
+                <a href="main.php?id=4"  class="ico"> <img id="planta" src="/img/media.png" title="Multimedia"> </a>
+                <a href="main.php?id=5"  class="ico"> <img id="keys" src="/img/lock.png" title="Relés" > </a>
+                <a href="main.php?id=6"  class="ico"> <img id="webcam" src="/img/keyboard.png" title="Teclado / Pulsador"> </a>
+                <a href="main.php?id=7"  class="ico"> <img id="list" src="/img/key.png" title="Módulos y licencias "> </a>
+               	<a href="main.php?id=8"  class="ico"> <img id="test" src="/img/gear.png" title="Herramientas"> </a>
+				<a href="main.php?id=9"  class="ico"><img  id="conexion" src="/img/protected.png"  title="Usuarios" ></img></a>  
+            </div>
+			<!DOCTYPE html>
+
+<script type="text/javascript">
+<!--
+function mostrarReferencia(){
+
+if (document.prueba.tipollamada.value == 'directa') {
+	document.getElementById('desdeotro').style.display='block';
+	} else {
+	document.getElementById('desdeotro').style.display='none';
+	}
+}
+
+
+function ValidateIPaddress()   
+{  
+ if (/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$/.test(document.prueba.ip.value))  
+  {  
+    return (true)  
+  }  
+alert("Por favor, introduzca una IP valida!")  
+return (false)  
+}  
+-->
+</script>
+<div id="wrapper"> 
+    <h1>Herramientas</h1>
+    <fieldset>
+		<div class="contenedor">
+			<div id="pestanas">
+				<ul id="lista">
+					<li id="pestana1" style="background:dimgray;padding-bottom:2px;">
+						<a href='javascript:cambiarPestanna(pestanas,pestana1);'><img src="/sel icons/gear.png" height="15"></img> &nbsp;&nbsp;&nbsp;Configuración general                        </a>
+					</li>
+					<li id="pestana2">
+						<a href='javascript:cambiarPestanna(pestanas,pestana2);'><img src="/sel icons/inbox.png" height="15"></img>&nbsp;&nbsp;&nbsp;Actualizaciones</a>
+					</li>
+						<li id="pestana3">
+							<a href='javascript:cambiarPestanna(pestanas,pestana3);'><img src="/sel icons/shield.png" height="15"></img>&nbsp;&nbsp;&nbsp;Webserver</a>
+						</li>
+						<li id="pestana4"  >
+							<a href='javascript:cambiarPestanna(pestanas,pestana4);'><img src="/sel icons/wrench.png" height="15"></img>&nbsp;&nbsp;&nbsp;API</a>
+						</li>
+				</ul>
+			</div>
+			<div id="contenidopestanas">
+				<div id="cpestana1" style="display:block;">
+                    <fieldset class="field">
+                        <legend>&emsp; Llamada de Prueba &emsp;</legend>
+                        <form method="post" action="" name="prueba">
+                            <table WIDTH="100%" border="0">
+                                <tr>
+                                    <td style="width:25%">
+                                        Elegir tipo: 
+                                    </td>
+                                    <td>
+                                        <select name="tipollamada" id="tipollamada" onchange="mostrarReferencia();" required>
+                                            <option value="pbx"  >Llamada a Extensión ( pbx )</option>
+                                            <option value="directa"  >Llamada directa a IP</option>
+                                        </select>
+                                    </td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td>
+                                        <div id="desdeotro" style="display:none;">
+                                            <p align="right">IP: <input class="redondeada" type="text" name="ip" size="15" maxlength="15" value="" onblur="ValidateIPaddress()"></input></p>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <p align="center">Usuario/Ext.: </p>
+                                    </td>
+                                    <td>
+                                        <input class="redondeada" type="text" name="usuarior" size="10" maxlength="15" value=""></input>
+                                    </td>
+                                </tr>
+                            </table>
+                            <input class="boton" type="submit" value="Confirmar">
+                        </form>
+                    </fieldset>
+					<fieldset class="field">
+						<form method="post" action="">
+							
+								<legend>&emsp;Reiniciar o restaurar dispositivo</legend>
+								<table WIDTH="100%" border="0">
+									<tr>
+										<td class="center">
+											<button type="submit" name="reiniciar" value="reiniciar" onclick="return confirm('¿Desea reiniciar el dispositivo?');"> Reiniciar Dispositivo</button>
+										</td>
+										<td class="center">
+											Reinicio Automático:
+											<select name="estado_watchdog">
+												<option value="0" selected>Apagado</option>
+												<option value="101" >Cada 12 h.</option>
+												<option value="102" >Diariamente</option>
+												<option value="103" >Semanalmente</option>
+												<option value="104" >Mensualmente</option>
+											</select>
+										</td>
+									</tr>
+									<tr>
+										<td class="center">
+											<button type="submit" name="restaurar" value="restaurar" onclick="return confirm('Se borrarán todas las configuraciones a fabrica ¿Está seguro?');"> Restaurar Dispositivo</button>
+										</td>
+										<td class="center">
+											&nbsp;&nbsp;&nbsp;<button type="submit"> Confirmar</button>
+										</td>
+									</tr>
+								</table>
+							
+						</form>
+					</fieldset>
+                </div>
+				<div id="cpestana2" style="display:none;">
+					<!-- Contenedor de progreso para actualizaciones (muestra mensajes y contador) -->
+					<div id="progress" style="display:none; margin:10px 0; padding:8px; border:1px solid #ccc; background:#f9f9f9;">
+						<p>&nbsp;&nbsp;&nbsp;Actualización en progreso...
+							<span id="progressMessage">Por favor, espere mientras se realiza la actualización.</span><br>
+							&nbsp;&nbsp;&nbsp;<span id="countdown"></span>
+						</p>
+					</div>
+					<fieldset class="field" id="apiFieldset">
+						<script>
+						// Validación y normalización de IPs en el textarea antes de enviar el formulario API
+						document.addEventListener('DOMContentLoaded', function() {
+							var apiForm = document.querySelector('#cpestana4 form');
+							if (apiForm) {
+								apiForm.onsubmit = function(e) {
+									var textarea = apiForm.querySelector('textarea[name="api_whitelist"]');
+									if (!textarea) return true;
+									// Normalizar: reemplazar comas y espacios por saltos de línea
+									var raw = textarea.value.replace(/[ ,]+/g, '\n');
+									// Eliminar líneas vacías y validar cada IP
+									var lines = raw.split(/\r?\n/).map(function(line){ return line.trim(); }).filter(Boolean);
+									var ipRegex = /^(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$/;
+									for (var i=0; i<lines.length; i++) {
+										if (!ipRegex.test(lines[i])) {
+											alert('IP inválida en la línea ' + (i+1) + ': ' + lines[i]);
+											textarea.focus();
+											return false;
+										}
+									}
+									// Reescribir el textarea con una IP por línea
+									textarea.value = lines.join('\n');
+									return true;
+								};
+							}
+
+							// Interceptar el formulario de firmware para iniciar la actualización inmediatamente
+							var firmwareForm = document.getElementById('firmwareForm');
+							if (firmwareForm) {
+								firmwareForm.addEventListener('submit', function(e) {
+									e.preventDefault();
+									var progress = document.getElementById('progress');
+									var countdownEl = document.getElementById('countdown');
+									var progressMessage = document.getElementById('progressMessage');
+									if (progress) progress.style.display = 'block';
+									var countdown = 60;
+									if (countdownEl) countdownEl.textContent = countdown + ' s';
+									var timer = setInterval(function(){
+										countdown--;
+										if (countdownEl) countdownEl.textContent = countdown + ' s';
+										if (countdown <= 0) clearInterval(timer);
+									}, 1000);
+
+									var formData = new FormData(firmwareForm);
+									fetch(firmwareForm.action, { method: 'POST', body: formData })
+									.then(function(resp){ return resp.text(); })
+									.then(function(text){
+										if (progressMessage) progressMessage.textContent = 'Finalizado.';
+										// abrir respuesta del servidor en nueva pestaña para detalles
+										try {
+											var w = window.open('', '_blank');
+											w.document.open();
+											w.document.write(text);
+											w.document.close();
+										} catch (ex) {
+											// ignorar si el popup es bloqueado
+										}
+									})
+									.catch(function(err){ if (progressMessage) progressMessage.textContent = 'Error: ' + err; })
+									.finally(function(){ clearInterval(timer); if (countdownEl) countdownEl.textContent = ''; });
+
+									return false;
+								});
+							}
+						});
+						</script>
+						<form id="firmwareForm" action="update/update2.php" method="post">
+							<legend>&emsp;Firmware</legend>
+							<table WIDTH="100%">
+								<tr>
+									<td colspan="2">Versión actual: <font color="green"><b> CSIP H6 -- V 5.9</b></font></td>
+								</tr>
+								<tr>
+									<td colspan="2">Estado: 
+									<font color='green'><b>Su firmware está actualizado</b></font>									</td>
+								</tr>
+							</table>
+						</form>
+					</fieldset>
+
+					<!-- Colocar aquí las opciones de servidor de actualizaciones y actualización manual (debajo del bloque de firmware) -->
+                    
+					<fieldset class="field">
+						<form method="post" action="">
+						<legend>&emsp; Servidor de actualizaciones &emsp;</legend>
+						<table WIDTH="100%">
+							<tr>
+								<td>URL del servidor:</td>
+								<td>
+									<input type="text" class="redondeada" name="update_server" id="update_server" size="30" maxlength="200" value="https://updates.panphone.es" required>&nbsp;&nbsp;&nbsp;<input type="submit" value="Cambiar">
+									&nbsp;&nbsp;&nbsp;
+									
+								</td>
+							</tr>    
+						</table>
+						</form>
+					</fieldset>
+					<fieldset class="field">
+						<form id="manualUpdateForm" action="update/update2.php" method="post" enctype="multipart/form-data">
+							<legend>&emsp;Actualización manual&emsp;</legend>
+							<table WIDTH="100%">
+								<tr>
+									<td>Seleccione el archivo de actualización deseado:</td>
+									<td>
+										<input type="file" name="fichero_usuario" id="fichero_usuario" accept=".bin">
+									</td>
+								</tr>
+								<tr>
+									<td></td>
+									<td>
+										<button type="submit" name="Actualizar" value="Actualizar" onclick="return confirm('Se va a proceeder a actualizar el equipo ¿Desea continuar?');">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Confirmar&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</button>
+									</td>
+								</tr>
+							</table>
+						</form>
+					</fieldset>
+				</div>
+								<div id="cpestana3" style="display:none;">
+				   <form method="post" action="" id="webserverForm">
+					   <input type="hidden" name="confirm_webserver" id="confirm_webserver" value="0">
+					   <fieldset class="field">
+						   <legend>&emsp; Webserver &emsp;</legend>
+						   <table width="100%">
+							   <tr>
+								   <td>HTTPS:</td>
+								   <td>
+									   <input type="checkbox" name="web_https" id="web_https" value="1" >
+									   <label for="web_https">Activado</label>
+								   </td>
+							   </tr>
+							   <tr>
+								   <td>Puerto:</td>
+								   <td><input type="number" name="web_port" min="1" max="65535" value="8090"></td>
+							   </tr>
+							   <tr>
+								   <td colspan="2" style="text-align:right;">
+									   <button type="submit">Guardar cambios</button>
+								   </td>
+							   </tr>
+						   </table>
+					   </fieldset>
+				   </form>
+				</div>
+				<div id="cpestana4" style="display:none;">
+					<form method="post" action="">
+						<fieldset class="field">
+							<legend>&emsp; Opciones del API &emsp;</legend>
+							<table width="100%">
+								<tr>
+									<td>API:</td>
+									<td>
+																					<b style="color:green;">ON</b>
+																			</td>
+								</tr>
+								<tr>
+					<td>Modo API:</td>
+					<td>
+						<select name="api_mode">
+							<option value="0" >Normal</option>
+							<option value="1" selected>Custom1</option>
+						</select>
+					</td>
+				</tr>
+												<tr>
+									<td>Token/API Key:</td>
+									<td><input type="text" name="api_token" value="f3fb37ac959b795507cf3d6794b1f29b91ed2b1b1d1f06c6" size="45" ></td>
+								</tr>
+								<tr>
+									<td>Lista blanca de IPs:</td>
+									<td><textarea name="api_whitelist" rows="8" cols="50" placeholder="Una IP por línea" ></textarea></td>
+								</tr>
+								<tr>
+									<td>Nivel de seguridad:</td>
+									<td>
+										<select name="api_security" >
+											<option value="token" selected>Token/API Key</option>
+											<option value="ip" >IP</option>
+											<option value="tkip" >Token + IP</option>
+										</select>
+									</td>
+								</tr>
+								<tr>
+									<td>URL de notificaciones:</td>
+									<td><input type="text" name="notification_url" value="http://81.60.195.21:8000/api/csip/notify" size="60"  placeholder="https://example.com/notify"></td>
+								</tr>
+								<tr>
+									<td colspan="2" style="text-align:right;">
+										<button type="submit" >Guardar cambios</button>
+									</td>
+								</tr>
+							</table>
+						</fieldset>
+					</form>
+				</div>
+
+				<script>
+				   // Confirmación antes de enviar el formulario de webserver (i18n)
+				   var webserverForm = document.getElementById('webserverForm');
+				   if (webserverForm) {
+					   webserverForm.onsubmit = function(e) {
+					   	var ok = confirm('ADVERTENCIA: Cambiar la configuración del Webserver puede afectar el acceso a la interfaz web. ¿Desea continuar?');
+					   	var confirmField = document.getElementById('confirm_webserver');
+					   	if (confirmField) confirmField.value = ok ? '1' : '0';
+					   	if (!ok) {
+					   		e.preventDefault();
+					   		return false;
+					   	}
+					   	return true;
+					   };
+				   } else {
+				   	   console.warn('[API DEBUG] webserverForm no encontrado al asignar onsubmit');
+				   }
+                var firmwareForm = document.getElementById('firmwareForm');
+                 if (firmwareForm) {
+                 firmwareForm.onsubmit = function(event) {
+                	event.preventDefault();
+                	var formData = new FormData(this);
+                	var progress = document.getElementById('progress');
+					if (!progress) {
+						var updateTab = document.getElementById('cpestana2');
+						if (updateTab) {
+							var wrapper = document.createElement('div');
+							wrapper.id = 'progress';
+							wrapper.style.display = 'none';
+							wrapper.style.margin = '10px 0';
+							wrapper.style.padding = '8px';
+							wrapper.style.border = '1px solid #ccc';
+							wrapper.style.background = '#f9f9f9';
+							var msg = document.createElement('div');
+							msg.id = 'progressMessage';
+							msg.innerText = 'Por favor, espere mientras se realiza la actualización.';
+							var cd = document.createElement('div');
+							cd.id = 'countdown';
+							cd.style.marginTop = '6px';
+							cd.style.fontWeight = 'bold';
+							wrapper.appendChild(msg);
+							wrapper.appendChild(cd);
+							updateTab.insertBefore(wrapper, updateTab.firstChild);
+							progress = wrapper;
+						}
+					}
+					if (progress) progress.style.display = 'block';
+                	console.log("Formulario enviado, mostrando progreso...");
+                	var xhr = new XMLHttpRequest();
+                	xhr.open('POST', 'update/update2.php', true);
+                	xhr.onload = function () {
+                		console.log("Respuesta recibida del servidor:", xhr.responseText);
+                		var progressMessage = document.getElementById('progressMessage');
+                		if (xhr.status === 200) {
+	                		if (xhr.responseText.includes("step=2")) {
+	                			var countdownSeconds = 50;
+	                			startCountdown(countdownSeconds);
+                						// Lanzar paso 2 inmediatamente; el contador es solo visual
+                						var xhrStep2 = new XMLHttpRequest();
+                						xhrStep2.open('GET', 'update/update2.php?step=2', true);
+                						xhrStep2.onload = function () {
+                							if (xhrStep2.status === 200) {
+                                            if (xhrStep2.responseText.includes("rebooting")) {
+                                                if (progressMessage) progressMessage.innerText = 'Instalando.... Espere por favor.';
+                                                setTimeout(function() {
+                                                    window.location.href = '../index.php';
+                                                }, 3000);
+                                            } else {
+                                                if (progressMessage) progressMessage.innerText = 'Error : ' + xhrStep2.responseText;
+                                            }
+                							} else {
+                								if (progressMessage) progressMessage.innerText = 'Error: ' + xhrStep2.statusText;
+                							}
+                							};
+                						xhrStep2.send();
+                			} else {
+                				if (progressMessage) progressMessage.innerText = 'Error: ' + xhr.responseText;
+                			}
+                		} else {
+                			if (progressMessage) progressMessage.innerText = 'Error: ' + xhr.statusText;
+                		}
+                	};
+                	xhr.send(formData);
+                };
+              } else {
+               	 console.warn('[API DEBUG] firmwareForm no encontrado al asignar onsubmit');
+               }
+
+             var manualUpdateForm = document.getElementById('manualUpdateForm');
+ 			 if (manualUpdateForm) {
+ 			 manualUpdateForm.onsubmit = function(event) {
+ 					event.preventDefault();
+ 					var formData = new FormData(this);
+					var progress = document.getElementById('progress');
+					if (!progress) {
+						var updateTab = document.getElementById('cpestana2');
+						if (updateTab) {
+							var wrapper = document.createElement('div');
+							wrapper.id = 'progress';
+							wrapper.style.display = 'none';
+							wrapper.style.margin = '10px 0';
+							wrapper.style.padding = '8px';
+							wrapper.style.border = '1px solid #ccc';
+							wrapper.style.background = '#f9f9f9';
+							var msg = document.createElement('div');
+							msg.id = 'progressMessage';
+							msg.innerText = 'Por favor, espere mientras se realiza la actualización.';
+							var cd = document.createElement('div');
+							cd.id = 'countdown';
+							cd.style.marginTop = '6px';
+							cd.style.fontWeight = 'bold';
+							wrapper.appendChild(msg);
+							wrapper.appendChild(cd);
+							updateTab.insertBefore(wrapper, updateTab.firstChild);
+							progress = wrapper;
+						}
+					}
+					if (progress) progress.style.display = 'block';
+ 					var xhr = new XMLHttpRequest();
+ 					xhr.open('POST', 'update/update2.php', true);
+ 					xhr.onload = function () {
+ 						var progressMessage = document.getElementById('progressMessage');
+ 						if (xhr.status === 200) {
+	  						if (xhr.responseText.includes("step=2")) {
+	  							var countdownSeconds = 50;
+	  							startCountdown(countdownSeconds);
+                						// Lanzar paso 2 inmediatamente; el contador es solo visual
+ 						var xhrStep2 = new XMLHttpRequest();
+ 						xhrStep2.open('GET', 'update/update2.php?step=2', true);
+ 						xhrStep2.onload = function () {
+ 							if (xhrStep2.status === 200) {
+ 								if (xhrStep2.responseText.includes("rebooting")) {
+ 									if (progressMessage) progressMessage.innerText = 'Instalando.... Espere por favor.';
+ 									setTimeout(function() {
+ 										window.location.href = '../index.php';
+ 									}, 3000);
+ 								} else {
+ 									if (progressMessage) progressMessage.innerText = 'Error: ' + xhrStep2.responseText;
+ 								}
+ 							} else {
+ 								if (progressMessage) progressMessage.innerText = 'Error: ' + xhrStep2.statusText;
+ 							}
+ 							};
+ 						xhrStep2.send();
+ 							} else {
+ 								if (progressMessage) progressMessage.innerText = 'Error: ' + xhr.responseText;
+ 							}
+ 						} else {
+ 							if (progressMessage) progressMessage.innerText = 'Error: ' + xhr.statusText;
+ 						}
+ 					};
+ 					xhr.send(formData);
+ 				};
+ 			 } else {
+ 				// manualUpdateForm no encontrado al asignar onsubmit
+ 			 }
+
+		 		function startCountdown(seconds) {
+		 			var countdownElement = document.getElementById('countdown');
+		 			if (!countdownElement) return;
+					var progressMessage = document.getElementById('progressMessage');
+					if (progressMessage) progressMessage.innerText = 'Reinicio en ' + seconds + ' Segundos...';
+					countdownElement.innerText = 'Reinicio en ' + seconds + ' Segundos...';
+		 			var interval = setInterval(function() {
+		 				seconds--;
+		 				countdownElement.innerText = 'Reinicio en ' + seconds + ' Segundos...';
+						if (seconds <= 0) {
+							clearInterval(interval);
+							if (progressMessage) progressMessage.innerText = 'Reinicio en 0 Segundos...';
+							// Al llegar a 0, refrescar a la página principal
+							setTimeout(function(){ window.location.href = '../index.php'; }, 800);
+						}
+						}, 1000);
+		 		}
+		var pestanas = document.getElementById('pestanas');
+		var pestana1 = document.getElementById('pestana1');
+		var pestana2 = document.getElementById('pestana2');
+		var pestana3 = document.getElementById('pestana3');
+		var pestana4 = document.getElementById('pestana4');
+
+		</script>
+
+			</div>
+		</div>
+	</fieldset>
+</div>
+        </div>
+    </body>
+</html>
+

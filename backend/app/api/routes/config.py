@@ -10,6 +10,7 @@ from app.db.template_store import get_template_config, set_template_config
 from app.db.tablet_config_store import get_tablet_config_record, set_tablet_config
 from app.db.schedule_store import get_schedule_config, set_schedule_config
 from app.db import authorized_tablets_store as ats
+from app.services import tablet_call_hub
 from app.services.schedule_runner import notify_schedule_config_changed
 
 router = APIRouter(prefix="/config")
@@ -48,14 +49,54 @@ def get_tablet():
 @router.put("/tablet", summary="Guardar configuración por defecto de tablets")
 def put_tablet(config: dict = Body(...)):
     result = set_tablet_config(config)
+    tablet_call_hub.notify_tablet_config_changed()
     return {**result, "config": config}
+
+
+def _tablets_with_connection() -> list[dict]:
+    online = tablet_call_hub.connected_android_ids()
+    return [{**t, "connected": t["android_id"] in online} for t in ats.list_tablets()]
+
+
+@router.get("/tablets", summary="Tablets de la sucursal (Tablet 1..N) con estado de conexión")
+def list_branch_tablets():
+    return {"settings": ats.get_settings(), "items": _tablets_with_connection()}
+
+
+@router.get("/tablets/{tablet_id}/config", summary="Configuración efectiva de una tablet")
+def get_branch_tablet_config(tablet_id: int):
+    rec = ats.get_tablet_config_record(tablet_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    return rec
+
+
+@router.put("/tablets/{tablet_id}/config", summary="Guardar configuración propia de una tablet")
+def put_branch_tablet_config(tablet_id: int, config: dict = Body(...)):
+    rec = ats.set_tablet_config(tablet_id, config)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    tablet_call_hub.notify_tablet_config_changed(rec["tablet"]["android_id"])
+    return rec
+
+
+@router.delete(
+    "/tablets/{tablet_id}/config",
+    summary="Descartar config propia: la tablet vuelve a la común de la sucursal",
+)
+def reset_branch_tablet_config(tablet_id: int):
+    rec = ats.reset_tablet_config(tablet_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    tablet_call_hub.notify_tablet_config_changed(rec["tablet"]["android_id"])
+    return rec
 
 
 @router.get("/authorized-tablets", summary="Listar tablets autorizadas (Android ID)")
 def list_authorized_tablets():
     return {
         "settings": ats.get_settings(),
-        "items": ats.list_tablets(),
+        "items": _tablets_with_connection(),
     }
 
 
@@ -78,6 +119,7 @@ def update_authorized_tablet(tablet_id: int, body: AuthorizedTabletUpdate):
     item = ats.update_tablet(tablet_id, label=body.label, enabled=body.enabled)
     if not item:
         raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    tablet_call_hub.notify_coce_tablets_changed()
     return {"ok": True, "item": item}
 
 

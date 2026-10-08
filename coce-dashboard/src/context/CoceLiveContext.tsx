@@ -17,6 +17,10 @@ export type LiveTablet = {
   username: string;
   /** Epoch en ms. */
   connectedSince: number | null;
+  androidId: string | null;
+  /** «Tablet N» asignado por la sucursal (null con backend antiguo). */
+  name: string | null;
+  label: string | null;
 };
 
 export type LiveBranchInfo = {
@@ -62,6 +66,9 @@ function parseTablets(raw: unknown): LiveTablet[] | undefined {
       ip: t.ip != null ? String(t.ip) : null,
       username: String(t.username ?? ''),
       connectedSince: t.connected_since != null ? Number(t.connected_since) * 1000 : null,
+      androidId: t.android_id != null ? String(t.android_id) : null,
+      name: t.name ? String(t.name) : null,
+      label: t.label ? String(t.label) : null,
     }));
 }
 

@@ -1,0 +1,198 @@
+﻿<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="es">
+    <head>
+        <title> Panphone IP - Conectividad</title>       
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /> 
+	    <!-- <link href='http://fonts.googleapis.com/css?family=Ubuntu' rel='stylesheet' type='text/css'></link>
+        <script type="text/javascript" src="lib/jquery.min.js"></script>-->
+		<script type="text/javascript" src="js/jquery-1.7.2.min.js"></script>
+        <script type="text/javascript" src="js/cambiarPestanna.js"></script>
+		<link rel="stylesheet" type="text/css" href="common.css" />
+        <style type="text/css">
+
+            #wrapper{
+                width:980px;
+                min-height:730px;
+                height:auto;
+                border: none;   
+                margin: 10px;
+                float: right;
+                position: relative; 
+                border-radius:9px;
+                background-color:rgba(255,255,255,0.8);	
+                overflow-y:auto;
+                overflow-x:hidden;
+
+            }
+			.inputfondo{
+                background-color: #dddddd;
+                
+            }            
+            .redondeada{
+                border-radius: 9px; 
+            }            
+            .solo{
+				float:right;
+				font-size: 16px;
+				margin-right: 90px;
+            }          
+
+            fieldset{
+                font-family: 'Ubuntu', sans-serif;
+                width: 810px;
+                margin: 20px auto;
+                padding: 10px;
+                background-color: rgba(255,255,255,0.5);
+                border-radius: 9px;
+                color: gray;
+            }
+
+            .field{
+                font-family: 'Ubuntu', sans-serif;
+                width: 770px;
+                margin: 10px;
+                padding: 5px;
+                background-color: rgba(155,155,255,0.1);
+                border:none;
+                color: black;
+            }
+			#number {
+			  width: 7em;
+			}
+			
+			//pestanas
+			.contenedor{
+			width: 770px;
+			margin: auto;
+			//background: black;
+			color: bisque;
+			
+			padding: 10px 10px 40px 40px;
+			border-radius: 10px;
+			//box-shadow: 0 10px 10px 0px rgba(0, 0, 0, 0.8);
+			}
+
+			.contenedor .titulo{
+			font-size: 2.5ex;
+			font-weight: bold;
+			margin-left: 5px;
+			margin-bottom: 5px;
+			}
+
+			#pestanas {
+			float: top;
+			font-size: 2ex;
+			font-weight: bold;
+			}
+
+			#pestanas ul{
+				margin-left: -40px;    
+			}
+
+			#pestanas li{
+				list-style-type: none;
+				float: left;
+				text-align: center;
+				margin: 0px 1px -2px -0px;
+				background: rgba(42,192,42,0.8);
+				border-top-left-radius: 5px;
+				border-top-right-radius: 5px;
+				border: 2px  grey;
+				border-bottom: black;
+				padding: 5px 25px 0px 20px;
+			}
+
+			#pestanas a:link{
+				text-decoration: none;
+				color: black;
+			}
+
+			#contenidopestanas{
+				clear: both;  
+				//background: dimgray;
+				background: rgba(155,155,255,0.1);
+				padding: 1px 0px 20px 20px;
+				border-radius: 5px;
+				border-top-left-radius: 0px;
+				border: 2px solid grey;
+				width: 800px;
+				max-height: 600px;
+				overflow-y: auto;
+				overflow-x: hidden;
+			}
+ 		.right { text-align: right; }
+		.center { text-align: center; }
+
+
+        </style>
+	<script>
+		function myFunction() {
+		alert("Cambios almacenados correctamente");
+		}
+		
+				
+		if (top != self) top.location.href = location.href;
+	</script>
+
+    </head>
+	<body onload="javascript:cambiarPestanna(pestanas,pestana1);">		
+		<span id="timer">
+		<script type="text/javascript">
+			if (typeof countDown === 'function') {
+				countDown();
+			}
+		</script>
+		</span>
+        <div id="wrapperbox">
+            <div id="menu">
+                <a href="main.php?id=1"  class="ico"><img id="casa" src="/img/home.png" title="Inicio"></img>  </a>
+                <a href="main.php?id=2"  class="ico"> <img id="exit" src="/img/address_book.png" title="Cuentas SIP"></img> </a> 
+				<a href="main.php?id=3"  class="ico"> <img id="log" src="/img/site_map.png" title="Conectividad"></img> </a> 
+                <a href="main.php?id=4"  class="ico"> <img id="planta" src="/img/media.png" title="Multimedia"> </a>
+                <a href="main.php?id=5"  class="ico"> <img id="keys" src="/img/lock.png" title="Relés" > </a>
+                <a href="main.php?id=6"  class="ico"> <img id="webcam" src="/img/keyboard.png" title="Teclado / Pulsador"> </a>
+                <a href="main.php?id=7"  class="ico"> <img id="list" src="/img/key.png" title="Módulos y licencias "> </a>
+               	<a href="main.php?id=8"  class="ico"> <img id="test" src="/img/gear.png" title="Herramientas"> </a>
+				<a href="main.php?id=9"  class="ico"><img  id="conexion" src="/img/protected.png"  title="Usuarios" ></img></a>  
+            </div>
+			
+<div id="wrapper">
+    <h1>Logs del sistema</h1>
+    <div id="log-container" style="color: blue; font-size: 14px; padding-top: 0px; margin: 35px auto; width: 840px; height: 550px; overflow: auto; border-bottom: 5px solid gray; border-top: 5px solid gray;">
+        <!-- Contenido del log se cargará aquí -->
+    </div>
+    <a href="main.php?id=3"><input class="boton" type="button" value="Cerrar"></a>
+    <a href="logs.php?log=sip&lang=ES&descarga=1"><input class="boton" type="button" value="Descargar"></a>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    let offset = 0;
+    const logType = "sip";
+    const logContainer = document.getElementById("log-container");
+
+    function loadLog() {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "load_log.php?log=" + logType + "&offset=" + offset, true);
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                logContainer.innerHTML += xhr.responseText;
+                offset += 100; // Incrementar el offset para la próxima carga
+            }
+        };
+        xhr.send();
+    }
+
+    loadLog(); // Cargar la primera parte del log
+
+    logContainer.addEventListener("scroll", function() {
+        if (logContainer.scrollTop + logContainer.clientHeight >= logContainer.scrollHeight) {
+            loadLog(); // Cargar más contenido cuando se llega al final del contenedor
+        }
+    });
+});
+</script>
+
+                   </div>
+    </body>
+</html>
+

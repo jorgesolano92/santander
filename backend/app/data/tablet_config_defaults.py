@@ -222,6 +222,8 @@ def get_builtin_default_tablet_config() -> dict[str, Any]:
         },
         "api": {
             "port": 8000,
+            "secure": True,
+            "tlsPort": 8443,
             "username": "ceroideas",
             "password": "12345678",
             "urlToken": "/api/v1/auth/token",

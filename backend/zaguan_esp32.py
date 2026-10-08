@@ -39,6 +39,41 @@ _estado_canales: dict[str, EstadoValido] = {
 # Ejemplo: registrar_callback_pulsacion(mi_funcion_apertura)
 _callback_pulsacion: Callable | None = None
 
+
+def _known_device_hosts() -> set[str]:
+    hosts = {"127.0.0.1", "::1", "localhost"}
+    try:
+        target = zaguan_led_client.get_target()
+        hosts.add(str(target.get("host") or "").strip().lower())
+        for ch in (target.get("channels") or {}).values():
+            hosts.add(str((ch or {}).get("resolved_host") or "").strip().lower())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.csip.devices import get_csip_devices
+
+        for d in get_csip_devices().values():
+            host = (d.base_url or "").split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+            hosts.add(host.strip().lower())
+    except Exception:  # noqa: BLE001
+        pass
+    hosts.discard("")
+    return hosts
+
+
+def _require_known_device_host(request: Request | None) -> None:
+    """Pulsación solo desde ESP32/Panphone configurados (abre puertas)."""
+    from app.core.config import settings
+
+    if not settings.device_webhook_known_hosts_only or request is None:
+        return
+    host = (request.client.host if request.client else "") or ""
+    host = host.strip().lower().removeprefix("::ffff:")
+    if host not in _known_device_hosts():
+        logger.warning("[ESP32] Pulsación rechazada desde IP no configurada: %s", host or "?")
+        raise HTTPException(status_code=403, detail="Origen no autorizado para pulsaciones")
+
+
 def registrar_callback_pulsacion(fn: Callable):
     """
     Registra la función que se llamará cuando el ESP32
@@ -245,6 +280,7 @@ async def recibir_pulsacion(
       .70 puerta P2: botón local p1 → canal p2 (ext), botón local p2 → canal p4 (int)
       Ambos botones de .80 abren P1; ambos de .70 abren P2.
     """
+    _require_known_device_host(request)
     payload_raw: Any = None
     if request is not None:
         try:

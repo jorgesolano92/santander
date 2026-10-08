@@ -44,8 +44,8 @@ function formatWhen(iso) {
   }
 }
 
-export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
-      const [items, setItems] = useState([]);
+export default function AuthorizedTabletsSection({ apiFetch, onNotify, onChanged }) {
+  const [items, setItems] = useState([]);
   const [enforcement, setEnforcement] = useState(false);
   const [loading, setLoading] = useState(true);
   const [androidId, setAndroidId] = useState("");
@@ -58,6 +58,7 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
       const data = await apiFetch("/api/config/authorized-tablets");
       setItems(Array.isArray(data?.items) ? data.items : []);
       setEnforcement(!!data?.settings?.enforcement_enabled);
+      onChanged?.();
     } catch (e) {
       onNotify?.("Error", "No se pudo cargar tablets autorizadas: " + e.message);
     } finally {
@@ -123,7 +124,7 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
   };
 
   const rename = async (id, currentLabel) => {
-    const next = window.prompt("Nombre / ubicación de la tablet", currentLabel || "");
+    const next = window.prompt("Ubicación de la tablet (ej. Caja 1, Recepción)", currentLabel || "");
     if (next == null) return;
     try {
       await apiFetch(`/api/config/authorized-tablets/${id}`, {
@@ -154,9 +155,10 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <p style={{ margin: 0, color: "#64748b", fontSize: 13, lineHeight: 1.45 }}>
-        Autoriza tablets por <strong>Android ID</strong> (no por MAC: Android ya no la expone).
-        La tablet muestra su ID abajo; cópialo aquí para autorizarla. Sin autorización no podrá
-        usar la app.
+        Cada tablet se identifica por su <strong>Android ID</strong> y se numera automáticamente
+        como <strong>Tablet 1, Tablet 2…</strong> la primera vez que contacta con el panel. Si la
+        autorización está exigida, las tablets nuevas quedan <em>pendientes</em> hasta que las
+        actives aquí.
       </p>
 
       <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14 }}>
@@ -202,7 +204,7 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
           />
         </div>
         <div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Nombre (opcional)</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>Ubicación (opcional)</div>
           <input
             style={inputStyle}
             placeholder="Caja 1 / Recepción"
@@ -234,9 +236,11 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e7eb", color: "#6b7280" }}>
-                <th style={{ padding: "8px 6px" }}>Nombre</th>
+                <th style={{ padding: "8px 6px" }}>Tablet</th>
+                <th style={{ padding: "8px 6px" }}>Ubicación</th>
                 <th style={{ padding: "8px 6px" }}>Android ID</th>
                 <th style={{ padding: "8px 6px" }}>Estado</th>
+                <th style={{ padding: "8px 6px" }}>Config</th>
                 <th style={{ padding: "8px 6px" }}>Último visto</th>
                 <th style={{ padding: "8px 6px" }} />
               </tr>
@@ -244,6 +248,20 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
             <tbody>
               {items.map((t) => (
                 <tr key={t.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: "10px 6px", fontWeight: 600, whiteSpace: "nowrap" }}>
+                    <span
+                      title={t.connected ? "Conectada" : "Sin conexión"}
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        marginRight: 6,
+                        background: t.connected ? "#16a34a" : "#9ca3af",
+                      }}
+                    />
+                    {t.name}
+                  </td>
                   <td style={{ padding: "10px 6px" }}>
                     <button
                       type="button"
@@ -259,7 +277,7 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
                         textDecoration: "underline",
                       }}
                     >
-                      {t.label || "(sin nombre)"}
+                      {t.label || "(añadir)"}
                     </button>
                   </td>
                   <td style={{ padding: "10px 6px", fontFamily: "ui-monospace, monospace" }}>
@@ -272,11 +290,15 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
                         fontWeight: 600,
                       }}
                     >
-                      {t.enabled ? "Activa" : "Desactivada"}
+                      {t.enabled ? "Activa" : t.pending ? "Pendiente" : "Desactivada"}
                     </span>
                   </td>
                   <td style={{ padding: "10px 6px", color: "#6b7280" }}>
+                    {t.has_own_config ? "Propia" : "Común"}
+                  </td>
+                  <td style={{ padding: "10px 6px", color: "#6b7280" }}>
                     {formatWhen(t.last_seen_at)}
+                    {t.last_ip ? ` · ${t.last_ip}` : ""}
                   </td>
                   <td style={{ padding: "10px 6px", whiteSpace: "nowrap" }}>
                     <button
@@ -284,7 +306,7 @@ export default function AuthorizedTabletsSection({ apiFetch, onNotify }) {
                       style={{ ...btnSecondary, marginRight: 6 }}
                       onClick={() => void setEnabled(t.id, !t.enabled)}
                     >
-                      {t.enabled ? "Desactivar" : "Activar"}
+                      {t.enabled ? "Desactivar" : t.pending ? "Autorizar" : "Activar"}
                     </button>
                     <button type="button" style={btnSecondary} onClick={() => void remove(t.id, t.android_id)}>
                       Eliminar

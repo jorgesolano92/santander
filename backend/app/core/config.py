@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     # Si tiene valor: todo registro requiere cabecera coincidente.
     panel_setup_token: Optional[str] = None
 
+    # HTTP (ESP32 zaguán y compatibilidad) + HTTPS/WSS con certificado de la CA propia (tablets).
+    # Sin TLS_CERT_FILE/TLS_KEY_FILE solo se sirve HTTP. Certificados: scripts/tls_ca.py
+    http_port: int = 8000
+    https_port: int = 8443
+    tls_cert_file: Optional[str] = None
+    tls_key_file: Optional[str] = None
+    # Si True, la API de tablets (/api/v1, incluido el WS) solo responde por HTTPS/WSS.
+    tablet_require_tls: bool = False
+    # Pulsaciones (webhook CSIP de Panphone y ESP32 zaguán) solo desde IPs de equipos configurados:
+    # sin esto cualquiera en la red podría abrir puertas con un POST.
+    device_webhook_known_hosts_only: bool = True
+
     # SQLite
     database_url: str = "sqlite:///./data/control_accesos.db"
 

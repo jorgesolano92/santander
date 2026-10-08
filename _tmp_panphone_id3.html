@@ -1,0 +1,768 @@
+﻿<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="es">
+    <head>
+        <title> Panphone IP - Conectividad</title>       
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" /> 
+	    <!-- <link href='http://fonts.googleapis.com/css?family=Ubuntu' rel='stylesheet' type='text/css'></link>
+        <script type="text/javascript" src="lib/jquery.min.js"></script>-->
+		<script type="text/javascript" src="js/jquery-1.7.2.min.js"></script>
+        <script type="text/javascript" src="js/cambiarPestanna.js"></script>
+		<link rel="stylesheet" type="text/css" href="common.css" />
+        <style type="text/css">
+
+            #wrapper{
+                width:980px;
+                min-height:730px;
+                height:auto;
+                border: none;   
+                margin: 10px;
+                float: right;
+                position: relative; 
+                border-radius:9px;
+                background-color:rgba(255,255,255,0.8);	
+                overflow-y:auto;
+                overflow-x:hidden;
+
+            }
+			.inputfondo{
+                background-color: #dddddd;
+                
+            }            
+            .redondeada{
+                border-radius: 9px; 
+            }            
+            .solo{
+				float:right;
+				font-size: 16px;
+				margin-right: 90px;
+            }          
+
+            fieldset{
+                font-family: 'Ubuntu', sans-serif;
+                width: 810px;
+                margin: 20px auto;
+                padding: 10px;
+                background-color: rgba(255,255,255,0.5);
+                border-radius: 9px;
+                color: gray;
+            }
+
+            .field{
+                font-family: 'Ubuntu', sans-serif;
+                width: 770px;
+                margin: 10px;
+                padding: 5px;
+                background-color: rgba(155,155,255,0.1);
+                border:none;
+                color: black;
+            }
+			#number {
+			  width: 7em;
+			}
+			
+			//pestanas
+			.contenedor{
+			width: 770px;
+			margin: auto;
+			//background: black;
+			color: bisque;
+			
+			padding: 10px 10px 40px 40px;
+			border-radius: 10px;
+			//box-shadow: 0 10px 10px 0px rgba(0, 0, 0, 0.8);
+			}
+
+			.contenedor .titulo{
+			font-size: 2.5ex;
+			font-weight: bold;
+			margin-left: 5px;
+			margin-bottom: 5px;
+			}
+
+			#pestanas {
+			float: top;
+			font-size: 2ex;
+			font-weight: bold;
+			}
+
+			#pestanas ul{
+				margin-left: -40px;    
+			}
+
+			#pestanas li{
+				list-style-type: none;
+				float: left;
+				text-align: center;
+				margin: 0px 1px -2px -0px;
+				background: rgba(42,192,42,0.8);
+				border-top-left-radius: 5px;
+				border-top-right-radius: 5px;
+				border: 2px  grey;
+				border-bottom: black;
+				padding: 5px 25px 0px 20px;
+			}
+
+			#pestanas a:link{
+				text-decoration: none;
+				color: black;
+			}
+
+			#contenidopestanas{
+				clear: both;  
+				//background: dimgray;
+				background: rgba(155,155,255,0.1);
+				padding: 1px 0px 20px 20px;
+				border-radius: 5px;
+				border-top-left-radius: 0px;
+				border: 2px solid grey;
+				width: 800px;
+				max-height: 600px;
+				overflow-y: auto;
+				overflow-x: hidden;
+			}
+ 		.right { text-align: right; }
+		.center { text-align: center; }
+
+
+        </style>
+	<script>
+		function myFunction() {
+		alert("Cambios almacenados correctamente");
+		}
+		
+				
+		if (top != self) top.location.href = location.href;
+	</script>
+
+    </head>
+	<body onload="javascript:cambiarPestanna(pestanas,pestana1);">		
+		<span id="timer">
+		<script type="text/javascript">
+			if (typeof countDown === 'function') {
+				countDown();
+			}
+		</script>
+		</span>
+        <div id="wrapperbox">
+            <div id="menu">
+                <a href="main.php?id=1"  class="ico"><img id="casa" src="/img/home.png" title="Inicio"></img>  </a>
+                <a href="main.php?id=2"  class="ico"> <img id="exit" src="/img/address_book.png" title="Cuentas SIP"></img> </a> 
+				<a href="main.php?id=3"  class="ico"> <img id="log" src="/img/site_map.png" title="Conectividad"></img> </a> 
+                <a href="main.php?id=4"  class="ico"> <img id="planta" src="/img/media.png" title="Multimedia"> </a>
+                <a href="main.php?id=5"  class="ico"> <img id="keys" src="/img/lock.png" title="Relés" > </a>
+                <a href="main.php?id=6"  class="ico"> <img id="webcam" src="/img/keyboard.png" title="Teclado / Pulsador"> </a>
+                <a href="main.php?id=7"  class="ico"> <img id="list" src="/img/key.png" title="Módulos y licencias "> </a>
+               	<a href="main.php?id=8"  class="ico"> <img id="test" src="/img/gear.png" title="Herramientas"> </a>
+				<a href="main.php?id=9"  class="ico"><img  id="conexion" src="/img/protected.png"  title="Usuarios" ></img></a>  
+            </div>
+			
+<script type="text/javascript">
+
+
+function ValidateIPaddress()   
+{  
+ if (/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(document.prueba.ip.value))  
+  {  
+    return (true)  
+  }  
+alert('IP inválida.')  
+return (false)  
+}  
+
+	function busquedawifi (url,ancho,alto){
+		
+		var x=(screen.width/2)-(ancho/2);
+		//Ajustar verticalmente
+		var y=(screen.height/2)-(alto/2);
+	
+		window.open(url, 'popup', 'toolbar=0,scrollbars=0,location=0,statusbar=0,menubar=0,resizable=0, width=' + ancho + ', height=' + alto + ', left=' + x + ', top=' + y +'' );
+		
+	}
+
+	function selectWifiSsid(ssid) {
+		try {
+			var ssidInput = document.querySelector('input[name="ssid"]');
+			if (ssidInput) {
+				ssidInput.value = ssid;
+				ssidInput.focus();
+			}
+		} catch (e) {
+			window.location.href = 'main.php?id=3&ssid=' + encodeURIComponent(ssid);
+		}
+	}
+
+</script>
+
+<div id="wrapper"> 
+				<h1>Conectividad</h1>
+                <fieldset>
+				 <div class="contenedor">
+						<div id="pestanas">
+							<ul id=lista>
+								<li id="pestana1"><a href='javascript:cambiarPestanna(pestanas,pestana1);'><img src="/img/site_map.png" height="15" ></img> Cable</a></li>
+								<li id="pestana2"><a href='javascript:cambiarPestanna(pestanas,pestana2);'><img src="/sel icons/rss_feed_2.png" height="15" ></img> Wifi</a></li>
+								<li id="pestana3"><a href='javascript:cambiarPestanna(pestanas,pestana3);'><img src="/sel icons/wireless_router.png" height="15" ></img> 4G /LTE </a></li>
+								<li id="pestana4"><a href='javascript:cambiarPestanna(pestanas,pestana4);'><img src="/sel icons/oscilloscope.png" height="15" ></img> Utilidades </a></li>
+								<li id="pestana5"><a href='javascript:cambiarPestanna(pestanas,pestana5);'><img src="/sel icons/message.png" height="15" ></img> SMTP</a></li>
+								<li id="pestana6"><a href='javascript:cambiarPestanna(pestanas,pestana6);'><img src="/sel icons/entry_feed.png" height="15" ></img> SNMP</a></li>
+								<li id="pestana7"><a href='javascript:cambiarPestanna(pestanas,pestana7);'><img src="/sel icons/entry_feed.png" height="15" ></img> VPN </a></li>								
+							</ul>
+						</div>
+						<div id="contenidopestanas">
+							<div id="cpestana1">
+								<form method="post" action="" onsubmit="return validateNetworkForm();">
+										<fieldset class="field"><legend>&emsp; Configurar red por cable&emsp;</legend>   
+										<script>
+										function validateIP(ip) {
+											var re = /^(25[0-5]|2[0-4]\d|1?\d{1,2})\.(25[0-5]|2[0-4]\d|1?\d{1,2})\.(25[0-5]|2[0-4]\d|1?\d{1,2})\.(25[0-5]|2[0-4]\d|1?\d{1,2})$/;
+											return re.test(ip);
+										}
+										function validateMask(mask) {
+											if (!mask) return false;
+											if (mask.indexOf('.') !== -1) {
+												return validateIP(mask);
+											}
+											var n = parseInt(mask, 10);
+											return !isNaN(n) && n >= 0 && n <= 32;
+										}
+										function validateNetworkForm() {
+											try {
+												var dhcpEl = document.querySelector('input[name="dhcp"]:checked');
+												var dhcp = dhcpEl ? dhcpEl.value : 'On';
+											} catch (e) { var dhcp = 'On'; }
+											if (dhcp === 'Off') {
+												var ip = (document.querySelector('input[name="ipaddress"]') || {value: ''}).value.trim();
+												var mask = (document.querySelector('input[name="mask"]') || {value: ''}).value.trim();
+												var gate = (document.querySelector('input[name="gate"]') || {value: ''}).value.trim();
+												if (!ip || !mask || !gate) {
+													alert('Por favor, complete IP, máscara y puerta de enlace.');
+													return false;
+												}
+												if (!validateIP(ip)) { alert('IP inválida.'); return false; }
+												if (!validateMask(mask)) { alert('Máscara inválida. Use CIDR (24) o máscara punteada (255.255.255.0).'); return false; }
+												if (!validateIP(gate)) { alert('Puerta de enlace inválida.'); return false; }
+											}
+											return confirm('Al aplicar cambios se cambiará la nueva IP indicada');
+										}
+
+										// Validación previa al envío para formulario Wi-Fi
+										function validateWifiForm() {
+											function validateIP(ip) {
+												var re = /^(25[0-5]|2[0-4]\d|1?\d{1,2})\.(25[0-5]|2[0-4]\d|1?\d{1,2})\.(25[0-5]|2[0-4]\d|1?\d{1,2})\.(25[0-5]|2[0-4]\d|1?\d{1,2})$/;
+												return re.test(ip);
+											}
+											function validateMask(mask) {
+												if (!mask) return false;
+												if (mask.indexOf('.') !== -1) {
+													return validateIP(mask);
+												}
+												var n = parseInt(mask, 10);
+												return !isNaN(n) && n >= 0 && n <= 32;
+											}
+											try {
+												var dhcpEl = document.querySelector('input[name="dhcpwifi"]:checked');
+												var dhcp = dhcpEl ? dhcpEl.value : 'On';
+											} catch (e) { var dhcp = 'On'; }
+											if (dhcp === 'Off') {
+												var ip = (document.querySelector('input[name="ipaddresswifi"]') || {value: ''}).value.trim();
+												var mask = (document.querySelector('input[name="maskwifi"]') || {value: ''}).value.trim();
+												var gate = (document.querySelector('input[name="gatewifi"]') || {value: ''}).value.trim();
+												if (!ip || !mask || !gate) {
+													alert('Por favor, complete IP, máscara y puerta de enlace para Wi‑Fi.');
+													return false;
+												}
+												if (!validateIP(ip)) { alert('IP inválida.'); return false; }
+												if (!validateMask(mask)) { alert('Máscara inválida. Use CIDR (24) o máscara punteada (255.255.255.0).'); return false; }
+												if (!validateIP(gate)) { alert('Puerta de enlace inválida.'); return false; }
+											}
+											return confirm('Al aplicar cambios se cambiará la nueva IP indicada');
+										}
+										</script>
+										<table>
+											<tr>
+												<td>													
+													Dirección IP actual:
+												</td>
+												<td>
+													192.168.1.70
+
+
+												</td>
+												<td>
+													Dirección MAC  : 
+												</td>
+												<td>
+													fc:c2:3d:3f:c6:10
+												</td>
+											</tr>
+
+											<tr>
+												<td>																					
+													DHCP :  
+												</td>
+												<td colspan="2">
+													<input type="radio" name="dhcp" value="On" 	> On &nbsp; &nbsp;
+													<input type="radio" name="dhcp" value="Off" checked="checked"> Off													</td>
+												<td style="vertical-align:middle; text-align:left;">
+													<input type="checkbox" name="playIP" value="1" > Reproducir IP al inicio 												</td>
+											</tr>
+											<tr>
+												<td>																				
+													Dirección IP Estática :
+												</td>
+												<td colspan="3"> 
+													<input class="redondeada" type="text" name="ipaddress" size="20" maxlength="15" value="192.168.1.70"></input><br>
+												</td>
+											</tr>
+											<tr>
+												<td>							
+													Máscara de red  :
+												</td>
+												<td colspan="3"> 
+													<input class="redondeada" type="text" name="mask" size="20" maxlength="15" value="255.255.255.0" ></input>
+												</td>
+											</tr>
+											<tr>
+												<td>							
+													Puerta de enlace :
+												</td>
+												<td colspan="3"> 
+													<input class="redondeada" type="text" name="gate" size="20" maxlength="15" value="192.168.1.1" ></input>
+												</td>
+											</tr>
+											<tr>
+												<td>							
+													Servidores DNS :
+												</td>
+												<td colspan="3" style="white-space:nowrap;"> 
+													1: &nbsp;<input class="redondeada" type="text" name="dns1" size="17" maxlength="15" value="8.8.8.8" ></input>
+													&nbsp;&nbsp;&nbsp;&nbsp;2: &nbsp;<input class="redondeada" type="text" name="dns2" size="17" maxlength="15" value="9.9.9.9" ></input>
+												</td>
+											</tr>
+											<tr>
+												<td>
+													VLAN ID:
+												</td>
+												<td colspan="3">
+													<input class="redondeada" type="number" name="vlan_id" min="0" max="4094" value="" placeholder="0">
+													<span style="font-size:11px;"> (0 = sin VLAN )</span>
+												</td>
+											</tr>
+											
+										</table>	          
+									 <input type="hidden" value="" name="datosIP" />
+									 <input type="hidden" value="" name="reconectar" />
+									 <input class="boton" type="submit" value="Cambiar" >
+									</fieldset>    
+									 
+								</form>
+								<fieldset class="field"><legend>&nbsp;&nbsp;Logs del sistema </legend> 
+									<form method="post" action="">
+										<table>
+											<tr>
+												<td>         		
+														Log VOIP SIP :
+												</td>
+												<td>        
+															<input type="radio" name="logsip" value="1"    > On 
+															<input type="radio" name="logsip" value="0" checked="checked" > Off												</td>	
+												<td style="text-align:center;">
+														Puerto: 
+												</td>
+												<td>
+													<input class="redondeada" type="number" name="puerto" size="9" max="9999"  min="2000"  value="5060" required></input>
+												</td>
+												<td>         		
+													<a href="main.php?id=3.1&log=sip&lang=ES">Visualizar log </a> &nbsp;&nbsp;<a href="logs.php?log=sip&descarga=1"><img src="/img/download.png" width="30" title="Descargar"></a> 
+												</td>
+											
+											</tr>		
+											<tr>				
+												<td>         		
+													Log eventos :
+												</td>	
+											
+												<td>  													
+														<input type="radio" name="log" value="1"  checked="checked"> On														<input type="radio" name="log" value="0"  >Off																	
+												</td>
+												<td>
+
+												</td>
+												<td>
+													
+												</td>		
+												<td>         		
+														<a href="main.php?id=3.1&log=log&lang=ES">Visualizar log </a> &nbsp;&nbsp;<a href="logs.php?lang=ES&log=log&descarga=1"><img src="/img/download.png" width="30" title="Descargar"></a> 
+												</td>
+											
+											</tr>
+										</table>	
+										
+										<input class="boton" type="submit"  value="Cambiar" >
+									</form>            
+
+									</fieldset> 				  
+								</div>
+
+							<div id="cpestana2">
+																				<br>
+											Sin dispositivos Wifi conectados											<br><br>	
+												
+										 					 
+							</div>
+							<div id="cpestana3">
+							
+																								<br>
+																	Sin dispositivos 4G /LTE conectados																	<br><br>	
+										 	
+							</div>
+						
+							<div id="cpestana4">
+						
+									<form method="post" action="">
+										<fieldset class="field"><legend>&emsp; Utilidades de red</legend>   
+										<table>
+										<tr>
+												<td>	
+														Puerta de enlace :   
+												</td>
+												<td>
+												
+														192.168.1.1
+<br>
+														<select name="gatewaydefault" >
+															<option  value="br0" selected> Cable - 192.168.1.1</option>
+															<option  value="wlan0" DISABLED> Wifi -  </option>
+															<option  value="usb0" DISABLED > 4G /LTE  -  </option>
+															<option  value="tun0" DISABLED > VPN -  </option>
+														</select>
+														<input type="submit" value="Cambiar" >
+												</td>												
+											</tr>
+											<!--
+											<tr>
+												<td>	
+														IP pública :   
+												</td>
+												<td>
+																										</td>
+											</tr>
+											-->
+											<tr>
+												<td colspan="2">
+												<font color='green'>
+														<b>PING TEST  :</b> 
+													</font>
+												</td>
+												
+											</tr>
+												</form>
+												<form method="post" action="">
+											<tr>
+												<td>																				
+														Adaptador de red :
+												</td>
+												<td> 
+														<select name="adaptador" >
+														 if ($wifi !="sin wifi") {
+															<option  value="br0" > Cable </option>
+															<option  value="wlan0" DISABLED> Wifi </option>
+															<option  value="usb0" DISABLED > 4G /LTE  </option>
+															<option  value="tun0" DISABLED > VPN </option>																						
+														</select>
+												</td>
+											</tr>
+											<tr>
+												<td>	
+														Dirección:  
+												</td>
+												<td>
+														<input class="redondeada" type="text" name="url" size="20" maxlength="100" value="google.com"></input>
+																												
+												</td>
+											</tr>
+											<tr>
+												<td >	
+													<p style="text-align:center;">		
+														<input class="boton" type="submit" value="Realizar test" >
+													</p>
+												</td>
+											</tr>
+											<tr>
+												<td colspan="2">							
+																	<textarea name="resultado" rows="10" cols="90" style="resize: none;"></textarea>
+												</td>
+											</tr>
+											
+										</table>	          
+											
+									</fieldset>    
+											 <input type="hidden" value="pingtest" name="pingtest" />
+
+									</form>
+							
+							</div>
+						
+						
+							<div id="cpestana5">
+						
+									<form method="post" action="emailconf.php">
+										<fieldset class="field"><legend>&emsp;Protocolo SMTP</legend>   
+										<table WIDTH="90%">
+										<tr>
+												<td colspan="3">	
+													Desde aquí podrá configurar los parámetros para el envío de emails desde el dispositivo. Puede usar el servidor de correo interno, o utilizar su propio servidor de correo externo con su dominio.  												</td>												
+											</tr>
+											<tr>
+												<td>	
+													Destinatario  : 
+												</td>
+												<td colspan="2">
+														<input class="redondeada" type="text" name="smtp_to" size="40" maxlength="76" value="email@example.com" required>
+														
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+												Remitente   :  
+												</td>
+												<td colspan="2">
+														<input class="redondeada" type="text" name="smtp_from" size="40" maxlength="76" value="email@example.com" required>
+														
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+													Usar Servidor :   
+												</td>
+												<td colspan="2">
+													<input type="radio" name="smtp_ext" value="0" checked="checked"> Interno &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+													<input type="radio" name="smtp_ext" value="1" > Externo 														
+												</td>
+											</tr>
+											<tr>
+												<td>	
+													 Servidor de correo (SMTP):    
+												</td>
+												<td colspan="2">
+													<input class="redondeada" type="text" name="smtp_server" size="30" maxlength="100" value="smtp.example.com"> :
+													<input class="redondeada" type="text" name="smtp_port" size="3" maxlength="5" value="25"> (Puerto)
+														
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+													Usuario:    
+												</td>
+												<td colspan="2">
+													<input class="redondeada" type="text" name="smtp_user" size="20" maxlength="50" value="test">
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+													Password: 
+												</td>
+												<td colspan="2">
+													<input class="redondeada" type="password" name="smtp_pass" size="20" maxlength="50" value="*********">
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+													Seguridad (opcional):   
+												</td>
+												<td colspan="2">
+														<select name="smtp_sec" >
+															<option  value="none" selected>  ------ </option>
+															<option  value="starttls" >  STARTTLS </option>
+															<option  value="tls" >  TLS </option>
+															<option  value="ssl" >  SSL </option>
+														</select>
+														
+														
+												</td>												
+											</tr>
+											
+											<tr>
+												
+												<td colspan="2" style="text-align:center;">	
+													
+													<input class="boton" type="submit" value="Guardar" >
+													
+												</td>
+											</tr>
+											<tr>
+												<td>	
+												</td>
+												<td colspan="2">
+													<input type="button" onclick="location.href='emailconf.php?test=1';" value=" Enviar email de prueba " />
+												</td>												
+											</tr>
+										</table>	          
+											
+									</fieldset>    
+											 
+
+									</form>
+							
+							</div>
+							
+							
+							<div id="cpestana6">
+						
+									<form method="post" action="">
+										<fieldset class="field"><legend>&emsp;Protocolo SNMP</legend>   
+										<table>
+										<tr>
+												<td>	
+														Estado SNMP :   
+												</td>
+												<td>
+													
+													Off
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+														Envio de traps :   
+												</td>
+												<td>
+														<input type="radio" name="snmptrapp" value="1"   > On &nbsp;
+														<input type="radio" name="snmptrapp" value="0" checked="checked" > Off &nbsp; &nbsp;
+														
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+														Servidor 1 :  
+												</td>
+												<td>
+													<input class="redondeada" type="text" name="snmptrappserver1" size="30" maxlength="50" value="localhost" >
+
+												</td>												
+											</tr>
+											<tr>
+												<td>	
+														Servidor 2 :  
+												</td>
+												<td>
+													<input class="redondeada" type="text" name="snmptrappserver2" size="30" maxlength="50" value="localhost" >
+												</td>						
+											</tr>
+											<tr>
+												<td>	
+														Servidor 3 :  
+												</td>
+												<td>
+													<input class="redondeada" type="text" name="snmptrappserver3" size="30" maxlength="50" value="localhost" >
+												</td>						
+											</tr>
+											<tr>
+												<td>	
+														Comunidad :   
+												</td>
+												<td>
+														<input class="redondeada" type="text" name="community" size="30" maxlength="150" value="public" required>
+												</td>
+											</tr>
+											<tr>
+												<td>	
+														Nombre :   
+												</td>
+												<td>
+														<input class="redondeada" type="text" name="name" size="30" maxlength="150" value="Panphone">
+												</td>
+											</tr>
+											<tr>
+												<td>	
+														Descripción  :   
+												</td>
+												<td>
+														<input class="redondeada" type="text" name="description" size="30" maxlength="150" value="Panphone">
+												</td>
+											</tr>
+											<tr>
+												<td>	
+														Ubicación :   
+												</td>
+												<td>
+														<input class="redondeada" type="text" name="location" size="30" maxlength="150" value="Network">
+												</td>
+											</tr>
+											<tr>
+												<td>	
+														Contacto :   
+												</td>
+												<td>
+														<input class="redondeada" type="text" name="contact" size="30" maxlength="150" value="admin@domain.com">
+												</td>
+											</tr>
+
+
+											<tr>
+												<td colspan="2" style="text-align:center;">	
+													
+														<br><br><br><input class="boton" type="submit" value="Guardar" >
+													
+												</td>
+											</tr>
+											
+										</table>	          
+											
+									</fieldset>    
+											 
+
+									</form>
+							
+							</div>
+									
+							<div id="cpestana7">
+						
+								<form action="vpn.php" method="post" enctype="multipart/form-data">  
+										<fieldset class="field"><legend>&emsp;Conexión VPN </legend>   
+										<table>
+											<tr>
+												<td colspan="2">	
+													Desde aquí podra activar la conexión mediante una VPN usando la herramienta OpenVPN. Para ello deberá seleccionar su archivo de linux embebido en formato .conf. Opcionalmente puede adjuntar un archivo con claves en formato .txt  
+													<br>
+													<img />
+												</td>
+											</tr>
+											
+											<tr>
+												<td>	
+														Conexión VPN :   
+												</td>
+												<td>
+														<input type="radio" name="vpn" value="On"   > On &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+														<input type="radio" name="vpn" value="Off" checked="checked" > Off												</td>												
+											</tr>
+											<tr>
+												<td>	
+													<br>Subir Archivo de configuración (.conf) :   
+												</td>
+												<td>
+													<br><input  type="file" name="vpnconf" size="40" accept=".conf" />
+												</td>
+											</tr>
+											<tr>
+												<td>	
+													<br>Subir Archivo de claves (.txt) (Opcional) :   
+												</td>
+												<td>
+													<br><input  type="file" name="vpnuser" size="40" accept=".txt" />
+												</td>
+											</tr>
+											<tr>
+												<td colspan="2" style="text-align:center;">	
+													<br><br><input class="boton" type="submit" value="Guardar" >
+												</td>
+											</tr>
+										</table>	          
+									</fieldset>    
+								</form>
+							</div>
+				 </div>                
+               </fieldset>  
+            </div>        </div>
+    </body>
+</html>
+

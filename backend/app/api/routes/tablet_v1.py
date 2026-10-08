@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, model_validator
 
@@ -133,16 +133,91 @@ def read_output(
     return {"code": code, "on": on}
 
 
+def _client_ip(request: Request) -> Optional[str]:
+    return request.client.host if request.client else None
+
+
+def _calling_tablet(request: Request, x_tablet_id: Optional[str]) -> Optional[dict]:
+    """Ficha de la tablet que llama (alta automática como «Tablet N»); None sin cabecera."""
+    if not (x_tablet_id or "").strip():
+        return None
+    return ats.ensure_registered(x_tablet_id, _client_ip(request))
+
+
+def _require_calling_tablet(request: Request, x_tablet_id: Optional[str]) -> dict:
+    row = _calling_tablet(request, x_tablet_id)
+    if not row:
+        raise HTTPException(status_code=400, detail="Falta la cabecera X-Tablet-Id (Android ID)")
+    return row
+
+
 @router.get("/tablet-config")
-def get_tablet_config(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
-    """Configuración por defecto de la sucursal para tablets."""
+def get_tablet_config(
+    request: Request,
+    _user: Annotated[str, Depends(get_tablet_username)],
+    x_tablet_id: Annotated[Optional[str], Header(alias="X-Tablet-Id")] = None,
+) -> dict:
+    """Config de esta tablet (la propia o, si no tiene, la común de la sucursal)."""
+    row = _calling_tablet(request, x_tablet_id)
+    if row:
+        rec = ats.get_tablet_config_record(row["id"])
+        if rec:
+            return rec
     return get_tablet_config_record()
 
 
 @router.get("/tablet-config/revision")
-def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
-    rec = get_tablet_config_record()
-    return {"revision": rec.get("revision"), "updated_at": rec.get("updated_at")}
+def get_tablet_config_revision(
+    request: Request,
+    _user: Annotated[str, Depends(get_tablet_username)],
+    x_tablet_id: Annotated[Optional[str], Header(alias="X-Tablet-Id")] = None,
+) -> dict:
+    rec = get_tablet_config(request, _user, x_tablet_id)
+    return {
+        "revision": rec.get("revision"),
+        "updated_at": rec.get("updated_at"),
+        "inherited": rec.get("inherited"),
+        "tablet": rec.get("tablet"),
+    }
+
+
+@router.put("/tablet-config", summary="Guardar la configuración propia de esta tablet")
+def put_tablet_config(
+    request: Request,
+    user: Annotated[str, Depends(get_tablet_username)],
+    x_tablet_id: Annotated[Optional[str], Header(alias="X-Tablet-Id")] = None,
+    config: dict = Body(...),
+) -> dict:
+    row = _require_calling_tablet(request, x_tablet_id)
+    rec = ats.set_tablet_config(row["id"], config)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    try:
+        ses.record_event(
+            "INFO",
+            f"{row['name']} guardó su configuración",
+            event_type="tablet_config_saved",
+            source="tablet_v1",
+            actor_principal="tablet",
+            actor_username=user,
+            payload={"tablet_id": row["id"], "android_id": row["android_id"], "revision": rec["revision"]},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return rec
+
+
+@router.post("/tablet-config/reset", summary="Volver a la configuración común de la sucursal")
+def reset_tablet_config(
+    request: Request,
+    _user: Annotated[str, Depends(get_tablet_username)],
+    x_tablet_id: Annotated[Optional[str], Header(alias="X-Tablet-Id")] = None,
+) -> dict:
+    row = _require_calling_tablet(request, x_tablet_id)
+    rec = ats.reset_tablet_config(row["id"])
+    if not rec:
+        raise HTTPException(status_code=404, detail="Tablet no encontrada")
+    return rec
 
 
 @router.get(
@@ -150,10 +225,11 @@ def get_tablet_config_revision(_user: Annotated[str, Depends(get_tablet_username
     summary="Comprobar si este Android ID está autorizado en la sucursal",
 )
 def check_authorized_tablet(
+    request: Request,
     android_id: str = Query(..., min_length=1, max_length=128),
 ) -> dict:
     """Público (bajo /api/v1): la tablet lo consulta al arrancar sin JWT."""
-    return ats.check_authorization(android_id)
+    return ats.check_authorization(android_id, _client_ip(request))
 
 
 @router.get("/branch/location", summary="Ubicación y modo actual (COCE / mapa)")

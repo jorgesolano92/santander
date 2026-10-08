@@ -7,6 +7,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 
+from app.db import authorized_tablets_store as ats
 from app.services import tablet_call_hub
 from app.services import tablet_jwt
 
@@ -18,6 +19,7 @@ router = APIRouter()
 async def ws_tablet_calls(
     websocket: WebSocket,
     token: Annotated[Optional[str], Query()] = None,
+    device_id: Annotated[Optional[str], Query(max_length=128)] = None,
 ) -> None:
     jwt_token = token or websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not jwt_token:
@@ -36,11 +38,33 @@ async def ws_tablet_calls(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    client_ip = websocket.client.host if websocket.client else None
+    android_id = (device_id or "").strip().lower() or None
+    tablet: Optional[dict] = None
+    if android_id:
+        auth = ats.check_authorization(android_id, client_ip)
+        if not auth.get("authorized"):
+            log.warning(
+                "Tablet WS rechazado: %s no autorizada (%s)", android_id, auth.get("reason")
+            )
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+        tablet = ats.get_by_android_id(android_id)
+
     await websocket.accept()
     client_id = uuid.uuid4().hex
-    client_ip = websocket.client.host if websocket.client else None
-    await tablet_call_hub.register(client_id, websocket, username, ip=client_ip)
-    await websocket.send_json({"type": "registered", "client_id": client_id, "username": username})
+    await tablet_call_hub.register(
+        client_id, websocket, username, ip=client_ip, android_id=android_id
+    )
+    await websocket.send_json(
+        {
+            "type": "registered",
+            "client_id": client_id,
+            "username": username,
+            "tablet_number": (tablet or {}).get("number"),
+            "tablet_name": (tablet or {}).get("name"),
+        }
+    )
 
     try:
         while True:
