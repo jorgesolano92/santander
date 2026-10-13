@@ -351,7 +351,7 @@ export function SucursalList() {
     <div className="content-view content-view--map">
       <header className="app-header">
         <div>
-          <h1>COCE — Dashboard</h1>
+          <h1>SRC — Dashboard</h1>
 
           <span className="tag">Mapa de sucursales</span>
         </div>
@@ -558,7 +558,7 @@ export function SucursalList() {
                     </ul>
                   ) : (
                     <p className="sucursal-side-log-empty">
-                      Tiempo real desconectado en COCE.
+                      Tiempo real desconectado en SRC.
                     </p>
                   )}
                 </section>

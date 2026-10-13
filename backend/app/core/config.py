@@ -4,6 +4,7 @@ No hace falta crear .env: los valores por defecto están en la clase `Settings`.
 Si existe `backend/.env`, se usa como override opcional; siempre se pueden fijar
 variables de entorno del proceso (mismo nombre en MAYÚSCULAS).
 """
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -71,7 +72,7 @@ class Settings(BaseSettings):
     modbus_mode: str = "tcp"  # tcp | rtu
     modbus_default_port: int = 5000  # Modbus TCP estándar; ETD8A12 suele usar 502 (no 5000).
     modbus_default_slave_id: int = 1
-    modbus_serial_port: str = "COM7"
+    modbus_serial_port: str = "COM7" if os.name == "nt" else "/dev/ttyUSB0"
     modbus_serial_baudrate: int = 9600
     modbus_serial_bytesize: int = 8
     modbus_serial_parity: str = "N"
@@ -162,6 +163,14 @@ class Settings(BaseSettings):
     # Brillo LED Panphone en led_control (escala CSIP 1–9). None = no enviar el campo.
     # Default 5 alineado con el tester / payload de referencia de la placa.
     csip_led_brightness: Optional[int] = 5
+    # Interfaz web de la placa (puerto 8090): ajuste de volumen altavoz/micrófono desde la tablet.
+    panphone_web_user: str = "admin"
+    panphone_web_password: str = ""
+    panphone_web_timeout_s: float = 8.0
+
+    # Tras aplicar una actualización del SRC, salir del proceso para que el supervisor
+    # (systemd con Restart=always) lo relance con el código nuevo. Por defecto solo bajo systemd.
+    panel_restart_after_update: Optional[bool] = None
 
     @model_validator(mode="after")
     def normalize_api_prefix(self) -> "Settings":

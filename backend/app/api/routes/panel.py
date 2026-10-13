@@ -127,59 +127,69 @@ def _is_emergency_toggle_rule(rule_key: str) -> bool:
     return isinstance(rule_key, str) and rule_key.startswith(EMERGENCY_TOGGLE_RULE_PREFIX)
 
 
-def _coce_sync_branch_alerts() -> None:
-    """Emite alertas COCE solo en transición (incendio / emergencia verde)."""
-    global _coce_branch_alert_state
-    fire_key = "senal_de_incendio_activada"
-    fire_active = current_mode == fire_key
-    if fire_active != _coce_branch_alert_state.get("fire"):
-        _coce_branch_alert_state["fire"] = fire_active
-        try:
-            from app.coce.notify import emit_coce_event
+def _coce_emit_branch_alert(
+    alert_type: str,
+    active: bool,
+    rule_key: str,
+    message_on: str,
+    message_off: str,
+    extra: Optional[dict] = None,
+) -> None:
+    if active == _coce_branch_alert_state.get(alert_type):
+        return
+    _coce_branch_alert_state[alert_type] = active
+    payload = {
+        "alert_type": alert_type,
+        "active": active,
+        "rule_key": rule_key,
+        "current_mode": current_mode,
+        "message": message_on if active else message_off,
+        **(extra or {}),
+    }
+    try:
+        from app.coce.notify import emit_coce_event
 
-            emit_coce_event(
-                "branch_alert",
-                {
-                    "alert_type": "fire",
-                    "active": fire_active,
-                    "rule_key": fire_key,
-                    "current_mode": current_mode,
-                    "message": (
-                        "Alarma de incendio activada en la sucursal. "
-                        "Contactar de inmediato con la oficina."
-                        if fire_active
-                        else "Alarma de incendio desactivada."
-                    ),
-                },
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        emit_coce_event("branch_alert", payload)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        add_event(
+            "WARN" if active else "INFO",
+            f"Alerta SRC {'activada' if active else 'resuelta'}: {payload['message']}",
+            1,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _coce_sync_branch_alerts() -> None:
+    """Emite alertas al SRC solo en transición: incendio, emergencia y bloqueo de puertas."""
+    fire_key = "senal_de_incendio_activada"
+    _coce_emit_branch_alert(
+        "fire",
+        current_mode == fire_key,
+        fire_key,
+        "Alarma de incendio activada en la sucursal. Contactar de inmediato con la oficina.",
+        "Alarma de incendio desactivada.",
+    )
 
     emerg_keys = sorted(k for k in active_toggle_rules if _is_emergency_toggle_rule(k))
-    emerg_active = bool(emerg_keys)
-    if emerg_active != _coce_branch_alert_state.get("emergency"):
-        _coce_branch_alert_state["emergency"] = emerg_active
-        try:
-            from app.coce.notify import emit_coce_event
+    _coce_emit_branch_alert(
+        "emergency",
+        bool(emerg_keys),
+        emerg_keys[0] if emerg_keys else "pulsador_emergencia_verde",
+        "Emergencia activada en la sucursal. Contactar de inmediato con la oficina.",
+        "Emergencia desactivada en la sucursal.",
+        {"active_toggle_rules": emerg_keys},
+    )
 
-            emit_coce_event(
-                "branch_alert",
-                {
-                    "alert_type": "emergency",
-                    "active": emerg_active,
-                    "rule_key": emerg_keys[0] if emerg_keys else "pulsador_emergencia_verde",
-                    "active_toggle_rules": emerg_keys,
-                    "current_mode": current_mode,
-                    "message": (
-                        "Emergencia activada en la sucursal. "
-                        "Contactar de inmediato con la oficina."
-                        if emerg_active
-                        else "Emergencia desactivada en la sucursal."
-                    ),
-                },
-            )
-        except Exception:  # noqa: BLE001
-            pass
+    _coce_emit_branch_alert(
+        "door_lockdown",
+        current_mode == DOOR_LOCKDOWN_MODE_KEY,
+        DOOR_LOCKDOWN_MODE_KEY,
+        "La oficina ha entrado en BLOQUEO DE PUERTAS. Contactar con la oficina.",
+        "Bloqueo de puertas finalizado en la sucursal.",
+    )
 
 
 def _zaguan_mode_changed(mode: Optional[str]) -> None:
@@ -191,6 +201,12 @@ def _zaguan_mode_changed(mode: Optional[str]) -> None:
         from app.services import zaguan_orchestrator as zo
 
         zo.on_mode_changed(mode)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.services import locution_service
+
+        locution_service.on_mode_changed(mode)
     except Exception:  # noqa: BLE001
         pass
 
@@ -210,7 +226,13 @@ def _zaguan_rule_executed(rule_key: str, result: dict) -> None:
 HORARIO_MODE_KEY_PREFIX = "horario_"
 EMERGENCY_MODE_RULE_KEYS = frozenset({"senal_de_incendio_activada"})
 EMERGENCY_TOGGLE_RULE_PREFIX = "pulsador_emergencia_verde_"
-_coce_branch_alert_state: Dict[str, bool] = {"fire": False, "emergency": False}
+# «BLOQUEO DE PUERTAS» en la tablet.
+DOOR_LOCKDOWN_MODE_KEY = "horario_manual"
+_coce_branch_alert_state: Dict[str, bool] = {
+    "fire": False,
+    "emergency": False,
+    "door_lockdown": False,
+}
 
 
 def _rule_owns_operational_mode(rule: dict, rule_key: str) -> bool:

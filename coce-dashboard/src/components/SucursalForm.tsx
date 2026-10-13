@@ -132,7 +132,7 @@ export function SucursalForm() {
 
       {createdEnv && (
         <div className="card">
-          <h2>Configuración canal COCE (sucursal)</h2>
+          <h2>Configuración canal SRC (sucursal)</h2>
           <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
             Copia estas variables en <code>backend/.env</code> del PC de la oficina. El token solo se muestra una vez.
           </p>
@@ -189,7 +189,7 @@ export function SucursalForm() {
             autoComplete="off"
           />
           <small style={{ color: 'var(--muted)' }}>
-            El servidor COCE (coce-api) debe poder hacer ping a esta IP. Si backend y COCE están en el mismo PC,
+            El servidor SRC (coce-api) debe poder hacer ping a esta IP. Si backend y SRC están en el mismo PC,
             usa <code>127.0.0.1</code> o <code>localhost</code>.
           </small>
         </label>
@@ -214,7 +214,7 @@ export function SucursalForm() {
         </div>
 
         <label className="field">
-          <span>Estado operativo (COCE)</span>
+          <span>Estado operativo (SRC)</span>
           <select
             value={form.estado}
             onChange={(e) => setForm((f) => ({ ...f, estado: e.target.value as SucursalEstado }))}
@@ -227,7 +227,7 @@ export function SucursalForm() {
 
         <h2>Credenciales API tableta (obligatorio)</h2>
         <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: 0 }}>
-          Usuario del PC industrial para <code>/api/v1/*</code>. Solo el servidor COCE las usará al consultar la
+          Usuario del PC industrial para <code>/api/v1/*</code>. Solo el servidor SRC las usará al consultar la
           oficina.
         </p>
         <label className="field">

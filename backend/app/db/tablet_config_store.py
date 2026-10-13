@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -92,7 +93,32 @@ def merge_tablet_config_with_defaults(saved: dict[str, Any] | None) -> dict[str,
             else:
                 modes[mk] = mv
         merged["modes"] = modes
+    merged["sip"] = {
+        **(base.get("sip") or {}),
+        **(_legacy_sip_account(saved_doors) if not isinstance(saved.get("sip"), dict) else saved["sip"]),
+    }
     return merged
+
+
+def _legacy_sip_account(doors: list[Any]) -> dict[str, Any]:
+    """Configuraciones antiguas repetían la cuenta SIP de la tablet en cada puerta: se toma la primera."""
+    for door in doors:
+        ic = door.get("intercom") if isinstance(door, dict) else None
+        if not isinstance(ic, dict):
+            continue
+        user = str(ic.get("sipUsername") or "").strip()
+        if not user:
+            m = re.match(r"^sips?:([^@]+)@", str(ic.get("sipUri") or "").strip(), re.IGNORECASE)
+            user = m.group(1) if m else ""
+        if not user:
+            continue
+        account: dict[str, Any] = {"extension": user, "enableTLS": bool(ic.get("enableTLS"))}
+        for key, field in (("password", "sipPassword"), ("domain", "sipDomain"), ("server", "sipServer")):
+            value = str(ic.get(field) or "").strip()
+            if value:
+                account[key] = value
+        return account
+    return {}
 
 
 def _row_to_record(row: tuple) -> dict:

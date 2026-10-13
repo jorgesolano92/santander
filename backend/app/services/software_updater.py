@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 import tempfile
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -221,13 +223,35 @@ def apply_panel_update(pending: Optional[dict[str, Any]] = None) -> dict[str, An
         store.mark_panel_applied(version)
         _report(release_id, "success", version)
         log.info("Panel update aplicada version=%s", version)
-        return {"ok": True, "version": version, "restart_required": True}
+        restarting = schedule_restart()
+        return {"ok": True, "version": version, "restart_required": not restarting, "restarting": restarting}
     except Exception as exc:  # noqa: BLE001
         _report(release_id, "failed", version, str(exc))
         log.exception("Error aplicando update panel")
         raise
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _restart_enabled() -> bool:
+    if settings.panel_restart_after_update is not None:
+        return bool(settings.panel_restart_after_update)
+    return bool(os.environ.get("INVOCATION_ID"))
+
+
+def schedule_restart(delay_s: float = 3.0) -> bool:
+    """Sale del proceso tras responder; systemd (Restart=always) lo relanza con el código nuevo."""
+    if not _restart_enabled():
+        return False
+
+    def _exit() -> None:
+        log.warning("Reiniciando backend para cargar la actualización")
+        os._exit(3)
+
+    timer = threading.Timer(delay_s, _exit)
+    timer.daemon = True
+    timer.start()
+    return True
 
 
 def download_apk_to_path(dest: Path, pending: Optional[dict[str, Any]] = None) -> dict[str, Any]:

@@ -317,6 +317,51 @@ def open_door(
     return _open_door_for_tablet(body.door, user)
 
 
+class IntercomAudioBody(BaseModel):
+    speaker: Optional[int] = Field(default=None, ge=0, le=10, description="Volumen altavoz de la placa (0–10)")
+    microphone: Optional[int] = Field(default=None, ge=0, le=10, description="Ganancia micrófono de la placa (0–10)")
+
+
+@router.get("/intercom/{door}/audio", summary="Volumen altavoz/micrófono de la placa Panphone")
+def get_intercom_audio(
+    door: Literal["p1", "p2"],
+    _user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    from app.csip import panphone_web
+
+    try:
+        return panphone_web.get_audio(door)
+    except panphone_web.PanphoneWebError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+
+@router.put("/intercom/{door}/audio", summary="Cambiar volumen altavoz/micrófono de la placa Panphone")
+def put_intercom_audio(
+    door: Literal["p1", "p2"],
+    body: IntercomAudioBody,
+    user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    from app.csip import panphone_web
+
+    try:
+        result = panphone_web.set_audio(door, speaker=body.speaker, microphone=body.microphone)
+    except panphone_web.PanphoneWebError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    try:
+        ses.record_event(
+            "INFO",
+            f"Audio placa {door}: altavoz {result['speaker']}, micrófono {result['microphone']}",
+            event_type="intercom_audio",
+            source="tablet_v1",
+            actor_principal="tablet",
+            actor_username=user,
+            payload=result,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, **result}
+
+
 class SetModeBody(BaseModel):
     action: Literal["set_rule", "set_output"]
     rule_key: Optional[str] = None

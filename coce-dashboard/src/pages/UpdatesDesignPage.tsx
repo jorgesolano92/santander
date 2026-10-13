@@ -227,7 +227,7 @@ export function UpdatesDesignPage() {
       <div className="card">
         <h2>Actualizaciones remotas</h2>
         <p className="muted">
-          Sube APK compiladas (fuera del repo) o publica el panel desde el checkout local del COCE.
+          Sube APK compiladas (fuera del repo) o publica el panel desde el checkout local del SRC.
           Las sucursales reciben aviso por WebSocket y descargan el artefacto desde aquí.
         </p>
         {error ? <p className="error-text">{error}</p> : null}
@@ -270,7 +270,7 @@ export function UpdatesDesignPage() {
       </div>
 
       <div className="card">
-        <h2>Publicar panel (código local COCE)</h2>
+        <h2>Publicar panel (código local SRC)</h2>
         <p className="muted">
           Requiere <code>COCE_PANEL_SOURCE_DIR</code> en el API apuntando al checkout con{' '}
           <code>backend/</code> y <code>frontend/</code>.

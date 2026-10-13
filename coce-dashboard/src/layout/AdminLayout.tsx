@@ -75,9 +75,11 @@ export function AdminLayout() {
     <div className="coce-layout">
       <aside className="coce-sidebar">
         <div className="coce-brand">
-          <div className="coce-brand-dot">C</div>
+          <div className="coce-brand-dot">
+            <img src="/santander-logo.png" alt="Santander" />
+          </div>
           <div>
-            <strong>COCE Santander</strong>
+            <strong>SRC Santander</strong>
             <small>Dashboard operativo</small>
           </div>
         </div>
@@ -102,8 +104,8 @@ export function AdminLayout() {
       <div className="coce-main">
         <header className="coce-topbar">
           <div>
-            <h1>Centro de Operaciones y Control Externo</h1>
-            <p>Datos en servidor COCE central · credenciales de oficina no expuestas al navegador</p>
+            <h1>SRC · Supervisión remota de sucursales</h1>
+            <p>Datos en servidor SRC central · credenciales de oficina no expuestas al navegador</p>
           </div>
           <div className="topbar-badges">
             {user ? (

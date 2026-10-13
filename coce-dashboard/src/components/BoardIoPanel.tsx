@@ -187,9 +187,9 @@ export function BoardIoPanel({
       <section className="board-io-section">
         <h4>Entradas (IN)</h4>
         <p className="board-io-legend">
-          <span className="board-io-legend-item board-io-legend--active">Activa</span>
-          <span className="board-io-legend-item board-io-legend--forced-on">Forzada ON</span>
-          <span className="board-io-legend-item board-io-legend--forced-off">Forzada OFF</span>
+          <span className="board-io-legend-item board-io-legend--forced-on">Override ON</span>
+          <span className="board-io-legend-item board-io-legend--forced-off">Override OFF</span>
+          <span className="board-io-legend-item board-io-legend--active">Real activa</span>
         </p>
         <div className="board-io-grid">
           {Array.from({ length: inputsLen }, (_, i) => {

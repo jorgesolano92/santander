@@ -1,0 +1,21 @@
+[Unit]
+Description=Panel de control de accesos Santander (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+SupplementaryGroups=dialout
+WorkingDirectory=__REPO__/backend
+Environment=PYTHONUNBUFFERED=1
+Environment=BACKEND_RELOAD=0
+ExecStart=__REPO__/backend/.venv/bin/python run.py
+# Tras aplicar una actualización del SRC el proceso sale y systemd lo relanza.
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

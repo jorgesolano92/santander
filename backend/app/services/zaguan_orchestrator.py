@@ -2082,6 +2082,14 @@ def poll_door_sensors() -> None:
         if _pending_abriendo.get(door) and is_open:
             _saw_open_during_pending[door] = True
 
+        if is_open and not was_open:
+            try:
+                from app.services import locution_service
+
+                locution_service.on_door_opened(door, _current_mode)
+            except Exception as e:  # noqa: BLE001
+                log.debug("Locución apertura %s: %s", door, e)
+
         if _try_tablet_maneuver_close(door, is_open=is_open, age_s=age_s):
             pass
         elif _current_mode in STRICT_INTERLOCK_MODES and _door_interlock_active.get(door):

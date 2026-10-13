@@ -62,7 +62,7 @@ export function applyLivePatch(
 
   if (eventType === 'branch_alert') {
     const alertType = String(payload.alert_type ?? '') as BranchAlertType;
-    if (alertType !== 'fire' && alertType !== 'emergency') return null;
+    if (!alertType) return null;
     const nextAlerts = { ...prev.branchAlerts };
     if (payload.active) {
       nextAlerts[alertType] = {
@@ -74,6 +74,8 @@ export function applyLivePatch(
         active_toggle_rules: Array.isArray(payload.active_toggle_rules)
           ? payload.active_toggle_rules.map(String)
           : undefined,
+        door: payload.door as string | undefined,
+        held_seconds: payload.held_seconds as number | undefined,
       };
     } else {
       delete nextAlerts[alertType];

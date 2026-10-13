@@ -191,7 +191,7 @@ class LiveHub:
                     "active_toggle_rules": payload.get("active_toggle_rules") or [],
                 }
             elif msg_type in ("output_changed", "input_override", "board_connected", "board_disconnected"):
-                st.partial = payload
+                st.partial = {**(st.partial or {}), **payload}
             elif msg_type in ("snapshot", "panel_status"):
                 st.modbus = bool(payload.get("modbus"))
                 st.boards_connected = int(payload.get("boards_connected") or 0)

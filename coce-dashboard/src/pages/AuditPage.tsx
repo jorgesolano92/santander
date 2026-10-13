@@ -29,7 +29,7 @@ export function AuditPage() {
     <div className="content-view">
       <header className="app-header">
         <div>
-          <h1>Auditoría COCE</h1>
+          <h1>Auditoría SRC</h1>
           <span className="tag">Acciones administrativas en servidor central</span>
         </div>
       </header>

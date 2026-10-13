@@ -131,7 +131,7 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
         <button
           type="button"
           onClick={togglePanel}
-          title="Mensajes COCE"
+          title="Mensajes SRC"
           aria-expanded={open}
           aria-haspopup="true"
           style={{
@@ -150,7 +150,7 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
           }}
         >
           <FontAwesomeIcon icon={faBell} />
-          Mensajes COCE
+          Mensajes SRC
           {unread > 0 ? (
             <span
               style={{
@@ -175,7 +175,7 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
         {open ? (
           <div
             role="dialog"
-            aria-label="Notificaciones COCE"
+            aria-label="Notificaciones SRC"
             style={{
               position: "absolute",
               top: "calc(100% + 8px)",
@@ -386,7 +386,7 @@ export function CoceMessageNotifications({ apiFetch, wsEvent }) {
                 {toast.body}
               </p>
               {toast.urgent ? (
-                <small style={{ color: "#B91C1C", fontWeight: 700 }}>Mensaje urgente del COCE</small>
+                <small style={{ color: "#B91C1C", fontWeight: 700 }}>Mensaje urgente del SRC</small>
               ) : null}
             </div>
             <button

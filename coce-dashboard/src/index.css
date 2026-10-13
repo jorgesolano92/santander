@@ -69,14 +69,18 @@ a {
   color: #94a3b8;
 }
 .coce-brand-dot {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 8px;
   display: grid;
   place-items: center;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 700;
+  background: #fff;
+  padding: 4px;
+}
+.coce-brand-dot img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .coce-nav {
@@ -1620,6 +1624,12 @@ th {
   max-width: 420px;
   width: 100%;
 }
+.login-logo {
+  display: block;
+  width: 64px;
+  height: auto;
+  margin-bottom: 0.5rem;
+}
 
 .btn-sm {
   padding: 0.35rem 0.75rem;
@@ -1874,6 +1884,29 @@ th {
   background: linear-gradient(90deg, #fef2f2 0%, #fee2e2 100%);
   border-color: #f87171;
   color: #7f1d1d;
+}
+
+.coce-critical-alert--door_lockdown {
+  background: linear-gradient(90deg, #f5f3ff 0%, #ede9fe 100%);
+  border-color: #8b5cf6;
+  color: #4c1d95;
+}
+
+.coce-critical-alert--door_held {
+  background: linear-gradient(90deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #f59e0b;
+  color: #78350f;
+}
+
+.coce-alert-notify-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  background: #1e293b;
+  color: #f8fafc;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
 }
 
 .coce-critical-alert-inner {

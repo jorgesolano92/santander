@@ -26,6 +26,7 @@ function formatWhen(iso?: string | null): string {
 function alertTypeLabel(t: string): string {
   if (t === 'fire') return 'Incendio';
   if (t === 'emergency') return 'Emergencia';
+  if (t === 'door_lockdown') return 'Bloqueo de puertas';
   if (t.startsWith('door_held')) return 'Puerta abierta';
   return t;
 }

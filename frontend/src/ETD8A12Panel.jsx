@@ -6,6 +6,7 @@ import ZaguanEsp32Panel from "./components/zaguan/ZaguanEsp32Panel";
 import { HomeZaguanSimulation } from "./components/zaguan/HomeZaguanSimulation";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
+import LocutionsPanel from "./components/locutions/LocutionsPanel";
 import DevicesAffiliatedPanel from "./components/DevicesAffiliatedPanel";
 import { CoceMessageNotifications } from "./components/CoceMessageNotifications";
 import { SoftwareUpdateBanner } from "./components/SoftwareUpdateBanner";
@@ -63,6 +64,46 @@ const C = {
   blue: "#0066CC",
   blueLight: "#E8F0FF",
 };
+
+const INPUT_LEGEND = [
+  { label: "Override ON", bg: C.greenLight, border: C.greenBorder, fg: C.green },
+  { label: "Override OFF", bg: C.blueLight, border: C.blue, fg: C.blue },
+  { label: "Real activa", bg: C.amberLight, border: C.amberBorder, fg: C.amber },
+  { label: "Inactiva", bg: C.white, border: C.border, fg: C.textSub },
+];
+
+function InputOverrideLegend() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 10,
+        margin: "4px 0 8px",
+        fontSize: 10,
+        color: C.textSub,
+      }}
+    >
+      {INPUT_LEGEND.map((item) => (
+        <span
+          key={item.label}
+          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <span
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: 3,
+              background: item.bg,
+              border: `1px solid ${item.border}`,
+            }}
+          />
+          <span style={{ color: item.fg, fontWeight: 600 }}>{item.label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 export const colors = {
   brand: "var(--template-primary)",
@@ -188,6 +229,7 @@ const TABS = [
   "Template",
   "Tablets",
   "Horarios",
+  "Locuciones",
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
 
@@ -4015,6 +4057,7 @@ export default function ETD8A12Panel() {
                         Click para ciclo: REAL -&gt; FORZADA ON -&gt; FORZADA
                         OFF -&gt; REAL
                       </div>
+                      <InputOverrideLegend />
                       <div
                         style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
                       >
@@ -4626,6 +4669,7 @@ export default function ETD8A12Panel() {
                     <FontAwesomeIcon icon={faBolt} style={{ color: C.amber }} />
                     Entradas
                   </div>
+                  <InputOverrideLegend />
                   <div
                     style={{
                       display: "grid",
@@ -5276,6 +5320,7 @@ export default function ETD8A12Panel() {
         )}
 
         {tab === 8 && <SchedulesPanel apiFetch={apiFetch} onNotify={addUI} />}
+        {tab === 9 && <LocutionsPanel apiFetch={apiFetch} onNotify={addUI} />}
       </div>
       <style>{`*{box-sizing:border-box} ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:${C.borderMid};border-radius:3px}`}</style>
     </div>

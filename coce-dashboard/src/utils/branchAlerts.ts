@@ -1,4 +1,7 @@
-export type BranchAlertType = 'fire' | 'emergency' | 'door_held' | string;
+export type BranchAlertType = 'fire' | 'emergency' | 'door_lockdown' | 'door_held' | string;
+
+/** «BLOQUEO DE PUERTAS» en la tablet. */
+export const DOOR_LOCKDOWN_MODE_KEY = 'horario_manual';
 
 export type BranchAlert = {
   alert_type: BranchAlertType;
@@ -64,6 +67,20 @@ export function deriveAlertsFromBranchState(
   } else {
     delete alerts.emergency;
   }
+
+  if (currentMode === DOOR_LOCKDOWN_MODE_KEY) {
+    alerts.door_lockdown = {
+      alert_type: 'door_lockdown',
+      active: true,
+      rule_key: DOOR_LOCKDOWN_MODE_KEY,
+      current_mode: currentMode,
+      message:
+        alerts.door_lockdown?.message ??
+        'La oficina ha entrado en BLOQUEO DE PUERTAS. Contactar con la oficina.',
+    };
+  } else if (currentMode !== undefined) {
+    delete alerts.door_lockdown;
+  }
   return alerts;
 }
 
@@ -88,6 +105,7 @@ export function alertTitle(alert: BranchAlert): string {
   const t = String(alert.alert_type || '');
   if (t === 'fire') return 'Alarma de incendio';
   if (t === 'emergency') return 'Emergencia en sucursal';
+  if (t === 'door_lockdown') return 'Bloqueo de puertas';
   if (t.startsWith('door_held')) {
     const door = alert.door || t.replace('door_held_', '').toUpperCase();
     return `Puerta abierta (${door})`;

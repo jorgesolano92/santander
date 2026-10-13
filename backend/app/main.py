@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config, panel, panel_ws, tablet_v1, tablet_ws, auth_panel, coce_status
+from app.api.routes import health, status, modes, events, config, panel, panel_ws, tablet_v1, tablet_ws, auth_panel, coce_status, locutions
 from app.csip.routes import router as csip_router
 from app.coce.client import start_coce_client_task
 from app.services import panel_live_hub, tablet_call_hub
@@ -181,6 +181,7 @@ app.include_router(status.router, prefix=settings.api_prefix, tags=["Estado"])
 app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])
 app.include_router(config.router, prefix=settings.api_prefix, tags=["Configuración"])
+app.include_router(locutions.router, prefix=settings.api_prefix)
 app.include_router(panel.router, prefix=settings.api_prefix, tags=["Panel ETD8A12"])
 app.include_router(panel_ws.router, prefix=f"{settings.api_prefix}/panel", tags=["Panel ETD8A12"])
 app.include_router(auth_panel.router, prefix=settings.api_prefix)

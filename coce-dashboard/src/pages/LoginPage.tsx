@@ -75,21 +75,22 @@ export function LoginPage() {
   return (
     <div className="login-page">
       <div className="card login-card">
-        <h1>COCE — Acceso</h1>
+        <img className="login-logo" src="/santander-logo.png" alt="Santander" />
+        <h1>SRC — Acceso</h1>
         <p style={{ color: 'var(--muted)', marginTop: 0 }}>
           Servidor central <code>coce-api</code>. Las sucursales y credenciales de oficina se guardan en el servidor,
           no en este navegador.
         </p>
         {firstUser && (
           <div className="alert alert-info">
-            No hay administradores COCE. Crea el <strong>primer usuario</strong> (mínimo 8 caracteres en la
+            No hay administradores SRC. Crea el <strong>primer usuario</strong> (mínimo 8 caracteres en la
             contraseña).
           </div>
         )}
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={showRegister ? onRegister : onLogin}>
           <label className="field">
-            <span>Usuario administrador COCE</span>
+            <span>Usuario administrador SRC</span>
             <input
               type="text"
               value={username}
@@ -111,7 +112,7 @@ export function LoginPage() {
           </label>
           {showRegister && needsSetupToken && (
             <label className="field">
-              <span>Token de alta COCE (obligatorio)</span>
+              <span>Token de alta SRC (obligatorio)</span>
               <input
                 type="password"
                 value={setupToken}
@@ -147,7 +148,7 @@ export function LoginPage() {
         </form>
         {setup.hasUsers && !canRegister && (
           <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: 0 }}>
-            El alta de nuevos usuarios está deshabilitada. Contacta con quien administra el servidor COCE o define{' '}
+            El alta de nuevos usuarios está deshabilitada. Contacta con quien administra el servidor SRC o define{' '}
             <code>COCE_SETUP_TOKEN</code> en <code>coce-api/.env</code> para permitir altas con token.
           </p>
         )}

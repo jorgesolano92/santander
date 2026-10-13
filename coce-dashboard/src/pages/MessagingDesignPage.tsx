@@ -164,9 +164,9 @@ export function MessagingDesignPage() {
       <div className="card">
         <h2>Mensajería avanzada</h2>
         <p className="muted">
-          Envía avisos del COCE a las sucursales. Llegan en tiempo real a la tablet como
-          notificación emergente y quedan en el historial. El estado pasa a «Leído» cuando
-          se abre en panel o tablet.
+          Envía avisos del SRC a las sucursales. Llegan en tiempo real a la tablet a pantalla
+          completa, con aviso sonoro, y quedan en el historial. El estado pasa a «Leído» cuando
+          se confirman en la tablet o se abren en el panel.
         </p>
         {error ? <div className="alert alert-error">{error}</div> : null}
         <div className="messaging-compose-grid">
@@ -259,7 +259,7 @@ export function MessagingDesignPage() {
               </>
             ) : (
               <p className="muted">
-                El mensaje se enviará a todas las sucursales registradas en el COCE.
+                El mensaje se enviará a todas las sucursales registradas en el SRC.
               </p>
             )}
           </aside>

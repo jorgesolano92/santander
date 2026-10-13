@@ -58,11 +58,17 @@ export function SoftwareUpdateBanner({ apiFetch }) {
         }
         setPending(null);
       } else {
-        await apiFetch("/software-update/apply", { method: "POST" });
+        const res = await apiFetch("/software-update/apply", { method: "POST" });
         setPending(null);
-        window.alert(
-          "Actualización aplicada. Reinicia el servicio del panel para cargar el nuevo código.",
-        );
+        if (res?.restarting) {
+          window.alert(
+            "Actualización aplicada. El panel se reinicia solo; recarga la página en unos segundos.",
+          );
+        } else {
+          window.alert(
+            "Actualización aplicada. Reinicia el servicio del panel para cargar el nuevo código.",
+          );
+        }
       }
     } catch (e) {
       setError(e?.message || String(e));

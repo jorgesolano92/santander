@@ -457,7 +457,7 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
               Ubicación de la sucursal
             </div>
             <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-              Coordenadas para el mapa del COCE. La dirección es solo referencia
+              Coordenadas para el mapa del SRC. La dirección es solo referencia
               en consola.
             </div>
             {locationDirty ? (

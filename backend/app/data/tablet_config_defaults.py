@@ -48,12 +48,6 @@ def _intercom_base(
         "csipApiUseHttps": False,
         "csipApiKey": CSIP_API_KEY_DEFAULT,
         "csipBearerToken": "",
-        "sipSignaling": "pbx",
-        "sipP2pPeerIp": "",
-        "csipCallTargetType": "default",
-        "csipCallTarget": "",
-        "csipCallUser": "",
-        "csipCallRecording": False,
         "csipButtonId": csip_button_id,
         "enableOnvifEvents": True,
         "enableTLS": False,
@@ -99,11 +93,6 @@ def _intercom_panphone_sip(
     ic.update(
         {
             "snapshotPath": "camara.php",
-            "sipUri": "sip:201@192.168.1.154",
-            "sipUsername": "201",
-            "sipPassword": "Santander201",
-            "sipDomain": "192.168.1.154",
-            "sipServer": "192.168.1.154:8088/ws",
             "sipCallDestination": sip_call_destination,
             "csipApiHost": f"{camera_ip}:8090",
             "doorControlUsername": "ceroideas",
@@ -128,7 +117,7 @@ def _intercom_p1_panphone() -> dict[str, Any]:
         switch=7,
         csip_button_id="p1",
         door_endpoint="api/v1/door/open/p1",
-        sip_call_destination="sip:101@192.168.1.154",
+        sip_call_destination="101",
     )
 
 
@@ -141,7 +130,7 @@ def _intercom_p2_panphone() -> dict[str, Any]:
         switch=7,
         csip_button_id="p2",
         door_endpoint="api/v1/door/open/p2",
-        sip_call_destination="sip:100@192.168.1.154",
+        sip_call_destination="100",
     )
 
 
@@ -215,6 +204,14 @@ def get_builtin_default_tablet_config() -> dict[str, Any]:
                 ),
             },
         ],
+        # Cuenta SIP de la tablet (común a sus intercomunicadores). Otra tablet: 202 / Santander202.
+        "sip": {
+            "extension": "201",
+            "password": "Santander201",
+            "domain": "192.168.1.154",
+            "server": "192.168.1.154:8088/ws",
+            "enableTLS": False,
+        },
         "network": {
             "consoleIP": "192.168.1.155",
             "netmask": "255.255.255.0",
