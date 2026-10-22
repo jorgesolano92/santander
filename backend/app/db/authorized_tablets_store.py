@@ -90,10 +90,11 @@ def _init() -> None:
             "SELECT id FROM authorized_tablets_settings WHERE id = 1"
         ).fetchone()
         if not row:
+            # Por defecto exigir autorización (T45): tablets nuevas quedan pendientes.
             conn.execute(
                 """
                 INSERT INTO authorized_tablets_settings (id, enforcement_enabled, updated_at)
-                VALUES (1, 0, ?)
+                VALUES (1, 1, ?)
                 """,
                 (_now(),),
             )

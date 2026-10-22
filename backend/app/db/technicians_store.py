@@ -8,6 +8,11 @@ from typing import Any, Optional
 from app.db.session import get_connection
 
 
+def _normalize_dni(dni: str) -> str:
+    """Quita espacios, guiones y puntos; mayúsculas (T46)."""
+    return "".join(ch for ch in str(dni or "").upper() if ch.isalnum())
+
+
 def _init_db() -> None:
     conn = get_connection()
     conn.execute(
@@ -34,7 +39,7 @@ def replace_all(items: list[dict[str, Any]]) -> int:
     conn.execute("DELETE FROM technicians")
     count = 0
     for item in items:
-        dni = str(item.get("dni") or "").strip().upper()
+        dni = _normalize_dni(str(item.get("dni") or ""))
         if not dni:
             continue
         conn.execute(
@@ -61,14 +66,19 @@ def replace_all(items: list[dict[str, Any]]) -> int:
 
 def find_by_dni(dni: str) -> Optional[dict[str, Any]]:
     _init_db()
-    key = dni.strip().upper()
+    key = _normalize_dni(dni)
+    if not key:
+        return None
     conn = get_connection()
+    # Comparar también DNI almacenado sin separadores
     row = conn.execute(
         """
         SELECT dni, nombre, apellidos, empresa, valido_hasta, active, updated_at
-        FROM technicians WHERE UPPER(dni) = ?
+        FROM technicians
+        WHERE UPPER(REPLACE(REPLACE(REPLACE(dni, ' ', ''), '-', ''), '.', '')) = ?
+           OR UPPER(dni) = ?
         """,
-        (key,),
+        (key, key),
     ).fetchone()
     conn.close()
     if not row:
