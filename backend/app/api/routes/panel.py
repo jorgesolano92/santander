@@ -1560,21 +1560,42 @@ def _read_output_cached(board_id: int, channel: int) -> bool:
     return False
 
 
+def _read_output_for_snapshot(board_id: int, channel: int) -> bool:
+    """Estado OUT lo más fresco posible antes de apagar (evita snapshot vacío por caché viejo)."""
+    if io_state.get(board_id, {}).get("connected"):
+        try:
+            with _board_modbus_lock(board_id):
+                _read_all_io(board_id, _modbus_lock_held=True)
+        except Exception:  # noqa: BLE001
+            pass
+    return _read_output_cached(board_id, channel)
+
+
 def _snapshot_temp_deactivate_outputs(rule: dict, rule_key: str) -> None:
     """Guarda en runtime qué OUT de deactivate_outputs estaban ON antes de apagarlos."""
     if not _rule_deactivate_outputs_temporary(rule):
         return
     _cancel_pending_temp_deactivate_restore(rule_key)
     runtime = _default_rule_runtime(rule_key)
+    prev = dict(runtime.get("temp_deact_snapshot") or {})
     snap: Dict[str, bool] = {}
     for do_code in rule.get("deactivate_outputs") or []:
         try:
             board_id, channel = _parse_out_code(do_code)
         except HTTPException:
             continue
-        if _read_output_cached(board_id, channel):
+        if _read_output_for_snapshot(board_id, channel):
+            snap[do_code] = True
+        elif prev.get(do_code):
             snap[do_code] = True
     runtime["temp_deact_snapshot"] = snap
+    if not snap:
+        add_event(
+            "WARN",
+            f"{rule_key}: desactivación temporal sin OUT previos ON en snapshot "
+            f"(nada que restaurar al soltar la regla)",
+            1,
+        )
 
 
 def _clear_temp_deactivate_snapshot(rule_key: str) -> None:
@@ -1918,11 +1939,13 @@ def _evaluate_pulse_5_sg_rule(
         runtime["pulse_until"] = None
 
     trigger_code = rule.get("trigger", "IN_01_01")
-    trigger_active = _read_input_effective(
+    # Seguimiento ON/OFF: IN efectivo (override incluido). Si solo se usara físico, override OFF
+    # con IN real aún ON dejaría la regla “colgada” y no restauraría OUT temporales.
+    trigger_active_follow = _read_input_effective(
         trigger_code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
-        physical_inputs=physical_inputs,
+        physical_inputs=False,
     )
     blocked_codes = rule.get("blocked_if_active", [])
     blocked_active_codes = [
@@ -1935,18 +1958,19 @@ def _evaluate_pulse_5_sg_rule(
             physical_inputs=physical_inputs,
         )
     ]
-    desired = bool(trigger_active) and not blocked_active_codes
+    desired = bool(trigger_active_follow) and not blocked_active_codes
     last = bool(runtime.get("last_follow_on"))
-    rising = bool(trigger_active) and not bool(runtime.get("last_trigger_active"))
+    snap_pending = any((runtime.get("temp_deact_snapshot") or {}).values())
+    rising = bool(trigger_active_follow) and not bool(runtime.get("last_trigger_active"))
 
     if rising and blocked_active_codes:
         _clear_trigger_input_override(trigger_code)
-        runtime["last_trigger_active"] = trigger_active
+        runtime["last_trigger_active"] = trigger_active_follow
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
         return {
             "executed": False,
             "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
-            "trigger_input_active": trigger_active,
+            "trigger_input_active": trigger_active_follow,
             "blocked_inputs": blocked_active_codes,
             "follow_on": False,
             "pulse_seconds": 0,
@@ -1960,7 +1984,7 @@ def _evaluate_pulse_5_sg_rule(
             return {
                 "executed": False,
                 "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
-                "trigger_input_active": trigger_active,
+                "trigger_input_active": trigger_active_follow,
                 "blocked_inputs": blocked_active_codes,
                 "follow_on": False,
                 "pulse_seconds": 0,
@@ -1969,13 +1993,13 @@ def _evaluate_pulse_5_sg_rule(
         _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         runtime["last_follow_on"] = True
-        runtime["last_trigger_active"] = trigger_active
+        runtime["last_trigger_active"] = trigger_active_follow
         runtime["last_executed_at"] = datetime.now().isoformat()
         add_event("OK", f"Seguimiento radar (manual): ON {rule_key}", 1)
         return {
             "executed": True,
             "mode": current_mode,
-            "trigger_input_active": trigger_active,
+            "trigger_input_active": trigger_active_follow,
             "blocked_inputs": blocked_active_codes,
             "outputs_activated": rule.get("activate_outputs", []),
             "follow_on": True,
@@ -1984,7 +2008,7 @@ def _evaluate_pulse_5_sg_rule(
             "timestamp": runtime["last_executed_at"],
         }
 
-    runtime["last_trigger_active"] = trigger_active
+    runtime["last_trigger_active"] = trigger_active_follow
 
     if desired and not last:
         _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
@@ -1995,7 +2019,7 @@ def _evaluate_pulse_5_sg_rule(
         return {
             "executed": True,
             "mode": current_mode,
-            "trigger_input_active": trigger_active,
+            "trigger_input_active": trigger_active_follow,
             "blocked_inputs": blocked_active_codes,
             "outputs_activated": rule.get("activate_outputs", []),
             "follow_on": True,
@@ -2004,18 +2028,19 @@ def _evaluate_pulse_5_sg_rule(
             "timestamp": runtime["last_executed_at"],
         }
 
-    if not desired and last:
+    if not desired and (last or snap_pending):
         restored = _restore_temp_deactivate_outputs(
             rule, rule_key, apply_outputs_to_hardware, origin=f"radar_off:{rule_key}"
         )
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
+        if last:
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
         runtime["last_follow_on"] = False
         runtime["last_executed_at"] = datetime.now().isoformat()
         add_event("INFO", f"Radar OFF o bloqueo → salidas OFF {rule_key}", 1)
         return {
             "executed": True,
             "mode": current_mode,
-            "trigger_input_active": trigger_active,
+            "trigger_input_active": trigger_active_follow,
             "blocked_inputs": blocked_active_codes,
             "outputs_activated": rule.get("activate_outputs", []),
             "follow_on": False,
@@ -2028,7 +2053,8 @@ def _evaluate_pulse_5_sg_rule(
     return {
         "executed": False,
         "reason": "Sin cambio de nivel",
-        "trigger_input_active": trigger_active,
+        "trigger_input_active": trigger_active_follow,
+        "blocked_inputs": blocked_active_codes,
         "follow_on": desired,
         "pulse_seconds": 0,
         "follow_mode": True,
