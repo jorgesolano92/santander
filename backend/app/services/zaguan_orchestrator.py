@@ -426,6 +426,17 @@ def _schedule_csip_led_push(states: dict[PulsadorId, EstadoLed]) -> None:
 
             def _one(ch: str, est: EstadoLed, cmd_suffix: str) -> tuple[str, str, Optional[str]]:
                 try:
+                    # Durante ventana WinHose el exterior usa cmd firmware winhouse
+                    # (verde ~15 s), no el estado lógico libre.
+                    door = PULSADOR_TO_DOOR.get(ch)  # type: ignore[arg-type]
+                    if (
+                        est == "libre"
+                        and door is not None
+                        and EXTERIOR_PULSADOR.get(door) == ch
+                        and _winhose_window_active_for(door)
+                    ):
+                        csip_client.led_control_winhose(ch, brightness=brightness)
+                        return ch, "winhouse", None
                     csip_client.led_control_for_logical_channel(
                         ch, color=cmd_suffix, brightness=brightness
                     )
@@ -830,19 +841,49 @@ async def _winhose_window_timer(door: PuertaId, until: float) -> None:
             log.debug("Reposo cerrado tras ventana WinHose: %s", e)
 
 
+def _schedule_csip_winhose_push(channel: PulsadorId) -> None:
+    """Panphone: ``cmd`` ``pX:winhouse`` (verde ~15 s en firmware)."""
+
+    async def _worker() -> None:
+        def _run() -> None:
+            try:
+                from app.core.config import settings
+                from app.csip import client as csip_client
+                from app.csip.devices import get_device
+            except Exception as e:  # noqa: BLE001
+                log.debug("CSIP winhouse import: %s", e)
+                return
+            if not csip_client.is_configured() or not get_device(channel):
+                return
+            brightness = settings.csip_led_brightness
+            if brightness is not None:
+                brightness = max(1, min(9, int(brightness)))
+            try:
+                csip_client.led_control_winhose(channel, brightness=brightness)
+                log.info("CSIP winhouse canal=%s OK", channel)
+            except Exception as e:  # noqa: BLE001
+                log.warning("CSIP winhouse canal=%s falló: %s", channel, e)
+
+        await asyncio.to_thread(_run)
+
+    _schedule_coro(_worker())
+
+
 def _apply_winhose_window_leds(door: PuertaId) -> None:
-    """LEDs libre durante ventana WinHose (animación parpadeo en el dispositivo)."""
+    """LEDs libre durante ventana WinHose (ESP32 parpadeo; Panphone cmd winhouse)."""
+    ch = EXTERIOR_PULSADOR[door]
     if _current_mode == "horario_autoservicio":
         _apply_led_map(
             {"p1": "libre", "p2": "libre", "p3": "libre", "p4": "libre"}
         )
     elif _current_mode == "horario_cerrado":
-        ch = EXTERIOR_PULSADOR[door]
         with _led_state_lock:
             _led_states[ch] = "libre"
             _sync_led_memory()
         _publish_zaguan_led_state()
         _schedule_led_device_push({ch: "libre"})
+    # Panphone (custom1): estado firmware winhouse — verde ~15 s en la placa.
+    _schedule_csip_winhose_push(ch)
 
 
 def _start_winhose_window(door: PuertaId) -> None:

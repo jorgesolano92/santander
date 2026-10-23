@@ -154,6 +154,19 @@ def button_event(
     return _post("button_event.php", payload, device_id=device_id)
 
 
+def _led_id_for_device(device: CsipDevice) -> str:
+    """Id LED en la placa (p1/p2/ALL) según config y si hay hermanos en el mismo host."""
+    configured = (device.led or "ALL").strip().lower()
+    if configured in ("p1", "p2", "a", "b"):
+        from app.csip.devices import get_csip_devices
+
+        siblings = [
+            d for d in get_csip_devices().values() if d.base_url == device.base_url
+        ]
+        return configured if len(siblings) > 1 else "ALL"
+    return "ALL"
+
+
 def led_control_for_logical_channel(
     channel: str,
     *,
@@ -170,16 +183,7 @@ def led_control_for_logical_channel(
     device = get_device(channel)
     if not device:
         raise CsipClientError(f"Sin dispositivo CSIP para canal {channel}")
-    configured = (device.led or "ALL").strip().lower()
-    if configured in ("p1", "p2", "a", "b"):
-        from app.csip.devices import get_csip_devices
-
-        siblings = [
-            d for d in get_csip_devices().values() if d.base_url == device.base_url
-        ]
-        led_id = configured if len(siblings) > 1 else "ALL"
-    else:
-        led_id = "ALL"
+    led_id = _led_id_for_device(device)
 
     color_l = (color or "").strip().lower()
     # Si viene "efectovuelta:orange" (legacy), quedarnos con el color.
@@ -208,5 +212,29 @@ def led_control_for_logical_channel(
         device.id,
         led_id,
         estado or color_l,
+    )
+    return led_control(body, device_id=device.id)
+
+
+def led_control_winhose(
+    channel: str,
+    *,
+    brightness: Optional[int] = None,
+) -> dict[str, Any]:
+    """
+    Llave WinHose: el firmware aplica verde ~15 s (``cmd`` ``p1:winhouse``).
+
+    El backend mantiene la ventana lógica; Panphone anima con su estado winhouse.
+    """
+    device = get_device(channel)
+    if not device:
+        raise CsipClientError(f"Sin dispositivo CSIP para canal {channel}")
+    led_id = _led_id_for_device(device)
+    body = LedControlRequest(cmd=f"{led_id}:winhouse", brightness=brightness)
+    log.info(
+        "CSIP LED winhouse channel=%s device=%s cmd=%s:winhouse",
+        channel,
+        device.id,
+        led_id,
     )
     return led_control(body, device_id=device.id)
