@@ -8,6 +8,7 @@ __pycache__/
 # Claves TLS (el certificado de servidor vive en data/tls/)
 *.key
 
-# Base de datos SQLite
+# Runtime local (SQLite, TLS, etc.) — las reglas de modos sí se versionan
 data/
+!data/panel_rules.json
 *.db
