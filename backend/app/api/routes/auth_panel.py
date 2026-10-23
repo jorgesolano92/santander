@@ -26,8 +26,11 @@ class TokenResponse(BaseModel):
 
 
 def _register_allowed(setup_header: Optional[str]) -> None:
-    token = (settings.panel_setup_token or "").strip()
     n = sus.count_users()
+    # Primer usuario: siempre permitido (bootstrap desde el login del panel).
+    if n == 0:
+        return
+    token = (settings.panel_setup_token or "").strip()
     hdr = (setup_header or "").strip()
     if token:
         if hdr != token:
@@ -36,12 +39,17 @@ def _register_allowed(setup_header: Optional[str]) -> None:
                 detail="Cabecera X-Panel-Setup-Token incorrecta o ausente",
             )
         return
-    if n == 0:
-        return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Ya existen usuarios: define PANEL_SETUP_TOKEN y envía X-Panel-Setup-Token para registrar más",
     )
+
+
+@router.get("/setup-status")
+def auth_setup_status() -> dict:
+    """Indica si el panel aún no tiene usuarios (primer acceso)."""
+    n = sus.count_users()
+    return {"needs_first_user": n == 0, "user_count": n}
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
