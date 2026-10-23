@@ -302,6 +302,10 @@ def build():
             ["MODBUS_SERIAL_*", "Puerto COM, baudios, etc. (si RTU)"],
             ["TABLET_JWT_SECRET / PANEL_JWT_SECRET", "Secretos JWT (obligatorios en producción)"],
             ["TABLET_JWT_EXPIRE_MINUTES", "Caducidad token tablet (p.ej. 10080 = 7 días)"],
+            [
+                "PANEL_SETUP_TOKEN",
+                "Opcional. Solo para registrar usuarios adicionales (el primero no lo necesita)",
+            ],
             ["COCE_WS_ENABLED / COCE_WS_URL", "Enlace saliente al Centro de Control"],
             ["COCE_INSTALLATION_ID / COCE_INGEST_TOKEN", "Identidad de la sucursal en COCE"],
             ["COCE_MESSAGE_SEND_WEB / TABLET", "Reparto de mensajes a panel y/o tablets"],
@@ -312,15 +316,32 @@ def build():
     )
     add_para(
         doc,
-        "La configuración de placas, reglas, horarios y zaguán se gestiona también desde el panel web "
-        "y se persiste en SQLite (backend/data/control_accesos.db). "
+        "La configuración de placas, horarios y zaguán se gestiona desde el panel web y se persiste "
+        "en SQLite (backend/data/control_accesos.db). Los modos de operación (reglas) viven en "
+        "backend/data/panel_rules.json (versionado en el repositorio). "
         "Overrides de ESP32 por canal: backend/data/zaguan_device_target.json.",
     )
 
     add_heading_styled(doc, "4.6 Primer acceso al panel web", 2)
-    add_bullet(doc, "Abrir http://<IP-PC>:8000 (producción) o :5173 (desarrollo).")
-    add_bullet(doc, "Registrar el primer usuario de panel (flujo de setup / PANEL_SETUP_TOKEN según .env).")
-    add_bullet(doc, "Configurar las 3 placas ETD8A12 (IP/puerto o slave_id), reglas y modos.")
+    add_para(
+        doc,
+        "Si la base de datos no tiene usuarios de panel (tabla system_users vacía), la pantalla "
+        "de login detecta el primer acceso y permite crear el administrador sin usar Swagger ni "
+        "PANEL_SETUP_TOKEN.",
+    )
+    add_bullet(doc, "Abrir http://<IP-PC>:8000/login (producción) o http://localhost:5173/login (desarrollo).")
+    add_bullet(
+        doc,
+        "Primer acceso: el formulario pide usuario, contraseña, repetir contraseña y confirmar "
+        "que los datos son correctos (se guardan con hash PBKDF2 en la BD local).",
+    )
+    add_bullet(doc, "Al confirmar: se crea el usuario y se inicia sesión automáticamente.")
+    add_bullet(
+        doc,
+        "Accesos posteriores: login normal (usuario/contraseña). Para dar de alta más usuarios "
+        "de panel hace falta PANEL_SETUP_TOKEN y POST /api/auth/register (p.ej. /docs).",
+    )
+    add_bullet(doc, "Configurar las 3 placas ETD8A12 (IP/puerto o slave_id); revisar modos en la pestaña Modos.")
     add_bullet(doc, "Verificar lectura de entradas/salidas en el panel.")
 
     add_heading_styled(doc, "4.7 Actualización del sistema local", 2)
