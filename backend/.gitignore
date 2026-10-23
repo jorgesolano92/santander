@@ -9,6 +9,6 @@ __pycache__/
 *.key
 
 # Runtime local (SQLite, TLS, etc.) — las reglas de modos sí se versionan
-data/
+data/*
 !data/panel_rules.json
 *.db
