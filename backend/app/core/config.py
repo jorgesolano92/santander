@@ -168,6 +168,15 @@ class Settings(BaseSettings):
     panphone_web_password: str = ""
     panphone_web_timeout_s: float = 8.0
 
+    # Locuciones Panphone (audio_play.php) en extendido/autoservicio.
+    # INs de «cajero ocupado» (presencia) de los 3 módulos, coma-separados.
+    csip_atm_occupied_inputs: str = "IN_01_11,IN_02_10,IN_03_10"
+    # Dispositivo CSIP donde se reproducen (videoportero exterior = p1 / .80).
+    csip_locution_device_id: str = "p1"
+    # Segundos de ocupación continua antes de «demora_operacion».
+    csip_atm_delay_locution_seconds: int = 300
+    csip_audio_timeout_s: float = 8.0
+
     # Tras aplicar una actualización del SRC, salir del proceso para que el supervisor
     # (systemd con Restart=always) lo relance con el código nuevo. Por defecto solo bajo systemd.
     panel_restart_after_update: Optional[bool] = None

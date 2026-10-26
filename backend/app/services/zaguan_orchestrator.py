@@ -2109,6 +2109,13 @@ def poll_door_sensors() -> None:
     if _current_mode in WINHOSE_MODES:
         poll_winhose()
 
+    try:
+        from app.services import panphone_locution_service
+
+        panphone_locution_service.poll_atm_occupancy(_current_mode)
+    except Exception as e:  # noqa: BLE001
+        log.debug("Locución Panphone ocupación: %s", e)
+
     now = time.monotonic()
     panel = _import_panel()
     for door, in_code in DOOR_OPEN_SENSOR.items():
@@ -2234,6 +2241,16 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
         panel_mode,
         ts,
     )
+
+    # Locuciones Panphone 1/3: botón exterior P1 en extendido/autoservicio
+    # (independiente de si la apertura se permite o se rechaza por ocupación).
+    if pulsador == "p1":
+        try:
+            from app.services import panphone_locution_service
+
+            panphone_locution_service.on_exterior_p1_pressed(_current_mode)
+        except Exception as e:  # noqa: BLE001
+            log.debug("Locución Panphone pulsación p1: %s", e)
 
     from app.services import tablet_call_hub
 

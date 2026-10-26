@@ -154,6 +154,21 @@ def button_event(
     return _post("button_event.php", payload, device_id=device_id)
 
 
+def audio_play(
+    locucion: str,
+    *,
+    device_id: Optional[str] = None,
+    timeout_s: Optional[float] = None,
+) -> dict[str, Any]:
+    """Reproduce una locución embebida en la placa (`audio_play.php`)."""
+    name = (locucion or "").strip()
+    if not name:
+        raise CsipClientError("audio_play requiere locucion")
+    payload = {"locucion": name}
+    log.info("CSIP audio_play device=%s → %s", device_id or "(default)", payload)
+    return _post("audio_play.php", payload, device_id=device_id, timeout_s=timeout_s)
+
+
 def _led_id_for_device(device: CsipDevice) -> str:
     """Id LED en la placa (p1/p2/ALL) según config y si hay hermanos en el mismo host."""
     configured = (device.led or "ALL").strip().lower()
