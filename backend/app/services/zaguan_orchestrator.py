@@ -1348,7 +1348,13 @@ def _release_locks_before_open(door: PuertaId) -> tuple[dict[str, bool], list[st
             _set_output_direct(lock_code, False)
             released.append(lock_code)
             log.info("Bulones OFF antes apertura %s: %s", door, lock_code)
-    _locks_to_restore[door] = released
+    prev = list(_locks_to_restore.get(door) or [])
+    if _current_mode == "horario_cerrado":
+        # Oficina cerrada: al cerrar deben volver ON aunque ya estuvieran OFF
+        # (regla Modbus concurrente o restauración previa fallida).
+        _locks_to_restore[door] = list(DOOR_LOCK_OUTPUTS[door])
+    else:
+        _locks_to_restore[door] = list(dict.fromkeys(prev + released))
     return locks_before, released
 
 
@@ -1392,11 +1398,11 @@ def _lock_restore_delay_s() -> float:
     return max(0.0, delay)
 
 
-def _restore_locks_after_close(door: PuertaId) -> None:
-    """Vuelve a activar los bulones que se soltaron para abrir desde tablet."""
+def _restore_locks_after_close(door: PuertaId) -> bool:
+    """Vuelve a activar los bulones pendientes. False si IN4 sigue abierto (hay que reintentar)."""
     pending = _locks_to_restore.get(door) or []
     if not pending:
-        return
+        return True
     # Seguridad: no echar bulones si el sensor sigue marcando abierta.
     try:
         _refresh_board_for_door(door)
@@ -1407,7 +1413,7 @@ def _restore_locks_after_close(door: PuertaId) -> None:
                 pending,
             )
             _door_was_open[door] = True
-            return
+            return False
     except Exception as e:  # noqa: BLE001
         log.debug("No se pudo verificar sensor antes de bulones %s: %s", door, e)
     for lock_code in pending:
@@ -1415,10 +1421,12 @@ def _restore_locks_after_close(door: PuertaId) -> None:
         log.info("Bulones ON tras cierre %s: %s", door, lock_code)
     _locks_to_restore[door] = []
     _notify_panel_outputs_written(pending, on=True)
+    return True
 
 
 async def _delayed_restore_locks(door: PuertaId, delay_s: float) -> None:
     """Espera delay_s tras cierre confirmado y luego activa bulones."""
+    retry = False
     try:
         await asyncio.sleep(delay_s)
         if _current_mode not in (
@@ -1430,23 +1438,30 @@ async def _delayed_restore_locks(door: PuertaId, delay_s: float) -> None:
             return
         if not (_locks_to_restore.get(door) or []):
             return
-        # Si la puerta se reabrió durante el settle, no echar bulones; esperar nuevo cierre.
+        # Si la puerta se reabrió durante el settle, no echar bulones; reintentar.
         still_open = await asyncio.to_thread(_door_is_open, door)
         if still_open:
             log.info(
-                "Bulones %s: puerta reabierta durante settle; se espera nuevo cierre",
+                "Bulones %s: puerta reabierta durante settle; se reagenda restauración",
                 door,
             )
             _door_was_open[door] = True
+            retry = True
             return
-        await asyncio.to_thread(_restore_locks_after_close, door)
+        restored = await asyncio.to_thread(_restore_locks_after_close, door)
+        if not restored:
+            retry = True
     except asyncio.CancelledError:
         return
     except Exception as e:  # noqa: BLE001
         log.warning("Error restaurando bulones %s tras retardo: %s", door, e)
+        retry = bool(_locks_to_restore.get(door))
     finally:
-        if _lock_restore_tasks.get(door) is not None:
+        cur = asyncio.current_task()
+        if _lock_restore_tasks.get(door) is cur:
             _lock_restore_tasks[door] = None
+        if retry and (_locks_to_restore.get(door) or []):
+            _schedule_lock_restore_after_close(door)
 
 
 def _schedule_lock_restore_after_close(door: PuertaId) -> None:
@@ -1518,8 +1533,6 @@ def _door_pulse_with_locks_sync(door: PuertaId, *, restore_locks: bool) -> None:
         _set_output_direct(open_code, False)
         if restore_locks:
             _restore_locks_after_close(door)
-        elif not released:
-            _locks_to_restore[door] = []
     except Exception:
         if released and not restore_locks:
             for lock_code in released:
@@ -1579,7 +1592,7 @@ def open_door_from_tablet(door: PuertaId) -> dict[str, Any]:
         "locks_released": locks_released,
         "open_output": open_code,
         "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
-        "locks_restore_on_close": bool(locks_released),
+        "locks_restore_on_close": bool(_locks_to_restore.get(door)),
         "leds": get_led_states(),
     }
 
@@ -2167,6 +2180,20 @@ def poll_door_sensors() -> None:
             _on_door_closed(door, source="post_pulse")
         _door_was_open[door] = is_open
         _track_door_held_alerts(door, is_open=is_open, now=now)
+        # Red de seguridad: maniobra ya cerrada, bulones pendientes y sin tarea.
+        if (
+            not is_open
+            and not _pending_abriendo.get(door)
+            and not _door_interlock_active.get(door)
+            and (_locks_to_restore.get(door) or [])
+            and _lock_restore_tasks.get(door) is None
+            and _current_mode
+            in (
+                "horario_cerrado",
+                *TABLET_LOCK_RELEASE_MODES,
+            )
+        ):
+            _schedule_lock_restore_after_close(door)
 
     if _current_mode in INTERLOCK_MODES:
         _sync_interlock_leds()
