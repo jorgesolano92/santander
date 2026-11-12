@@ -102,7 +102,7 @@ def build():
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = meta.add_run(
         f"Sistema local (panel de oficina) · Centro de Control (COCE) · App Android (tablet)\n"
-        f"Versión documental: 1.1 — {date.today().strftime('%d/%m/%Y')}"
+        f"Versión documental: 1.2 — {date.today().strftime('%d/%m/%Y')}"
     )
     set_run_font(r, size=11)
 
@@ -298,8 +298,8 @@ def build():
         ["Variable", "Uso"],
         [
             ["DATABASE_URL", "SQLite local (p.ej. sqlite:///./data/control_accesos.db)"],
-            ["MODBUS_MODE", "tcp o rtu"],
-            ["MODBUS_SERIAL_*", "Puerto COM, baudios, etc. (si RTU)"],
+            ["MODBUS_MODE", "rtu (plantilla) o tcp (Ethernet a las placas)"],
+            ["MODBUS_SERIAL_*", "Puerto COM, baudios, etc. (solo si RTU)"],
             ["TABLET_JWT_SECRET / PANEL_JWT_SECRET", "Secretos JWT (obligatorios en producción)"],
             ["TABLET_JWT_EXPIRE_MINUTES", "Caducidad token tablet (p.ej. 10080 = 7 días)"],
             [
@@ -312,6 +312,10 @@ def build():
             ["ZAGUAN_*", "IP ESP32, captura-only, etc."],
             ["CSIP_*", "Integración Panphone (opcional)"],
             ["TABLET_CALL_*", "Llamadas entrantes a tablets"],
+            [
+                "EXTENDIDO_P1_TABLET_CALL_WITHOUT_ZAGUAN",
+                "true solo si la oficina no tiene zaguán (P1 llama tablet en extendido)",
+            ],
         ],
     )
     add_para(
@@ -320,6 +324,47 @@ def build():
         "en SQLite (backend/data/control_accesos.db). Los modos de operación (reglas) viven en "
         "backend/data/panel_rules.json (versionado en el repositorio). "
         "Overrides de ESP32 por canal: backend/data/zaguan_device_target.json.",
+    )
+
+    add_heading_styled(doc, "4.5.1 Placas ETD8A12: RTU (RS-485) vs TCP (Ethernet)", 2)
+    add_para(
+        doc,
+        "Las tres placas ETD8A12 no requieren tres puertos COM. Según el cableado de la oficina:",
+    )
+    add_bullet(
+        doc,
+        "RTU (MODBUS_MODE=rtu, valor de la plantilla .env.example): un adaptador USB↔RS-485. "
+        "Las tres placas comparten el mismo bus y se distinguen por slave_id en el panel "
+        "(Central / Puerta Calle / Puerta Oficina). Un solo MODBUS_SERIAL_PORT para las tres.",
+    )
+    add_bullet(
+        doc,
+        "TCP (MODBUS_MODE=tcp): cada placa por Ethernet (IP y puerto en panel_modules). "
+        "No usa COM. Preferible cuando las placas ya van cableadas a la red local.",
+    )
+    add_para(doc, "Cambio de PC / otro ordenador con RTU:", bold=True)
+    add_bullet(
+        doc,
+        "Windows asigna el número COM al adaptador USB (no es fijo entre equipos). "
+        "Si el .env trae COM7 y en el PC nuevo no existe, el log muestra: "
+        "could not open port 'COMx': FileNotFoundError.",
+    )
+    add_bullet(
+        doc,
+        "Con el adaptador enchufado: Administrador de dispositivos → Puertos (COM y LPT). "
+        "Desconecta y vuelve a conectar el USB: el puerto que aparece/desaparece es el correcto. "
+        "Pon ese valor en MODBUS_SERIAL_PORT y reinicia el backend.",
+    )
+    add_bullet(
+        doc,
+        "Si el COM abre pero aparece «RTU no operativo (slave_id=N): No response…»: el puerto "
+        "está bien; revisar cableado A/B, alimentación, baudios (9600 8N1) y que el slave_id "
+        "del panel coincida con la dirección Modbus física de cada placa.",
+    )
+    add_para(
+        doc,
+        "Nota: la plantilla deja MODBUS_MODE=rtu y un COM de ejemplo. En cada instalación "
+        "hay que ajustar el COM real o pasar a tcp si las placas van por cable Ethernet.",
     )
 
     add_heading_styled(doc, "4.6 Primer acceso al panel web", 2)
@@ -734,7 +779,11 @@ def build():
         [
             ["Comercial automático", "Flujo normal de atención en horario comercial"],
             ["Comercial esclusa", "Paso controlado tipo esclusa"],
-            ["Horario extendido", "Fuera de horario comercial; llamadas tablet en ciertos pulsadores"],
+            [
+                "Horario extendido",
+                "P1 videoportero abre zaguán (si libre e interlock); P2 solo con autorización tablet. "
+                "Sin zaguán: EXTENDIDO_P1_TABLET_CALL_WITHOUT_ZAGUAN",
+            ],
             ["Horario autoservicio", "Autoservicio / acceso restringido según reglas"],
             ["Oficina cerrada", "Cierres de seguridad; puertas cerradas"],
             ["Carga de cajero", "Carga ATM en zaguán; P1 cerrada con llamada; vídeo en home"],
@@ -834,9 +883,22 @@ def build():
         [
             ["Tablet WS 403 / se desconecta", "JWT caducado o inválido; revisar TABLET_JWT_* y re-login"],
             ["No cambia modo / modo deshabilitado", "Ajustes de tablet: modes.*.enabled; el modo no debe listarse si está off"],
-            ["Placa Modbus desconectada", "Cableado RS-485/TCP, COM, slave_id, timeouts"],
+            [
+                "Placa Modbus desconectada / could not open port COMx",
+                "En RTU: el COM del .env no existe en ese PC. Ver 4.5.1 (detectar COM del adaptador USB). "
+                "En TCP: IP/puerto de panel_modules y red.",
+            ],
+            [
+                "RTU no operativo / No response (slave_id=N)",
+                "El COM abre pero la placa no responde: A/B, slave_id físico vs panel, 9600 8N1, alimentación",
+            ],
             ["COCE offline", "COCE_WS_URL alcanzable, token e installation_id correctos"],
             ["No suena llamada en tablets", "Modo actual en TABLET_CALL_MODES; WS conectado; pulsador permitido"],
+            [
+                "Extendido: videoportero P1 llama a tablet",
+                "Con zaguán debe abrir P1. Quitar horario_extendido de tabletCall.modes; "
+                "solo P2 fuerza llamada. Sin zaguán: EXTENDIDO_P1_TABLET_CALL_WITHOUT_ZAGUAN=true",
+            ],
             ["Sin audio intercom", "audio_bridge en marcha :8765; bridgeUrl; DLLs/VC++"],
             ["CSIP notify abre el panel en navegador", "Normal en GET; el webhook es POST"],
             ["Crash Android al abrir modos", "SVG orient=auto-start-reverse; ya mitigado en ModeIcon"],
@@ -888,7 +950,7 @@ def build():
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = footer.add_run(
         "— Fin del documento —\n"
-        "Control de Accesos Santander / SAIMA · Manual de operación e instalación v1.1"
+        "Control de Accesos Santander / SAIMA · Manual de operación e instalación v1.2"
     )
     set_run_font(r, size=10, color=RGBColor(0x66, 0x66, 0x66))
 

@@ -2259,6 +2259,20 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
         and _current_mode == "horario_extendido"
         and pulsador == "p2"
     )
+    # Sin zaguán: P1/P3 en extendido llaman a tablet (no abren).
+    try:
+        from app.core.config import settings as _settings
+
+        _extendido_p1_call_no_zaguan = bool(
+            getattr(_settings, "extendido_p1_tablet_call_without_zaguan", False)
+        )
+    except Exception:  # noqa: BLE001
+        _extendido_p1_call_no_zaguan = False
+    force_extendido_p1_tablet_call = (
+        _current_mode == "horario_extendido"
+        and pulsador in ("p1", "p3")
+        and _extendido_p1_call_no_zaguan
+    )
     force_carga_tablet_call = _current_mode == "horario_carga_cajero" and pulsador in (
         "p1",
         "p3",
@@ -2269,7 +2283,12 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
         "p3",
         "p4",
     )
-    if force_extendido_tablet_call or force_carga_tablet_call or force_manual_tablet_call:
+    if (
+        force_extendido_tablet_call
+        or force_extendido_p1_tablet_call
+        or force_carga_tablet_call
+        or force_manual_tablet_call
+    ):
         door = PULSADOR_TO_DOOR[pulsador]
         call_result = await tablet_call_hub.start_call(
             door=door,
@@ -2299,7 +2318,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
                 "door": door,
                 "mode": panel_mode or _current_mode,
                 "ts": ts,
-                "extendido_call": force_extendido_tablet_call,
+                "extendido_call": force_extendido_tablet_call or force_extendido_p1_tablet_call,
                 "carga_cajero_call": force_carga_tablet_call,
                 "manual_call": force_manual_tablet_call,
                 **call_result,
@@ -2311,14 +2330,18 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             "door": door,
             "mode": panel_mode or _current_mode,
             "tablet_call": True,
-            "extendido_call": force_extendido_tablet_call,
+            "extendido_call": force_extendido_tablet_call or force_extendido_p1_tablet_call,
             "carga_cajero_call": force_carga_tablet_call,
             "manual_call": force_manual_tablet_call,
             "modbus_ok": False,
             "call_id": call_result.get("call_id"),
         }
 
-    if tablet_call_hub.should_start_tablet_call(
+    # Extendido con zaguán: P1/P3 abren (ocupación + interlock). No usar tabletCall genérico.
+    skip_generic_tablet_call = (
+        _current_mode == "horario_extendido" and pulsador in ("p1", "p3")
+    )
+    if (not skip_generic_tablet_call) and tablet_call_hub.should_start_tablet_call(
         pulsador, panel_mode
     ):
         door = PULSADOR_TO_DOOR[pulsador]

@@ -141,8 +141,12 @@ class Settings(BaseSettings):
     tablet_call_enabled: bool = True
     tablet_call_timeout_seconds: int = 30
     # rule_key del panel (coma-separados): horario_manual, horario_carga_cajero, …
-    tablet_call_modes: str = "horario_manual,horario_carga_cajero,horario_extendido"
+    # Extendido: llamada tablet solo P2 (orquestador). P1 abre zaguán.
+    tablet_call_modes: str = "horario_manual,horario_carga_cajero"
     tablet_call_pulsadores: str = "p1"
+    # Oficina sin zaguán: en horario_extendido el videoportero P1 llama a tablet
+    # en lugar de abrir. Con zaguán (caso normal) dejar false.
+    extendido_p1_tablet_call_without_zaguan: bool = False
 
     # Panphone / CSIP custom1 (placa remota ↔ este FastAPI)
     # Base URL legacy (1 placa). Preferir CSIP_DEVICES para N placas.

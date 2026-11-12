@@ -219,7 +219,8 @@ def get_builtin_default_tablet_config() -> dict[str, Any]:
         },
         "api": {
             "port": 8000,
-            "secure": True,
+            # LAN típica: HTTP 8000. Poner True + tlsPort 8443 cuando haya CA de instalación.
+            "secure": False,
             "tlsPort": 8443,
             "username": "ceroideas",
             "password": "12345678",
@@ -261,7 +262,9 @@ def get_builtin_default_tablet_config() -> dict[str, Any]:
         "tabletCall": {
             "enabled": True,
             "timeoutSeconds": 30,
-            "modes": "horario_manual,horario_carga_cajero,horario_extendido",
+            # Extendido: P1 abre zaguán (orquestador); P2 llama tablet por fuerza local.
+            # No incluir horario_extendido aquí o el videoportero P1 dispararía llamada.
+            "modes": "horario_manual,horario_carga_cajero",
             "pulsadores": "p1",
         },
         "configLogin": {
