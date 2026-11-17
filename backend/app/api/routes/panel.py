@@ -366,6 +366,23 @@ def _is_toggle_enclavamiento_rule(rule_key: str, rule: Optional[dict] = None) ->
     return True
 
 
+def _rule_winkhaus_key(rule: Optional[dict]) -> bool:
+    """Llave Winkhaus: sigue el nivel del IN (OFF→ON echa, ON→OFF retrae), no alterna."""
+    return bool((rule or {}).get("winkhaus_key"))
+
+
+def _clear_zaguan_pending_lock_restore(out_codes: List[str]) -> None:
+    """Evita que el settle de 5 s pelee con echar/retraer por llave Winkhaus."""
+    if not out_codes:
+        return
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        zo.clear_pending_lock_restore_for_outputs(out_codes)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _lock_toggle_outputs(rule: dict) -> List[str]:
     """OUT de bulones si la regla interruptor solo maneja cierres mecánicos (llave IN_0x_03)."""
     outs = [str(c) for c in rule.get("activate_outputs") or []]
@@ -2316,6 +2333,9 @@ def _apply_toggle_enclavamiento_on(
     )
     active_toggle_rules.add(rule_key)
     _notify_toggle_rules_changed()
+    lock_outs = _lock_toggle_outputs(rule)
+    if lock_outs:
+        _clear_zaguan_pending_lock_restore(lock_outs)
     rt = rules_runtime.setdefault(
         rule_key,
         {
@@ -2336,7 +2356,15 @@ def _apply_toggle_enclavamiento_on(
         linked_stack=linked_stack,
     )
     _persist_overrides_to_db()
-    add_event("OK", f"Actuación interruptor ON: {rule_key}", 1)
+    add_event(
+        "OK",
+        (
+            f"Llave Winkhaus ON (echa bulones): {rule_key}"
+            if _rule_winkhaus_key(rule)
+            else f"Actuación interruptor ON: {rule_key}"
+        ),
+        1,
+    )
     return {
         "executed": True,
         "toggle_active": True,
@@ -2388,6 +2416,9 @@ def _apply_toggle_enclavamiento_off(
     active_toggle_rules.discard(rule_key)
     _persist_overrides_to_db()
     _notify_toggle_rules_changed()
+    lock_outs = _lock_toggle_outputs(rule)
+    if lock_outs:
+        _clear_zaguan_pending_lock_restore(lock_outs)
     rt = rules_runtime.setdefault(
         rule_key,
         {
@@ -2400,7 +2431,15 @@ def _apply_toggle_enclavamiento_off(
     rt["last_executed_at"] = datetime.now().isoformat()
     rt["last_trigger_active"] = False
     _mark_toggle_suppress_auto_rising(rule_key)
-    add_event("OK", f"Actuación interruptor OFF: {rule_key}", 1)
+    add_event(
+        "OK",
+        (
+            f"Llave Winkhaus OFF (retrae bulones): {rule_key}"
+            if _rule_winkhaus_key(rule)
+            else f"Actuación interruptor OFF: {rule_key}"
+        ),
+        1,
+    )
     out = {
         "executed": True,
         "toggle_active": False,
@@ -2424,7 +2463,12 @@ def _evaluate_toggle_enclavamiento_rule(
     use_overrides: bool = True,
     apply_outputs_to_hardware: bool = True,
 ) -> dict:
-    """Interruptor por flanco: 1ª pulsación ON, 2ª OFF (sin soltar = mantener estado)."""
+    """
+    Interruptor por flanco: 1ª pulsación ON, 2ª OFF (sin soltar = mantener estado).
+
+    Con `winkhaus_key`: OFF→ON echa bulones (si faltan); ON→OFF los retrae.
+    No alterna: si ya están en el estado pedido, no hace nada.
+    """
     phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
     runtime = rules_runtime.setdefault(
         rule_key,
@@ -2462,8 +2506,69 @@ def _evaluate_toggle_enclavamiento_rule(
             "trigger_input_active": trigger_active,
             "toggle_active": rule_key in active_toggle_rules,
         }
-    rising_edge = trigger_active and not runtime["last_trigger_active"]
+    was_active = bool(runtime["last_trigger_active"])
+    rising_edge = trigger_active and not was_active
+    falling_edge = (not trigger_active) and was_active
     runtime["last_trigger_active"] = trigger_active
+
+    if _rule_winkhaus_key(rule):
+        if rising_edge:
+            if blocked_active_codes:
+                _clear_trigger_input_override(trigger_code)
+                add_event(
+                    "WARN",
+                    f"{rule_key} (Winkhaus) bloqueado por {', '.join(blocked_active_codes)}",
+                    1,
+                )
+                return {
+                    "executed": False,
+                    "reason": (
+                        f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}"
+                    ),
+                    "trigger_input_active": trigger_active,
+                    "blocked_inputs": blocked_active_codes,
+                    "toggle_active": rule_key in active_toggle_rules,
+                    "winkhaus_key": True,
+                }
+            if _toggle_rule_is_on(rule_key, rule):
+                return {
+                    "executed": False,
+                    "reason": "Winkhaus ON: bulones ya echados",
+                    "trigger_input_active": trigger_active,
+                    "toggle_active": True,
+                    "winkhaus_key": True,
+                }
+            return _apply_toggle_enclavamiento_on(
+                rule_key,
+                rule,
+                trigger_code,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                blocked_active_codes=blocked_active_codes,
+            )
+        if falling_edge:
+            # Retraer aunque la puerta esté abierta (bloqueo solo aplica al echar).
+            if not _toggle_rule_is_on(rule_key, rule):
+                return {
+                    "executed": False,
+                    "reason": "Winkhaus OFF: bulones ya retraídos",
+                    "trigger_input_active": trigger_active,
+                    "toggle_active": False,
+                    "winkhaus_key": True,
+                }
+            return _apply_toggle_enclavamiento_off(
+                rule_key,
+                rule,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                blocked_active_codes=blocked_active_codes,
+            )
+        return {
+            "executed": False,
+            "reason": "Sin flanco en llave Winkhaus",
+            "trigger_input_active": trigger_active,
+            "toggle_active": rule_key in active_toggle_rules,
+            "winkhaus_key": True,
+        }
+
     if not rising_edge:
         return {
             "executed": False,
@@ -3321,13 +3426,53 @@ def _execute_rule_forced(
         }
 
     if _is_toggle_enclavamiento_rule(rule_key, rule):
-        if _toggle_rule_is_on(rule_key, rule):
+        trigger_code = rule.get("trigger") or "IN_01_01"
+        if _rule_winkhaus_key(rule):
+            # Forzado desde panel: alinea con el nivel físico de la llave.
+            phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
+            key_on = _read_input_effective(
+                trigger_code,
+                use_hardware_if_no_override=True,
+                use_overrides=True,
+                physical_inputs=phy_in,
+            )
+            if key_on:
+                if _toggle_rule_is_on(rule_key, rule):
+                    result = {
+                        "executed": False,
+                        "reason": "Winkhaus ON: bulones ya echados",
+                        "toggle_active": True,
+                        "winkhaus_key": True,
+                    }
+                else:
+                    result = _apply_toggle_enclavamiento_on(
+                        rule_key,
+                        rule,
+                        trigger_code,
+                        apply_outputs_to_hardware=apply_outputs_to_hardware,
+                        blocked_active_codes=blocked_active_codes,
+                        linked_stack=stack,
+                    )
+            elif _toggle_rule_is_on(rule_key, rule):
+                result = _apply_toggle_enclavamiento_off(
+                    rule_key,
+                    rule,
+                    apply_outputs_to_hardware=apply_outputs_to_hardware,
+                    linked_stack=stack,
+                )
+            else:
+                result = {
+                    "executed": False,
+                    "reason": "Winkhaus OFF: bulones ya retraídos",
+                    "toggle_active": False,
+                    "winkhaus_key": True,
+                }
+        elif _toggle_rule_is_on(rule_key, rule):
             result = _apply_toggle_enclavamiento_off(
                 rule_key, rule, apply_outputs_to_hardware=apply_outputs_to_hardware,
                 linked_stack=stack,
             )
         else:
-            trigger_code = rule.get("trigger") or "IN_01_01"
             result = _apply_toggle_enclavamiento_on(
                 rule_key,
                 rule,

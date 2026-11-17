@@ -1380,6 +1380,34 @@ def is_door_lock_output(out_code: str) -> bool:
     return _door_for_lock_output(out_code) is not None
 
 
+def clear_pending_lock_restore_for_outputs(out_codes: list[str]) -> None:
+    """Cancela restore pendiente de bulones (p. ej. llave Winkhaus ya echó/retrajo)."""
+    doors: set[PuertaId] = set()
+    for raw in out_codes:
+        door = _door_for_lock_output(str(raw or ""))
+        if door:
+            doors.add(door)
+    for door in doors:
+        _cancel_lock_restore(door)
+        _locks_to_restore[door] = []
+        log.info("Bulones %s: restore pendiente cancelado (llave/forzado)", door)
+
+
+def winkhaus_key_blocks_lock_restore(door: PuertaId) -> bool:
+    """
+    Llave Winkhaus en OFF (retraída): no echar bulones por settle de 5 s.
+    Cerrado/echada = IN ON; abierta = IN OFF.
+    """
+    code = WINHOSE_INPUT_BY_DOOR.get(door)
+    if not code:
+        return False
+    try:
+        _refresh_board_for_door(door)
+        return not bool(_read_input(code))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _lock_restore_delay_s() -> float:
     """Retardo tras IN4 OFF antes de echar bulones (más largo en oficina cerrada)."""
     delay = float(DOOR_LOCK_RESTORE_DELAY_S)
@@ -1403,6 +1431,14 @@ def _restore_locks_after_close(door: PuertaId) -> bool:
     pending = _locks_to_restore.get(door) or []
     if not pending:
         return True
+    if winkhaus_key_blocks_lock_restore(door):
+        log.info(
+            "Bulones %s: llave Winkhaus OFF; restore omitido (%s)",
+            door,
+            pending,
+        )
+        _locks_to_restore[door] = []
+        return True
     # Seguridad: no echar bulones si el sensor sigue marcando abierta.
     try:
         _refresh_board_for_door(door)
@@ -1416,11 +1452,17 @@ def _restore_locks_after_close(door: PuertaId) -> bool:
             return False
     except Exception as e:  # noqa: BLE001
         log.debug("No se pudo verificar sensor antes de bulones %s: %s", door, e)
-    for lock_code in pending:
+    # Si la llave (u otra vía) ya los echó, no reescribir ni pelear.
+    still_needed = [c for c in pending if not _output_is_on(c)]
+    if not still_needed:
+        log.info("Bulones %s: ya echados; restore no-op", door)
+        _locks_to_restore[door] = []
+        return True
+    for lock_code in still_needed:
         _set_output_direct(lock_code, True)
         log.info("Bulones ON tras cierre %s: %s", door, lock_code)
     _locks_to_restore[door] = []
-    _notify_panel_outputs_written(pending, on=True)
+    _notify_panel_outputs_written(still_needed, on=True)
     return True
 
 

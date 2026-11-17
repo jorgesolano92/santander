@@ -1000,6 +1000,8 @@ function RulesFormAssistant({
   const [wfDeactOut, setWfDeactOut] = useState([]);
   /** Si true → JSON `deactivate_outputs_temporary`: al soltar la regla, restaura OUT que estaban ON. */
   const [wfDeactTemporary, setWfDeactTemporary] = useState(false);
+  /** Si true → JSON `winkhaus_key`: OFF→ON echa bulones, ON→OFF retrae (sin toggle). */
+  const [wfWinkhausKey, setWfWinkhausKey] = useState(false);
   const [wfEnabled, setWfEnabled] = useState(true);
   const [wfAuto, setWfAuto] = useState(true);
   const [wfColor, setWfColor] = useState("#22c55e");
@@ -1060,6 +1062,9 @@ function RulesFormAssistant({
     if (wfDeactTemporary) {
       rule.deactivate_outputs_temporary = true;
     }
+    if (wfWinkhausKey) {
+      rule.winkhaus_key = true;
+    }
     if (wfType === "pulso_5_sg") {
       const n = parseInt(String(wfPulseSeconds).trim(), 10);
       rule.pulse_seconds = Number.isFinite(n)
@@ -1115,6 +1120,7 @@ function RulesFormAssistant({
       Array.isArray(r.deactivate_outputs) ? [...r.deactivate_outputs] : [],
     );
     setWfDeactTemporary(Boolean(r.deactivate_outputs_temporary));
+    setWfWinkhausKey(Boolean(r.winkhaus_key));
     setWfEnabled(r.enabled !== false);
     setWfAuto(r.auto_execute !== false);
     setWfColor(normalizeRuleColor(r.color, loadKey));
@@ -1339,6 +1345,19 @@ function RulesFormAssistant({
           />
           Auto-ejecutar (polling)
         </label>
+        {wfType === "enclavamiento" ? (
+          <label
+            style={assistChk}
+            title="Llave Winkhaus: OFF→ON echa OUT activados; ON→OFF los retrae. No alterna como interruptor."
+          >
+            <input
+              type="checkbox"
+              checked={wfWinkhausKey}
+              onChange={(e) => setWfWinkhausKey(e.target.checked)}
+            />
+            Llave Winkhaus
+          </label>
+        ) : null}
         <label
           style={{
             ...assistChk,

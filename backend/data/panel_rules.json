@@ -654,6 +654,7 @@
     "enabled": true,
     "auto_execute": true,
     "type": "enclavamiento",
+    "winkhaus_key": true,
     "trigger": "IN_03_03",
     "blocked_if_active": [
       "IN_03_04"
@@ -669,6 +670,7 @@
     "enabled": true,
     "auto_execute": true,
     "type": "enclavamiento",
+    "winkhaus_key": true,
     "trigger": "IN_02_03",
     "blocked_if_active": [
       "IN_02_04"
