@@ -131,6 +131,12 @@ PULSADOR_TO_INTERFONO_RULE: dict[PulsadorId, str] = {
     "p4": "interfono_puerta_oficina_interior",
 }
 
+# Exterior en cerrado: blocked_if_active IN_01_05 salvo ventana Winkhaus 15 s.
+EXTERIOR_INTERFONO_RULE_TO_DOOR: dict[str, PuertaId] = {
+    "interfono_puerta_calle_exterior": "p1",
+    "interfono_puerta_oficina_exterior": "p2",
+}
+
 DOOR_TO_LED_CHANNELS: dict[PuertaId, tuple[PulsadorId, PulsadorId]] = {
     "p1": ("p1", "p3"),
     "p2": ("p2", "p4"),
@@ -694,6 +700,56 @@ def _clear_winhose_window(door: PuertaId) -> None:
     _stop_winhose_intermittent(door)
 
 
+def winhose_bypasses_cerrado_block(rule_key: str) -> bool:
+    """
+    True si el interfono exterior puede ignorar IN_01_05:
+    llave desactivada (IN OFF) + ventana 15 s activa en esa puerta.
+    """
+    if _current_mode not in WINHOSE_MODES:
+        return False
+    door = EXTERIOR_INTERFONO_RULE_TO_DOOR.get(rule_key)
+    if not door:
+        return False
+    if not _winhose_window_active_for(door):
+        return False
+    code = WINHOSE_INPUT_BY_DOOR.get(door)
+    if not code:
+        return False
+    try:
+        # Llave echada (ON) → nunca bypass, aunque quede timer.
+        if bool(_read_input(code)):
+            return False
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+def notify_winkhaus_key_opened(door: PuertaId) -> None:
+    """Llave desactivada (ON→OFF): abre ventana 15 s para pulsador exterior."""
+    if _current_mode not in WINHOSE_MODES:
+        return
+    if door not in _winhose_doors_for_mode(_current_mode):
+        return
+    _start_winhose_window(door)
+
+
+def notify_winkhaus_key_closed(door: PuertaId) -> None:
+    """Llave echada/cerrada (OFF→ON): cierra ventana; exterior vuelve a quedar bloqueado."""
+    if _winhose_window_active_for(door) or _winhose_window_until.get(door, 0.0) > 0:
+        log.info("WinHose %s: llave cerrada — fin de ventana exterior", door)
+    _clear_winhose_window(door)
+    if _current_mode == "horario_cerrado":
+        try:
+            _sync_cerrado_interlock_leds()
+        except Exception:  # noqa: BLE001
+            pass
+    elif _current_mode == "horario_autoservicio":
+        try:
+            _sync_autoservicio_interlock_leds()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _reset_winhose_state() -> None:
     _winhose_last_closed.clear()
     for door in ("p1", "p2"):
@@ -987,8 +1043,13 @@ def poll_winhose() -> None:
             continue
 
         if not in_grace and last and not closed:
+            # Llave desactivada: 15 s para pulsador exterior.
             log.info("WinHose: flanco cerrado→abierto en %s (%s)", code, door)
             _start_winhose_window(door)
+        elif not in_grace and (not last) and closed:
+            # Llave echada otra vez: sin ventana, exterior bloqueado.
+            log.info("WinHose: flanco abierto→cerrado en %s (%s)", code, door)
+            notify_winkhaus_key_closed(door)
 
         _winhose_last_closed[code] = closed
 
@@ -1080,8 +1141,18 @@ def _can_open_p2_autoservicio(pulsador: PulsadorId) -> tuple[bool, str]:
 
 def _can_open_cerrado(pulsador: PulsadorId) -> tuple[bool, str]:
     door = PULSADOR_TO_DOOR[pulsador]
-    if pulsador in ("p1", "p2") and not _winhose_window_active_for(door):
-        return False, f"Cerrado: {door} exterior solo tras maniobra WinHose (15 s)"
+    if pulsador in ("p1", "p2"):
+        code = WINHOSE_INPUT_BY_DOOR.get(door)
+        try:
+            if code and bool(_read_input(code)):
+                return False, f"Cerrado: llave Winkhaus echada ({door})"
+        except Exception:  # noqa: BLE001
+            pass
+        if not _winhose_window_active_for(door):
+            return (
+                False,
+                f"Cerrado: {door} exterior solo 15 s tras desactivar Winkhaus",
+            )
     ok, reason = _can_open_in_interlock(door)
     if not ok:
         return False, f"Cerrado: {reason}"
@@ -1378,6 +1449,10 @@ def _door_for_lock_output(out_code: str) -> Optional[PuertaId]:
 
 def is_door_lock_output(out_code: str) -> bool:
     return _door_for_lock_output(out_code) is not None
+
+
+def door_for_lock_output(out_code: str) -> Optional[PuertaId]:
+    return _door_for_lock_output(out_code)
 
 
 def clear_pending_lock_restore_for_outputs(out_codes: list[str]) -> None:

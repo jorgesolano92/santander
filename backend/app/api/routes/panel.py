@@ -264,6 +264,47 @@ def _blocked_active_codes_for_rule(rule: dict) -> List[str]:
     ]
 
 
+def _filter_blocked_for_winhose_exterior(
+    rule_key: str, blocked_active_codes: List[str]
+) -> List[str]:
+    """
+    En cerrado, exterior lleva blocked IN_01_05. Durante ventana Winkhaus 15 s
+    se permite el pulsador exterior (retirar bulones / abrir).
+    """
+    if not blocked_active_codes or "IN_01_05" not in blocked_active_codes:
+        return blocked_active_codes
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        if zo.winhose_bypasses_cerrado_block(rule_key):
+            return [c for c in blocked_active_codes if c != "IN_01_05"]
+    except Exception:  # noqa: BLE001
+        pass
+    return blocked_active_codes
+
+
+def _notify_zaguan_winkhaus_edge(rule: dict, *, key_closed: bool) -> None:
+    """Sincroniza ventana 15 s exterior con flanco de llave Winkhaus (panel)."""
+    if not _rule_winkhaus_key(rule):
+        return
+    lock_outs = _lock_toggle_outputs(rule)
+    if not lock_outs:
+        return
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        doors = {
+            zo.door_for_lock_output(c) for c in lock_outs if zo.door_for_lock_output(c)
+        }
+        for door in doors:
+            if key_closed:
+                zo.notify_winkhaus_key_closed(door)
+            else:
+                zo.notify_winkhaus_key_opened(door)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _set_pending_manual_enclavamiento(rule_key: str, blocked_inputs: Optional[List[str]] = None) -> None:
     global pending_manual_enclavamiento_mode
     pending_manual_enclavamiento_mode = rule_key
@@ -1874,16 +1915,19 @@ def _evaluate_pulse_5_sg_rule(
             physical_inputs=physical_inputs,
         )
         blocked_codes = rule.get("blocked_if_active", [])
-        blocked_active_codes = [
-            code
-            for code in blocked_codes
-            if _blocked_signal_active(
-                code,
-                use_hardware_if_no_override=use_hardware_if_no_override,
-                use_overrides=use_overrides,
-                physical_inputs=physical_inputs,
-            )
-        ]
+        blocked_active_codes = _filter_blocked_for_winhose_exterior(
+            rule_key,
+            [
+                code
+                for code in blocked_codes
+                if _blocked_signal_active(
+                    code,
+                    use_hardware_if_no_override=use_hardware_if_no_override,
+                    use_overrides=use_overrides,
+                    physical_inputs=physical_inputs,
+                )
+            ],
+        )
 
         if runtime.get("pulse_until"):
             runtime["last_trigger_active"] = trigger_active
@@ -1965,16 +2009,19 @@ def _evaluate_pulse_5_sg_rule(
         physical_inputs=False,
     )
     blocked_codes = rule.get("blocked_if_active", [])
-    blocked_active_codes = [
-        code
-        for code in blocked_codes
-        if _blocked_signal_active(
-            code,
-            use_hardware_if_no_override=use_hardware_if_no_override,
-            use_overrides=use_overrides,
-            physical_inputs=physical_inputs,
-        )
-    ]
+    blocked_active_codes = _filter_blocked_for_winhose_exterior(
+        rule_key,
+        [
+            code
+            for code in blocked_codes
+            if _blocked_signal_active(
+                code,
+                use_hardware_if_no_override=use_hardware_if_no_override,
+                use_overrides=use_overrides,
+                physical_inputs=physical_inputs,
+            )
+        ],
+    )
     desired = bool(trigger_active_follow) and not blocked_active_codes
     last = bool(runtime.get("last_follow_on"))
     snap_pending = any((runtime.get("temp_deact_snapshot") or {}).values())
@@ -2336,6 +2383,8 @@ def _apply_toggle_enclavamiento_on(
     lock_outs = _lock_toggle_outputs(rule)
     if lock_outs:
         _clear_zaguan_pending_lock_restore(lock_outs)
+    if _rule_winkhaus_key(rule):
+        _notify_zaguan_winkhaus_edge(rule, key_closed=True)
     rt = rules_runtime.setdefault(
         rule_key,
         {
@@ -2419,6 +2468,8 @@ def _apply_toggle_enclavamiento_off(
     lock_outs = _lock_toggle_outputs(rule)
     if lock_outs:
         _clear_zaguan_pending_lock_restore(lock_outs)
+    if _rule_winkhaus_key(rule):
+        _notify_zaguan_winkhaus_edge(rule, key_closed=False)
     rt = rules_runtime.setdefault(
         rule_key,
         {
