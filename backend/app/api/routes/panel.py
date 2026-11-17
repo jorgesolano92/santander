@@ -2179,11 +2179,14 @@ def _override_request_blocked(board_id: int, channel: int, state: Optional[bool]
             continue
         if not _rule_participates_in_auto_cycle(rk, rule):
             continue
-        blocked = _blocked_inputs_for_rule(
-            rule,
-            use_hardware_if_no_override=False,
-            use_overrides=True,
-            physical_inputs=False,
+        blocked = _filter_blocked_for_winhose_exterior(
+            rk,
+            _blocked_inputs_for_rule(
+                rule,
+                use_hardware_if_no_override=False,
+                use_overrides=True,
+                physical_inputs=False,
+            ),
         )
         if blocked:
             hits.append(
@@ -2485,7 +2488,7 @@ def _apply_toggle_enclavamiento_off(
     add_event(
         "OK",
         (
-            f"Llave Winkhaus OFF (retrae bulones): {rule_key}"
+            f"Llave Winkhaus OFF (panel): {rule_key}"
             if _rule_winkhaus_key(rule)
             else f"Actuación interruptor OFF: {rule_key}"
         ),
@@ -2517,8 +2520,8 @@ def _evaluate_toggle_enclavamiento_rule(
     """
     Interruptor por flanco: 1ª pulsación ON, 2ª OFF (sin soltar = mantener estado).
 
-    Con `winkhaus_key`: OFF→ON echa bulones (si faltan); ON→OFF los retrae.
-    No alterna: si ya están en el estado pedido, no hace nada.
+    Con `winkhaus_key`: OFF→ON echa bulones (si faltan); ON→OFF solo abre
+    ventana exterior 15 s (no retrae bulones).
     """
     phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
     runtime = rules_runtime.setdefault(
@@ -2597,21 +2600,21 @@ def _evaluate_toggle_enclavamiento_rule(
                 blocked_active_codes=blocked_active_codes,
             )
         if falling_edge:
-            # Retraer aunque la puerta esté abierta (bloqueo solo aplica al echar).
-            if not _toggle_rule_is_on(rule_key, rule):
-                return {
-                    "executed": False,
-                    "reason": "Winkhaus OFF: bulones ya retraídos",
-                    "trigger_input_active": trigger_active,
-                    "toggle_active": False,
-                    "winkhaus_key": True,
-                }
-            return _apply_toggle_enclavamiento_off(
-                rule_key,
-                rule,
-                apply_outputs_to_hardware=apply_outputs_to_hardware,
-                blocked_active_codes=blocked_active_codes,
+            # Desactivar llave: ventana 15 s para exterior; bulones siguen echados.
+            _notify_zaguan_winkhaus_edge(rule, key_closed=False)
+            add_event(
+                "OK",
+                f"Llave Winkhaus OFF: ventana exterior 15 s ({rule_key})",
+                1,
             )
+            return {
+                "executed": True,
+                "reason": "Winkhaus OFF: ventana 15 s (bulones sin retraer)",
+                "trigger_input_active": trigger_active,
+                "toggle_active": _toggle_rule_is_on(rule_key, rule),
+                "winkhaus_key": True,
+                "winkhaus_window": True,
+            }
         return {
             "executed": False,
             "reason": "Sin flanco en llave Winkhaus",

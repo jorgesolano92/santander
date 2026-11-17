@@ -1000,7 +1000,7 @@ function RulesFormAssistant({
   const [wfDeactOut, setWfDeactOut] = useState([]);
   /** Si true → JSON `deactivate_outputs_temporary`: al soltar la regla, restaura OUT que estaban ON. */
   const [wfDeactTemporary, setWfDeactTemporary] = useState(false);
-  /** Si true → JSON `winkhaus_key`: OFF→ON echa bulones, ON→OFF retrae (sin toggle). */
+  /** Si true → JSON `winkhaus_key`: OFF→ON echa bulones; ON→OFF ventana exterior 15 s. */
   const [wfWinkhausKey, setWfWinkhausKey] = useState(false);
   const [wfEnabled, setWfEnabled] = useState(true);
   const [wfAuto, setWfAuto] = useState(true);
@@ -1348,7 +1348,7 @@ function RulesFormAssistant({
         {wfType === "enclavamiento" ? (
           <label
             style={assistChk}
-            title="Llave Winkhaus: OFF→ON echa OUT activados; ON→OFF los retrae. No alterna como interruptor."
+            title="Llave Winkhaus: OFF→ON echa OUT activados; ON→OFF abre ventana 15 s para pulsador exterior (no retrae bulones)."
           >
             <input
               type="checkbox"
