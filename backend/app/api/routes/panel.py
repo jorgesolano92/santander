@@ -3427,47 +3427,9 @@ def _execute_rule_forced(
 
     if _is_toggle_enclavamiento_rule(rule_key, rule):
         trigger_code = rule.get("trigger") or "IN_01_01"
-        if _rule_winkhaus_key(rule):
-            # Forzado desde panel: alinea con el nivel físico de la llave.
-            phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
-            key_on = _read_input_effective(
-                trigger_code,
-                use_hardware_if_no_override=True,
-                use_overrides=True,
-                physical_inputs=phy_in,
-            )
-            if key_on:
-                if _toggle_rule_is_on(rule_key, rule):
-                    result = {
-                        "executed": False,
-                        "reason": "Winkhaus ON: bulones ya echados",
-                        "toggle_active": True,
-                        "winkhaus_key": True,
-                    }
-                else:
-                    result = _apply_toggle_enclavamiento_on(
-                        rule_key,
-                        rule,
-                        trigger_code,
-                        apply_outputs_to_hardware=apply_outputs_to_hardware,
-                        blocked_active_codes=blocked_active_codes,
-                        linked_stack=stack,
-                    )
-            elif _toggle_rule_is_on(rule_key, rule):
-                result = _apply_toggle_enclavamiento_off(
-                    rule_key,
-                    rule,
-                    apply_outputs_to_hardware=apply_outputs_to_hardware,
-                    linked_stack=stack,
-                )
-            else:
-                result = {
-                    "executed": False,
-                    "reason": "Winkhaus OFF: bulones ya retraídos",
-                    "toggle_active": False,
-                    "winkhaus_key": True,
-                }
-        elif _toggle_rule_is_on(rule_key, rule):
+        # Forzado desde panel: permite echar/retraer a mano aunque la llave física
+        # esté en OFF (el auto por flanco Winkhaus sigue el nivel del IN).
+        if _toggle_rule_is_on(rule_key, rule):
             result = _apply_toggle_enclavamiento_off(
                 rule_key, rule, apply_outputs_to_hardware=apply_outputs_to_hardware,
                 linked_stack=stack,
