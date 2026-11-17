@@ -1393,21 +1393,6 @@ def clear_pending_lock_restore_for_outputs(out_codes: list[str]) -> None:
         log.info("Bulones %s: restore pendiente cancelado (llave/forzado)", door)
 
 
-def winkhaus_key_blocks_lock_restore(door: PuertaId) -> bool:
-    """
-    Llave Winkhaus en OFF (retraída): no echar bulones por settle de 5 s.
-    Cerrado/echada = IN ON; abierta = IN OFF.
-    """
-    code = WINHOSE_INPUT_BY_DOOR.get(door)
-    if not code:
-        return False
-    try:
-        _refresh_board_for_door(door)
-        return not bool(_read_input(code))
-    except Exception:  # noqa: BLE001
-        return False
-
-
 def _lock_restore_delay_s() -> float:
     """Retardo tras IN4 OFF antes de echar bulones (más largo en oficina cerrada)."""
     delay = float(DOOR_LOCK_RESTORE_DELAY_S)
