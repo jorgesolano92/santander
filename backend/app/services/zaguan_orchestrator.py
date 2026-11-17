@@ -1431,14 +1431,7 @@ def _restore_locks_after_close(door: PuertaId) -> bool:
     pending = _locks_to_restore.get(door) or []
     if not pending:
         return True
-    if winkhaus_key_blocks_lock_restore(door):
-        log.info(
-            "Bulones %s: llave Winkhaus OFF; restore omitido (%s)",
-            door,
-            pending,
-        )
-        _locks_to_restore[door] = []
-        return True
+    # Independiente de Winkhaus: el settle tras pulsador/interfono debe echar igual.
     # Seguridad: no echar bulones si el sensor sigue marcando abierta.
     try:
         _refresh_board_for_door(door)
@@ -1452,7 +1445,7 @@ def _restore_locks_after_close(door: PuertaId) -> bool:
             return False
     except Exception as e:  # noqa: BLE001
         log.debug("No se pudo verificar sensor antes de bulones %s: %s", door, e)
-    # Si la llave (u otra vía) ya los echó, no reescribir ni pelear.
+    # Si ya están ON (p. ej. llave o panel), no reescribir.
     still_needed = [c for c in pending if not _output_is_on(c)]
     if not still_needed:
         log.info("Bulones %s: ya echados; restore no-op", door)
