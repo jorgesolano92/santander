@@ -524,6 +524,8 @@ _tcp_connect_skip_until: Dict[int, float] = {}
 _TCP_OPEN_FAIL_BACKOFF_SEC: float = 60.0
 # Por placa: fallos seguidos de _read_all_io antes de marcar connected=False (histéresis en bus ruidoso).
 _read_io_fail_streak: Dict[int, int] = {}
+# Última pasada de auto-reconexión (monotonic).
+_last_auto_reconnect_at: float = 0.0
 
 
 def _reset_read_io_fail_streak(board_id: int) -> None:
@@ -3281,6 +3283,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     global background_auto_rules_last_result
     global background_auto_rules_last_error
     t0 = time.perf_counter()
+    maybe_auto_reconnect_boards()
     _refresh_connected_boards_snapshot(
         eval_on_edge=True,
         deactivate_on_fall=deactivate_on_fall,
@@ -3921,6 +3924,92 @@ def get_status(
     payload = _build_status_payload()
     payload["auto_rules_executed"] = run_auto_rules
     return payload
+
+
+def connect_configured_boards(*, reason: str = "manual") -> dict:
+    """
+    Conecta todas las placas de panel_modules (arranque / reintento).
+    Respeta backoff RTU/TCP tras fallos recientes.
+    """
+    global _last_auto_reconnect_at
+    _sync_runtime_from_db()
+    results: List[dict] = []
+    for board_id in _module_ids():
+        if io_state.get(board_id, {}).get("connected"):
+            results.append({"board_id": board_id, "connected": True, "skipped": True})
+            continue
+        if _connect_backoff_active(board_id):
+            results.append(
+                {
+                    "board_id": board_id,
+                    "connected": False,
+                    "skipped": True,
+                    "reason": "backoff",
+                }
+            )
+            continue
+        ok = False
+        try:
+            ok = bool(_connect_board(board_id))
+            if ok:
+                try:
+                    _read_all_io(board_id)
+                except Exception:  # noqa: BLE001
+                    pass
+                _coce_notify(
+                    "board_connected",
+                    {"board_id": board_id, "connected": True},
+                )
+        except Exception as e:  # noqa: BLE001
+            add_event("WARN", f"Auto-connect placa {board_id}: {e}", board_id)
+            ok = False
+        connected = bool(io_state.get(board_id, {}).get("connected"))
+        results.append(
+            {
+                "board_id": board_id,
+                "connected": connected,
+                "ok": ok,
+                "skipped": False,
+            }
+        )
+    _last_auto_reconnect_at = time.monotonic()
+    connected_n = sum(1 for r in results if r.get("connected"))
+    add_event(
+        "INFO",
+        f"Auto-connect placas ({reason}): {connected_n}/{len(results)} conectadas",
+        1,
+    )
+    return {
+        "reason": reason,
+        "connected": connected_n,
+        "total": len(results),
+        "boards": results,
+    }
+
+
+def maybe_auto_reconnect_boards() -> Optional[dict]:
+    """Reintenta placas caídas si panel_auto_reconnect y ha pasado el intervalo."""
+    if not bool(getattr(settings, "panel_auto_reconnect", True)):
+        return None
+    try:
+        interval = float(
+            getattr(settings, "panel_auto_reconnect_interval_seconds", 15.0) or 15.0
+        )
+    except (TypeError, ValueError):
+        interval = 15.0
+    interval = max(5.0, min(300.0, interval))
+    now = time.monotonic()
+    if now - _last_auto_reconnect_at < interval:
+        return None
+    disconnected = [
+        bid
+        for bid in _module_ids()
+        if not io_state.get(bid, {}).get("connected")
+    ]
+    if not disconnected:
+        _last_auto_reconnect_at = now
+        return None
+    return connect_configured_boards(reason="reconnect")
 
 
 @router.post("/boards/{board_id}/connect")

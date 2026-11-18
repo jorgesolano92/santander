@@ -102,6 +102,13 @@ class Settings(BaseSettings):
     # Lecturas I/O consecutivas fallidas antes de marcar la placa como desconectada (RTU/buses inestables).
     panel_modbus_read_failures_before_disconnect: int = 3
 
+    # Al arrancar el backend, conectar todas las placas configuradas (sin pulsar «Conectar» en el panel).
+    panel_auto_connect_on_startup: bool = True
+    # Reintentar placas desconectadas en segundo plano (tras corte de red/bus).
+    panel_auto_reconnect: bool = True
+    # Segundos mínimos entre pasadas de reintento automático.
+    panel_auto_reconnect_interval_seconds: float = 15.0
+
     # Si True, triggers y blocked_if_active refrescan Modbus y usan la lectura física (inputs_raw): un override
     # OFF no tapa un IN activo por hardware; un override ON sigue sirviendo para prueba sin cable. Si False,
     # el trigger sigue el IN efectivo del panel (override tristate, puede sin lectura previa).

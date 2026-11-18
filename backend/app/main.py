@@ -104,6 +104,18 @@ async def lifespan(app: FastAPI):
         zaguan_orchestrator.bootstrap_from_panel()
     except Exception as e:  # noqa: BLE001
         log.warning("Bootstrap orquestador zaguán: %s", e)
+    if bool(getattr(settings, "panel_auto_connect_on_startup", True)):
+        try:
+            auto_conn = await asyncio.to_thread(
+                panel.connect_configured_boards, reason="startup"
+            )
+            log.info(
+                "Auto-connect placas al arranque: %s/%s",
+                auto_conn.get("connected"),
+                auto_conn.get("total"),
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("Auto-connect placas al arranque: %s", e)
     retention_task = asyncio.create_task(_events_retention_loop())
     schedule_task = asyncio.create_task(schedule_background_loop())
     auto_rules_task: Optional[asyncio.Task] = None
