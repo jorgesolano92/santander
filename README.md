@@ -10,6 +10,8 @@ Sistema de control de accesos para oficinas del Banco Santander. Lógica de cont
 |-------------------|-------------|
 | **backend/** | Servicio Python (FastAPI): API REST, SQLite, comunicación con ETD8A12. |
 | **frontend/** | Interfaz web de configuración (React + Vite). |
+| **deploy/windows/** | Instalación / actualización / arranque al encender (PC sucursal Windows). |
+| **deploy/linux/** | Instalación como servicio systemd (Ubuntu/Debian). |
 | **coce-dashboard/** | POC dashboard tipo COCE: sucursales, modos y placas vía API del backend. |
 | **alcance.md** | Alcance del proyecto (requisitos, 7 modos, 33 actuaciones). |
 | **ARQUITECTURA.md** | Arquitectura en capas y tablas SQLite. |
