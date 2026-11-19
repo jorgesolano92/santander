@@ -3989,6 +3989,7 @@ def connect_configured_boards(*, reason: str = "manual") -> dict:
 
 def maybe_auto_reconnect_boards() -> Optional[dict]:
     """Reintenta placas caídas si panel_auto_reconnect y ha pasado el intervalo."""
+    global _last_auto_reconnect_at
     if not bool(getattr(settings, "panel_auto_reconnect", True)):
         return None
     try:
