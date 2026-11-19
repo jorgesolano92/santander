@@ -61,11 +61,35 @@ def _known_device_hosts() -> set[str]:
     return hosts
 
 
+def _panel_bearer_authorized(request: Request | None) -> bool:
+    """True si la petición trae JWT de panel válido (simulación desde la UI)."""
+    if request is None:
+        return False
+    auth = request.headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        return False
+    token = auth[7:].strip()
+    if not token:
+        return False
+    try:
+        from app.services import panel_jwt
+
+        panel_jwt.decode_access_token_username(token)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _require_known_device_host(request: Request | None) -> None:
-    """Pulsación solo desde ESP32/Panphone configurados (abre puertas)."""
+    """
+    Pulsación física: solo desde ESP32/Panphone configurados.
+    Simulación del panel web: permitida con JWT de panel (cualquier IP).
+    """
     from app.core.config import settings
 
     if not settings.device_webhook_known_hosts_only or request is None:
+        return
+    if _panel_bearer_authorized(request):
         return
     host = (request.client.host if request.client else "") or ""
     host = host.strip().lower().removeprefix("::ffff:")
