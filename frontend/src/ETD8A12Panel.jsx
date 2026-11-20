@@ -4208,33 +4208,67 @@ export default function ETD8A12Panel() {
                           </div>
                           <div
                             style={{
-                              display: "flex",
+                              display: "grid",
+                              gridTemplateColumns:
+                                "repeat(4, minmax(0, 1fr))",
                               gap: 6,
-                              flexWrap: "wrap",
                             }}
                           >
-                            {(b.outputs || []).map((v, i) => (
-                              <button
-                                key={i}
-                                onClick={() => doToggle(mid, i + 1, v)}
-                                disabled={
-                                  !b.connected || pending[`${mid}-${i + 1}`]
-                                }
-                                style={{
-                                  width: 26,
-                                  height: 26,
-                                  borderRadius: 5,
-                                  border: `1px solid ${v ? C.redBorder : C.border}`,
-                                  background: v ? C.redFaint : C.white,
-                                  color: v ? C.red : C.textSub,
-                                  cursor: b.connected
-                                    ? "pointer"
-                                    : "not-allowed",
-                                }}
-                              >
-                                {i + 1}
-                              </button>
-                            ))}
+                            {(b.outputs || []).map((v, i) => {
+                              const ch = modCfg?.outputs?.[i];
+                              const chName = shortChannelName(ch, 12);
+                              return (
+                                <button
+                                  key={i}
+                                  onClick={() => doToggle(mid, i + 1, v)}
+                                  disabled={
+                                    !b.connected || pending[`${mid}-${i + 1}`]
+                                  }
+                                  title={channelIoTitle("output", i, ch)}
+                                  style={{
+                                    minHeight: 40,
+                                    borderRadius: 6,
+                                    border: `1px solid ${v ? C.redBorder : C.border}`,
+                                    background: v ? C.redFaint : C.white,
+                                    color: v ? C.red : C.textSub,
+                                    cursor: b.connected
+                                      ? "pointer"
+                                      : "not-allowed",
+                                    padding: "4px 3px",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: 1,
+                                    lineHeight: 1.1,
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    OUT{i + 1}
+                                  </span>
+                                  {chName ? (
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        fontWeight: 600,
+                                        opacity: 0.85,
+                                        maxWidth: "100%",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {chName}
+                                    </span>
+                                  ) : null}
+                                </button>
+                              );
+                            })}
                           </div>
                           <div
                             style={{
@@ -4290,15 +4324,19 @@ export default function ETD8A12Panel() {
                           <InputOverrideLegend />
                           <div
                             style={{
-                              display: "flex",
+                              display: "grid",
+                              gridTemplateColumns:
+                                "repeat(4, minmax(0, 1fr))",
                               gap: 6,
-                              flexWrap: "wrap",
                             }}
                           >
                             {(b.inputs || []).map((v, i) => {
                               const forcedState = b.input_overrides?.[i];
                               const forcedOn = forcedState === true;
                               const forcedOff = forcedState === false;
+                              const ch = modCfg?.inputs?.[i];
+                              const chName = shortChannelName(ch, 12);
+                              const st = inputChannelState(b, i);
                               return (
                                 <button
                                   key={i}
@@ -4306,10 +4344,12 @@ export default function ETD8A12Panel() {
                                     cycleInputOverride(mid, i + 1)
                                   }
                                   disabled={!b.connected}
+                                  title={`${channelIoTitle("input", i, ch, {
+                                    activeByOverride: st.activeByOverride,
+                                  })} | REAL=${st.raw ? "ON" : "OFF"}`}
                                   style={{
-                                    width: 26,
-                                    height: 26,
-                                    borderRadius: 5,
+                                    minHeight: 40,
+                                    borderRadius: 6,
                                     border: `1px solid ${
                                       forcedOn
                                         ? C.greenBorder
@@ -4334,21 +4374,40 @@ export default function ETD8A12Panel() {
                                           ? C.amber
                                           : C.textSub,
                                     display: "flex",
+                                    flexDirection: "column",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    fontSize: 11,
-                                    fontWeight: 600,
+                                    gap: 1,
+                                    padding: "4px 3px",
+                                    lineHeight: 1.1,
                                     cursor: b.connected
                                       ? "pointer"
                                       : "not-allowed",
                                   }}
-                                  title={
-                                    b.input_overrides?.[i] === null
-                                      ? `IN${i + 1} REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
-                                      : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"} | REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
-                                  }
                                 >
-                                  {i + 1}
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    IN{i + 1}
+                                  </span>
+                                  {chName ? (
+                                    <span
+                                      style={{
+                                        fontSize: 9,
+                                        fontWeight: 600,
+                                        opacity: 0.85,
+                                        maxWidth: "100%",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {chName}
+                                    </span>
+                                  ) : null}
                                 </button>
                               );
                             })}
