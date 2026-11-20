@@ -4210,13 +4210,13 @@ export default function ETD8A12Panel() {
                             style={{
                               display: "grid",
                               gridTemplateColumns:
-                                "repeat(4, minmax(0, 1fr))",
-                              gap: 6,
+                                "repeat(6, minmax(0, 1fr))",
+                              gap: 5,
                             }}
                           >
                             {(b.outputs || []).map((v, i) => {
                               const ch = modCfg?.outputs?.[i];
-                              const chName = shortChannelName(ch, 12);
+                              const chName = shortChannelName(ch, 10);
                               return (
                                 <button
                                   key={i}
@@ -4326,8 +4326,8 @@ export default function ETD8A12Panel() {
                             style={{
                               display: "grid",
                               gridTemplateColumns:
-                                "repeat(4, minmax(0, 1fr))",
-                              gap: 6,
+                                "repeat(6, minmax(0, 1fr))",
+                              gap: 5,
                             }}
                           >
                             {(b.inputs || []).map((v, i) => {
@@ -4335,7 +4335,7 @@ export default function ETD8A12Panel() {
                               const forcedOn = forcedState === true;
                               const forcedOff = forcedState === false;
                               const ch = modCfg?.inputs?.[i];
-                              const chName = shortChannelName(ch, 12);
+                              const chName = shortChannelName(ch, 10);
                               const st = inputChannelState(b, i);
                               return (
                                 <button
