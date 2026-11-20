@@ -180,6 +180,9 @@ class Settings(BaseSettings):
     panphone_web_timeout_s: float = 8.0
 
     # Locuciones Panphone (audio_play.php) en extendido/autoservicio.
+    # Desactivado por defecto: las locuciones se configuran en el panel (relés OUT2–4).
+    # Pon true solo si quieres el audio automático del Panphone (pase_por_favor, etc.).
+    csip_panphone_locutions_enabled: bool = False
     # INs de «cajero ocupado» (presencia) de los 3 módulos, coma-separados.
     csip_atm_occupied_inputs: str = "IN_01_11,IN_02_10,IN_03_10"
     # Dispositivo CSIP donde se reproducen (videoportero exterior = p1 / .80).

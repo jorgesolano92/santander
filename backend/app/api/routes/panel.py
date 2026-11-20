@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from app.db import panel_modules_store as pms
 from app.db import system_events_store as ses
 from app.db import coce_message_store
@@ -4439,6 +4439,26 @@ def get_events(
         offset=0,
     )
     return {"total": total, "events": rows}
+
+
+@router.post("/events")
+def post_event(body: dict = Body(...)):
+    """Registra un evento desde la consola (Actividad) para que persista al refrescar."""
+    level = str(body.get("type") or body.get("level") or body.get("severity") or "INFO")
+    if level.upper() in ("ERROR", "Error"):
+        level = "ERR"
+    message = str(body.get("msg") or body.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message requerido")
+    event_id = ses.record_event(
+        level,
+        message[:500],
+        board_id=int(body.get("board") or body.get("board_id") or 0),
+        event_type=str(body.get("event_type") or "panel_activity"),
+        source="panel_ui",
+        payload=body.get("payload") if isinstance(body.get("payload"), dict) else None,
+    )
+    return {"ok": True, "id": event_id}
 
 
 @router.delete("/events")

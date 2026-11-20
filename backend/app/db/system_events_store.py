@@ -21,6 +21,38 @@ def default_event_source() -> str:
     return "system"
 
 
+_SOURCE_LABELS = {
+    "panel_ui": "Consola web",
+    "tablet_api": "Tablet",
+    "zaguan_orchestrator": "Zaguán (automático)",
+    "panphone_locutions": "Locución Panphone",
+    "locutions": "Locuciones (relé audio)",
+    "system": "Sistema automático",
+}
+
+
+def human_actor_label(
+    actor_principal: Optional[str],
+    actor_username: Optional[str],
+    source: Optional[str] = None,
+) -> str:
+    """Texto legible para usuarios no técnicos: quién realizó la acción."""
+    ap = (actor_principal or "system").strip().lower()
+    user = (actor_username or "").strip()
+    if ap == "panel":
+        return f"Consola · {user}" if user else "Consola web"
+    if ap == "tablet":
+        return f"Tablet · {user}" if user else "Tablet"
+    src = (source or "system").strip().lower()
+    return _SOURCE_LABELS.get(src, "Sistema automático")
+
+
+def human_board_label(board_id: int) -> str:
+    if not board_id:
+        return "General"
+    return f"Placa {board_id}"
+
+
 def ensure_system_events_schema() -> None:
     with get_connection() as conn:
         conn.execute(
@@ -79,6 +111,7 @@ def record_event(
     src = source if source is not None else default_event_source()
     now = datetime.now(timezone.utc).isoformat()
     payload_s = json.dumps(payload, ensure_ascii=False) if payload is not None else None
+    event_id = 0
     with get_connection() as conn:
         cur = conn.execute(
             """
@@ -100,7 +133,31 @@ def record_event(
             ),
         )
         conn.commit()
-        return int(cur.lastrowid)
+        event_id = int(cur.lastrowid)
+
+    row_dict = {
+        "id": event_id,
+        "ts": datetime.now().astimezone().strftime("%d/%m/%Y %H:%M:%S"),
+        "date": now,
+        "type": severity.upper()[:16],
+        "msg": message,
+        "board": int(board_id or 0),
+        "event_type": event_type,
+        "source": src,
+        "actor_principal": ap,
+        "actor_username": au,
+        "actor_label": human_actor_label(ap, au, src),
+        "board_label": human_board_label(int(board_id or 0)),
+    }
+    if payload is not None:
+        row_dict["payload"] = payload
+    try:
+        from app.services import panel_live_hub as plh
+
+        plh.publish_sync({"type": "system_event", "payload": row_dict})
+    except Exception:  # noqa: BLE001
+        pass
+    return event_id
 
 
 def _row_to_api_dict(row: Tuple[Any, ...]) -> Dict[str, Any]:
@@ -110,19 +167,25 @@ def _row_to_api_dict(row: Tuple[Any, ...]) -> Dict[str, Any]:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         ts = dt.astimezone().strftime("%d/%m/%Y %H:%M:%S")
+        ts_short = dt.astimezone().strftime("%H:%M:%S")
     except Exception:  # noqa: BLE001
         ts = str(created_at)[:8] if created_at else ""
+        ts_short = ts
+    board = int(board_id) if board_id is not None else 0
     out: Dict[str, Any] = {
         "id": int(_id),
         "ts": ts,
+        "ts_short": ts_short,
         "date": str(created_at),
         "type": str(severity),
         "msg": str(message),
-        "board": int(board_id) if board_id is not None else 0,
+        "board": board,
         "event_type": str(event_type),
         "source": str(source),
         "actor_principal": str(actor_principal),
         "actor_username": actor_username,
+        "actor_label": human_actor_label(str(actor_principal), actor_username, str(source)),
+        "board_label": human_board_label(board),
     }
     if payload:
         try:

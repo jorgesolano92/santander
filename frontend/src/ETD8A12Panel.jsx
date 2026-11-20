@@ -262,6 +262,47 @@ function buildHistoricoQueryParams({
   return params;
 }
 
+/** Quién realizó la acción, en lenguaje claro (consola / tablet / automático). */
+function formatActorLabel(e) {
+  if (e?.actor_label) return e.actor_label;
+  const ap = String(e?.actor_principal || "system").toLowerCase();
+  const user = String(e?.actor_username || "").trim();
+  if (ap === "panel") return user ? `Consola · ${user}` : "Consola web";
+  if (ap === "tablet") return user ? `Tablet · ${user}` : "Tablet";
+  const src = String(e?.source || "system").toLowerCase();
+  const bySource = {
+    panel_ui: "Consola web",
+    tablet_api: "Tablet",
+    zaguan_orchestrator: "Zaguán (automático)",
+    panphone_locutions: "Locución Panphone",
+    locutions: "Locuciones (relé audio)",
+    system: "Sistema automático",
+  };
+  return bySource[src] || "Sistema automático";
+}
+
+function formatBoardLabel(e) {
+  if (e?.board_label) return e.board_label;
+  const board = Number(e?.board || 0);
+  return board > 0 ? `Placa ${board}` : "General";
+}
+
+function mapEventToUiLog(e) {
+  const fullTs = String(e?.ts || "");
+  const short =
+    e?.ts_short ||
+    (fullTs.includes(" ") ? fullTs.split(" ").pop() : fullTs) ||
+    new Date().toLocaleTimeString("es-ES", { hour12: false });
+  return {
+    id: e?.id,
+    ts: short,
+    type: e?.type || "INFO",
+    msg: e?.msg || "",
+    actor_label: formatActorLabel(e),
+    board_label: formatBoardLabel(e),
+  };
+}
+
 function normalizeHexColor(
   raw,
   fallback = DEFAULT_TEMPLATE_CONFIG.primaryColor,
@@ -2703,18 +2744,26 @@ export default function ETD8A12Panel() {
     [moduleList, boards],
   );
 
-  const addUI = useCallback(
-    (type, msg) =>
-      setUiLog((p) => [
-        ...p.slice(-199),
-        {
-          ts: new Date().toLocaleTimeString("es-ES", { hour12: false }),
-          type,
-          msg,
-        },
-      ]),
-    [],
-  );
+  const addUI = useCallback((type, msg) => {
+    const level = type === "Error" ? "ERR" : type;
+    const entry = {
+      ts: new Date().toLocaleTimeString("es-ES", { hour12: false }),
+      type: level,
+      msg,
+      actor_label: "Consola web",
+      board_label: "General",
+    };
+    setUiLog((p) => [...p.slice(-99), entry]);
+    // Persistir en SQLite (últimos N en Actividad / Histórico); no bloquear UI.
+    void apiFetch("/events", {
+      method: "POST",
+      body: JSON.stringify({
+        type: level,
+        msg: String(msg || "").slice(0, 500),
+        event_type: "panel_activity",
+      }),
+    }).catch(() => {});
+  }, []);
 
   const beginGlobalLoading = useCallback(
     () => setGlobalLoadingCount((c) => c + 1),
@@ -2961,6 +3010,30 @@ export default function ETD8A12Panel() {
           if (data.type === "coce_notification") {
             setCoceMessageWsEvent({ ...data, _ts: Date.now() });
           }
+          if (data.type === "system_event" && data.payload) {
+            const mapped = mapEventToUiLog(data.payload);
+            setUiLog((p) => {
+              if (mapped.id && p.some((x) => x.id === mapped.id)) return p;
+              const last = p[p.length - 1];
+              if (
+                last &&
+                !last.id &&
+                last.msg === mapped.msg &&
+                last.type === mapped.type
+              ) {
+                return [
+                  ...p.slice(0, -1),
+                  {
+                    ...last,
+                    id: mapped.id,
+                    actor_label: mapped.actor_label || last.actor_label,
+                    board_label: mapped.board_label || last.board_label,
+                  },
+                ];
+              }
+              return [...p.slice(-99), mapped];
+            });
+          }
           if (data.type === "software_update_available") {
             window.dispatchEvent(
               new CustomEvent("software_update_available", { detail: data }),
@@ -3152,6 +3225,20 @@ export default function ETD8A12Panel() {
       // silent
     }
   }, [histDateFrom, histDateTo, histFilter]);
+
+  const loadActividadEvents = useCallback(async () => {
+    try {
+      const d = await apiFetch("/events?limit=100");
+      const rows = (d.events || []).slice().reverse();
+      setUiLog(rows.map(mapEventToUiLog));
+    } catch {
+      // silent
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadActividadEvents();
+  }, [loadActividadEvents]);
 
   useEffect(() => {
     if (tab !== HISTORICO_TAB_INDEX) return;
@@ -4429,7 +4516,10 @@ export default function ETD8A12Panel() {
                               color: C.textSub,
                             }}
                           >
-                            Panel ETD8A12
+                            {e.actor_label || "Consola web"}
+                            {e.board_label && e.board_label !== "General"
+                              ? ` · ${e.board_label}`
+                              : ""}
                           </div>
                           <div
                             style={{
@@ -5056,21 +5146,20 @@ export default function ETD8A12Panel() {
                             flexWrap: "wrap",
                           }}
                         >
-                          <span>{e.actor_username || "Sistema"}</span>
+                          <span style={{ fontWeight: 600 }}>
+                            {formatActorLabel(e)}
+                          </span>
                           <span
                             style={{
                               fontSize: 10,
-                              fontWeight: 700,
+                              fontWeight: 600,
                               borderRadius: 999,
                               padding: "1px 7px",
                               background: C.surfaceAlt,
                               color: C.textSub,
                             }}
                           >
-                            {e.actor_principal || "system"}
-                          </span>
-                          <span>
-                            {e.board ? `Placa ${e.board}` : "Sin placa"}
+                            {formatBoardLabel(e)}
                           </span>
                         </div>
                         <div

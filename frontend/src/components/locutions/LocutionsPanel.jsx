@@ -146,6 +146,22 @@ export default function LocutionsPanel({ apiFetch, onNotify }) {
         </div>
       </div>
 
+      <div
+        style={{
+          ...card,
+          background: "#eff6ff",
+          border: "1px solid #bfdbfe",
+          color: "#1e3a8a",
+          fontSize: 13,
+        }}
+      >
+        Solo se reproducen las locuciones de esta lista (relés OUT2–OUT4). El
+        audio automático del Panphone (pase_por_favor, etc.) está desactivado
+        salvo que en el servidor pongas{" "}
+        <code style={{ fontSize: 12 }}>CSIP_PANPHONE_LOCUTIONS_ENABLED=true</code>
+        .
+      </div>
+
       <section style={card}>
         <div style={{ fontWeight: 700, marginBottom: 10 }}>Probar relés</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>

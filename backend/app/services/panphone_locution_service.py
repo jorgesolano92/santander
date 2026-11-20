@@ -87,10 +87,20 @@ def _record(message: str, payload: dict[str, Any]) -> None:
         pass
 
 
+def _auto_enabled() -> bool:
+    return bool(getattr(settings, "csip_panphone_locutions_enabled", False))
+
+
 def play(locucion: str, *, reason: str) -> bool:
     """POST ``audio_play.php`` en segundo plano. False si CSIP desactivado."""
     from app.csip import client as csip_client
 
+    if not _auto_enabled():
+        log.debug(
+            "Locución Panphone %s omitida (CSIP_PANPHONE_LOCUTIONS_ENABLED=false)",
+            locucion,
+        )
+        return False
     if not csip_client.is_configured():
         log.debug("Locución %s omitida (CSIP no configurado)", locucion)
         return False
@@ -119,6 +129,8 @@ def play(locucion: str, *, reason: str) -> bool:
 
 def on_exterior_p1_pressed(mode: Optional[str]) -> Optional[str]:
     """Actuaciones 1 y 3 al pulsar el botón de entrada exterior P1."""
+    if not _auto_enabled():
+        return None
     if not _mode_ok(mode):
         return None
     any_on, states = _any_atm_occupied()
@@ -132,6 +144,9 @@ def on_exterior_p1_pressed(mode: Optional[str]) -> Optional[str]:
 def poll_atm_occupancy(mode: Optional[str]) -> None:
     """Actuaciones 2 y 4: flancos de ocupación y demora > N s."""
     global _last_any_occupied, _bienvenido_armed
+
+    if not _auto_enabled():
+        return
 
     any_on, states = _any_atm_occupied()
     now = time.monotonic()
