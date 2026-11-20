@@ -250,6 +250,14 @@ def csip_health() -> dict[str, Any]:
     }
 
 
+@router.get("/ping-all", summary="Ping TCP a Panphones configurados")
+def csip_ping_all() -> dict[str, Any]:
+    """Reachability de placas Panphone (puerto de CSIP_DEVICES), no ESP32 LED."""
+    from app.csip import client as csip_client
+
+    return csip_client.ping_all_devices()
+
+
 @router.get("/status", response_model=CsipStatusResponse, summary="Estado integración CSIP")
 def csip_status() -> CsipStatusResponse:
     devices = [CsipDeviceStatus(**row) for row in devices_public_status()]

@@ -3,11 +3,20 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 from urllib import error, request
+from urllib.parse import urlparse
 
 from app.core.config import settings
-from app.csip.devices import CsipDevice, default_device, get_device, is_multi_configured
+from app.csip.devices import (
+    CsipDevice,
+    default_device,
+    get_device,
+    is_multi_configured,
+    list_device_ids,
+)
 from app.csip.schemas import ButtonEventRequest, CallStartRequest, LedControlRequest
 
 log = logging.getLogger("csip.client")
@@ -22,6 +31,137 @@ class CsipClientError(RuntimeError):
 
 def is_configured() -> bool:
     return bool(settings.csip_enabled) and is_multi_configured()
+
+
+def _device_host_port(device: CsipDevice) -> tuple[str, int]:
+    raw = (device.base_url or "").strip()
+    if raw and "://" not in raw:
+        raw = f"http://{raw}"
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").strip()
+    if not host:
+        raise CsipClientError(f"CSIP sin host en base_url ({device.id})")
+    if parsed.port:
+        port = int(parsed.port)
+    else:
+        port = 443 if (parsed.scheme or "").lower() == "https" else 80
+    return host, port
+
+
+def ping_device(
+    device_id: str,
+    *,
+    timeout_s: Optional[float] = None,
+) -> dict[str, Any]:
+    """
+    Comprueba si el Panphone/CSIP responde en TCP (puerto de base_url).
+    No requiere API key; solo reachability de red.
+    """
+    d = get_device(device_id)
+    if not d:
+        return {
+            "ok": False,
+            "device_id": device_id,
+            "error": "dispositivo no configurado",
+        }
+    try:
+        host, port = _device_host_port(d)
+    except CsipClientError as e:
+        return {"ok": False, "device_id": device_id, "error": str(e)}
+    timeout = max(0.3, float(timeout_s if timeout_s is not None else min(2.0, settings.csip_timeout_s)))
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+        return {
+            "ok": True,
+            "device_id": d.id,
+            "host": host,
+            "port": port,
+            "base_url": d.base_url,
+        }
+    except OSError as e:
+        return {
+            "ok": False,
+            "device_id": d.id,
+            "host": host,
+            "port": port,
+            "base_url": d.base_url,
+            "error": str(e),
+        }
+
+
+def ping_all_devices(*, timeout_s: Optional[float] = None) -> dict[str, Any]:
+    """Ping TCP a cada placa física configurada (p1, p2, …)."""
+    ids = list_device_ids()
+    # Solo placas físicas: p3/p4 suelen ser alias LED de la misma IP.
+    physical = [did for did in ids if did in ("p1", "p2")] or ids
+    # Deduplicar por host:port
+    seen_hosts: set[tuple[str, int]] = set()
+    unique_ids: list[str] = []
+    for did in physical:
+        d = get_device(did)
+        if not d:
+            continue
+        try:
+            key = _device_host_port(d)
+        except CsipClientError:
+            unique_ids.append(did)
+            continue
+        if key in seen_hosts:
+            continue
+        seen_hosts.add(key)
+        unique_ids.append(did)
+
+    results: dict[str, Any] = {}
+    if not unique_ids:
+        return {"ok": False, "devices": {}, "online_count": 0, "total": 0}
+
+    with ThreadPoolExecutor(max_workers=max(1, len(unique_ids))) as pool:
+        futs = {
+            pool.submit(ping_device, did, timeout_s=timeout_s): did for did in unique_ids
+        }
+        for fut in as_completed(futs):
+            did = futs[fut]
+            try:
+                results[did] = fut.result()
+            except Exception as e:  # noqa: BLE001
+                results[did] = {"ok": False, "device_id": did, "error": str(e)}
+
+    # Propagar estado a alias que comparten host (p3→p1, p4→p2).
+    for did in ids:
+        if did in results:
+            continue
+        d = get_device(did)
+        if not d:
+            continue
+        try:
+            host, port = _device_host_port(d)
+        except CsipClientError:
+            results[did] = {"ok": False, "device_id": did, "error": "sin host"}
+            continue
+        twin = next(
+            (
+                results[oid]
+                for oid in unique_ids
+                if results.get(oid)
+                and results[oid].get("host") == host
+                and int(results[oid].get("port") or 0) == port
+            ),
+            None,
+        )
+        if twin:
+            results[did] = {**twin, "device_id": did, "alias_of": twin.get("device_id")}
+        else:
+            results[did] = ping_device(did, timeout_s=timeout_s)
+
+    online = sum(1 for v in results.values() if v.get("ok"))
+    return {
+        "ok": online > 0,
+        "devices": results,
+        "online_count": online,
+        "total": len(results),
+        "csip_enabled": bool(settings.csip_enabled),
+    }
 
 
 def _resolve_device(device_id: Optional[str] = None) -> CsipDevice:

@@ -357,6 +357,14 @@ def _schedule_led_device_push(
     """HTTP a ESP32 en segundo plano: no bloquear ciclo Modbus / reglas automáticas."""
     if not LED_DEVICE_SYNC:
         return
+    # Con Panphone/CSIP los LEDs van por _schedule_csip_led_push; no insistir en ESP32 :80.
+    try:
+        from app.csip import client as csip_client
+
+        if csip_client.is_configured():
+            return
+    except Exception:  # noqa: BLE001
+        pass
     snapshot = dict(states)
     order = push_order
 

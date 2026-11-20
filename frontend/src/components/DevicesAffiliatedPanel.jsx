@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCircleCheck,
@@ -8,12 +8,7 @@ import {
   faRotate,
 } from "@fortawesome/free-solid-svg-icons";
 import { LedStrip } from "./zaguan/ZaguanLedComponents";
-import {
-  CANAL_DEFAULT_IPS,
-  CANAL_INFO,
-  ESTADO_META,
-} from "./zaguan/zaguanConstants";
-import { createZaguanDeviceApi } from "./zaguan/zaguanDeviceApi";
+import { CANAL_INFO, ESTADO_META } from "./zaguan/zaguanConstants";
 
 const C = {
   red: "var(--template-primary)",
@@ -61,15 +56,6 @@ const PUERTAS = [
     canales: [2, 4],
   },
 ];
-
-function resolveIp(canal, channels) {
-  const ch = channels?.[`p${canal}`] || {};
-  const resolved = String(ch.resolved_host || "").trim();
-  if (resolved) return resolved;
-  const override = String(ch.host || "").trim();
-  if (override) return override;
-  return CANAL_DEFAULT_IPS[canal] || "—";
-}
 
 function EstadoPill({ estado }) {
   const key = ESTADO_META[estado] ? estado : "apagado";
@@ -231,7 +217,7 @@ function DeviceCard({ canal, estado, online, ip, port }) {
               marginBottom: 1,
             }}
           >
-            IP asociada
+            Panphone
           </div>
           <div
             style={{
@@ -260,11 +246,6 @@ export default function DevicesAffiliatedPanel({
   apiFetchZaguan,
   active = true,
 }) {
-  const api = useMemo(
-    () => createZaguanDeviceApi(apiFetchZaguan),
-    [apiFetchZaguan],
-  );
-  const [channels, setChannels] = useState({});
   const [estados, setEstados] = useState({
     1: "apagado",
     2: "apagado",
@@ -277,6 +258,18 @@ export default function DevicesAffiliatedPanel({
     3: false,
     4: false,
   });
+  const [hostMap, setHostMap] = useState({
+    1: "—",
+    2: "—",
+    3: "—",
+    4: "—",
+  });
+  const [portMap, setPortMap] = useState({
+    1: null,
+    2: null,
+    3: null,
+    4: null,
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -285,15 +278,11 @@ export default function DevicesAffiliatedPanel({
     if (!silencioso) setLoading(true);
     setError("");
     try {
-      const [target, estadoRes, pingRes] = await Promise.all([
-        api.getTarget().catch(() => null),
+      const [estadoRes, pingRes] = await Promise.all([
         apiFetchZaguan("/api/zaguan/estado").catch(() => null),
-        api.pingAll().catch(() => null),
+        // Online/Offline = Panphone CSIP reachable (no ESP32 LED).
+        apiFetchZaguan("/api/csip/ping-all").catch(() => null),
       ]);
-
-      if (target?.channels) {
-        setChannels(target.channels);
-      }
 
       if (estadoRes) {
         const next = {};
@@ -306,20 +295,38 @@ export default function DevicesAffiliatedPanel({
         }
       }
 
-      if (pingRes?.channels) {
+      if (pingRes?.devices) {
         const map = { 1: false, 2: false, 3: false, 4: false };
-        for (let n = 1; n <= 4; n += 1) {
-          const entry = pingRes.channels[`p${n}`];
-          map[n] = Boolean(entry?.ok);
+        const hosts = { 1: "—", 2: "—", 3: "—", 4: "—" };
+        const ports = { 1: null, 2: null, 3: null, 4: null };
+        // Placa física p1 (.80) → canales lógicos 1 y 3; p2 (.70) → 2 y 4.
+        const pick = (primary, alias) =>
+          pingRes.devices[primary] || pingRes.devices[alias] || null;
+        const p1 = pick("p1", "p3");
+        const p2 = pick("p2", "p4");
+        map[1] = Boolean(p1?.ok);
+        map[3] = Boolean(p1?.ok) || Boolean(pingRes.devices.p3?.ok);
+        map[2] = Boolean(p2?.ok);
+        map[4] = Boolean(p2?.ok) || Boolean(pingRes.devices.p4?.ok);
+        for (const [canal, entry] of [
+          [1, p1],
+          [3, p1],
+          [2, p2],
+          [4, p2],
+        ]) {
+          if (entry?.host) hosts[canal] = String(entry.host);
+          if (entry?.port != null) ports[canal] = entry.port;
         }
         setOnlineMap(map);
+        setHostMap(hosts);
+        setPortMap(ports);
       }
     } catch (e) {
       setError(e?.message || "No se pudo cargar dispositivos");
     } finally {
       if (!silencioso) setLoading(false);
     }
-  }, [api, apiFetchZaguan]);
+  }, [apiFetchZaguan]);
 
   useEffect(() => {
     if (!active) return undefined;
@@ -378,7 +385,7 @@ export default function DevicesAffiliatedPanel({
             Dispositivos afiliados
           </div>
           <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-            Puertas del sistema con tiras LED e IP asociada
+            Panphones CSIP por puerta · Online = reachable en red
           </div>
         </div>
         <button
@@ -482,21 +489,16 @@ export default function DevicesAffiliatedPanel({
                 gap: 10,
               }}
             >
-              {puerta.canales.map((canal) => {
-                const ch = channels[`p${canal}`] || {};
-                const ip = resolveIp(canal, channels);
-                const port = ch.resolved_port || ch.port || null;
-                return (
-                  <DeviceCard
-                    key={canal}
-                    canal={canal}
-                    estado={estados[canal] || "apagado"}
-                    online={Boolean(onlineMap[canal])}
-                    ip={ip}
-                    port={port}
-                  />
-                );
-              })}
+              {puerta.canales.map((canal) => (
+                <DeviceCard
+                  key={canal}
+                  canal={canal}
+                  estado={estados[canal] || "apagado"}
+                  online={Boolean(onlineMap[canal])}
+                  ip={hostMap[canal] || "—"}
+                  port={portMap[canal] || null}
+                />
+              ))}
             </div>
           </div>
         ))}

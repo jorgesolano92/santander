@@ -3465,6 +3465,12 @@ export default function ETD8A12Panel() {
         });
         if (res?.ok === false) {
           addUI("WARN", `p${canal} rechazada: ${res.reason || "sin motivo"}`);
+        } else if (res?.tablet_call) {
+          // Horario manual/carga: la pulsación inicia llamada; Modbus abre al aceptar en tablet.
+          addUI(
+            "OK",
+            `p${canal}: llamada tablet iniciada${res?.call_id ? ` (${String(res.call_id).slice(0, 8)}…)` : ""}`,
+          );
         } else if (res?.modbus_ok === false) {
           addUI(
             "WARN",
