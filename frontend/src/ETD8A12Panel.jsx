@@ -4000,189 +4000,234 @@ export default function ETD8A12Panel() {
                       </span>
                       <div
                         style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: C.red,
-                          marginBottom: 6,
+                          display: "flex",
+                          gap: 16,
+                          flexWrap: "wrap",
+                          alignItems: "flex-start",
+                          marginBottom: 4,
                         }}
                       >
-                        {nOut} RELÉS DE SALIDA (OUT1..OUT{nOut || "—"})
-                      </div>
-                      <div
-                        style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
-                      >
-                        {(b.outputs || []).map((v, i) => (
-                          <button
-                            key={i}
-                            onClick={() => doToggle(mid, i + 1, v)}
-                            disabled={
-                              !b.connected || pending[`${mid}-${i + 1}`]
-                            }
+                        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                          <div
                             style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 5,
-                              border: `1px solid ${v ? C.redBorder : C.border}`,
-                              background: v ? C.redFaint : C.white,
-                              color: v ? C.red : C.textSub,
-                              cursor: b.connected ? "pointer" : "not-allowed",
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: C.red,
+                              marginBottom: 6,
                             }}
                           >
-                            {i + 1}
-                          </button>
-                        ))}
-                      </div>
-                      <div
-                        style={{ marginTop: 8, fontSize: 11, color: C.textSub }}
-                      >
-                        Activos:{" "}
-                        <strong style={{ color: C.red }}>
-                          {(b.outputs || []).filter(Boolean).length}/{nOut || 0}
-                        </strong>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: C.amber,
-                          marginTop: 10,
-                          marginBottom: 6,
-                        }}
-                      >
-                        {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL / OVERRIDE
-                      </div>
-                      <div
-                        style={{
-                          display: "inline-block",
-                          marginBottom: 6,
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: C.blue,
-                          background: C.blueLight,
-                          border: `1px solid ${C.blue}44`,
-                          borderRadius: 12,
-                          padding: "2px 8px",
-                        }}
-                      >
-                        Simulación / Override
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: C.muted,
-                          marginBottom: 6,
-                        }}
-                      >
-                        Click para ciclo: REAL -&gt; FORZADA ON -&gt; FORZADA
-                        OFF -&gt; REAL
-                      </div>
-                      <InputOverrideLegend />
-                      <div
-                        style={{ display: "flex", gap: 6, flexWrap: "wrap" }}
-                      >
-                        {(b.inputs || []).map((v, i) =>
-                          (() => {
-                            const forcedState = b.input_overrides?.[i];
-                            const isForced =
-                              forcedState !== null && forcedState !== undefined;
-                            const forcedOn = forcedState === true;
-                            const forcedOff = forcedState === false;
-                            return (
+                            {nOut} RELÉS DE SALIDA (OUT1..OUT{nOut || "—"})
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {(b.outputs || []).map((v, i) => (
                               <button
                                 key={i}
-                                onClick={() => cycleInputOverride(mid, i + 1)}
-                                disabled={!b.connected}
+                                onClick={() => doToggle(mid, i + 1, v)}
+                                disabled={
+                                  !b.connected || pending[`${mid}-${i + 1}`]
+                                }
                                 style={{
                                   width: 26,
                                   height: 26,
                                   borderRadius: 5,
-                                  border: `1px solid ${
-                                    forcedOn
-                                      ? C.greenBorder
-                                      : forcedOff
-                                        ? C.blue
-                                        : v
-                                          ? C.amberBorder
-                                          : C.border
-                                  }`,
-                                  background: forcedOn
-                                    ? C.greenLight
-                                    : forcedOff
-                                      ? C.blueLight
-                                      : v
-                                        ? C.amberLight
-                                        : C.white,
-                                  color: forcedOn
-                                    ? C.green
-                                    : forcedOff
-                                      ? C.blue
-                                      : v
-                                        ? C.amber
-                                        : C.textSub,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontSize: 11,
-                                  fontWeight: 600,
+                                  border: `1px solid ${v ? C.redBorder : C.border}`,
+                                  background: v ? C.redFaint : C.white,
+                                  color: v ? C.red : C.textSub,
                                   cursor: b.connected
                                     ? "pointer"
                                     : "not-allowed",
                                 }}
-                                title={
-                                  b.input_overrides?.[i] === null
-                                    ? `IN${i + 1} REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
-                                    : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"} | REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
-                                }
                               >
                                 {i + 1}
                               </button>
-                            );
-                          })(),
-                        )}
-                      </div>
-                      <div
-                        style={{ marginTop: 8, fontSize: 11, color: C.textSub }}
-                      >
-                        Activas:{" "}
-                        <strong style={{ color: C.amber }}>
-                          {(b.inputs || []).filter(Boolean).length}/{nIn || 0}
-                        </strong>
-                      </div>
-                      <div
-                        style={{ marginTop: 4, fontSize: 10, color: C.muted }}
-                      >
-                        Forzadas:{" "}
-                        <strong>
-                          {
-                            (b.input_overrides || []).filter((x) => x !== null)
-                              .length
-                          }
-                        </strong>
-                        {" · "}
-                        ON:{" "}
-                        <strong style={{ color: C.green }}>
-                          {
-                            (b.input_overrides || []).filter((x) => x === true)
-                              .length
-                          }
-                        </strong>
-                        {" · "}
-                        OFF:{" "}
-                        <strong style={{ color: C.blue }}>
-                          {
-                            (b.input_overrides || []).filter((x) => x === false)
-                              .length
-                          }
-                        </strong>
-                      </div>
-                      <div
-                        style={{ marginTop: 4, fontSize: 10, color: C.muted }}
-                      >
-                        Real (Modbus) activas:{" "}
-                        <strong>
-                          {(b.inputs_raw || []).filter(Boolean).length}/
-                          {nIn || 0}
-                        </strong>
+                            ))}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 11,
+                              color: C.textSub,
+                            }}
+                          >
+                            Activos:{" "}
+                            <strong style={{ color: C.red }}>
+                              {(b.outputs || []).filter(Boolean).length}/
+                              {nOut || 0}
+                            </strong>
+                          </div>
+                        </div>
+                        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: C.amber,
+                              marginBottom: 6,
+                            }}
+                          >
+                            {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL /
+                            OVERRIDE
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-block",
+                              marginBottom: 6,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: C.blue,
+                              background: C.blueLight,
+                              border: `1px solid ${C.blue}44`,
+                              borderRadius: 12,
+                              padding: "2px 8px",
+                            }}
+                          >
+                            Simulación / Override
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: C.muted,
+                              marginBottom: 6,
+                            }}
+                          >
+                            Click para ciclo: REAL -&gt; FORZADA ON -&gt;
+                            FORZADA OFF -&gt; REAL
+                          </div>
+                          <InputOverrideLegend />
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {(b.inputs || []).map((v, i) =>
+                              (() => {
+                                const forcedState = b.input_overrides?.[i];
+                                const forcedOn = forcedState === true;
+                                const forcedOff = forcedState === false;
+                                return (
+                                  <button
+                                    key={i}
+                                    onClick={() =>
+                                      cycleInputOverride(mid, i + 1)
+                                    }
+                                    disabled={!b.connected}
+                                    style={{
+                                      width: 26,
+                                      height: 26,
+                                      borderRadius: 5,
+                                      border: `1px solid ${
+                                        forcedOn
+                                          ? C.greenBorder
+                                          : forcedOff
+                                            ? C.blue
+                                            : v
+                                              ? C.amberBorder
+                                              : C.border
+                                      }`,
+                                      background: forcedOn
+                                        ? C.greenLight
+                                        : forcedOff
+                                          ? C.blueLight
+                                          : v
+                                            ? C.amberLight
+                                            : C.white,
+                                      color: forcedOn
+                                        ? C.green
+                                        : forcedOff
+                                          ? C.blue
+                                          : v
+                                            ? C.amber
+                                            : C.textSub,
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      cursor: b.connected
+                                        ? "pointer"
+                                        : "not-allowed",
+                                    }}
+                                    title={
+                                      b.input_overrides?.[i] === null
+                                        ? `IN${i + 1} REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
+                                        : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"} | REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
+                                    }
+                                  >
+                                    {i + 1}
+                                  </button>
+                                );
+                              })(),
+                            )}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 11,
+                              color: C.textSub,
+                            }}
+                          >
+                            Activas:{" "}
+                            <strong style={{ color: C.amber }}>
+                              {(b.inputs || []).filter(Boolean).length}/
+                              {nIn || 0}
+                            </strong>
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 10,
+                              color: C.muted,
+                            }}
+                          >
+                            Forzadas:{" "}
+                            <strong>
+                              {
+                                (b.input_overrides || []).filter(
+                                  (x) => x !== null,
+                                ).length
+                              }
+                            </strong>
+                            {" · "}
+                            ON:{" "}
+                            <strong style={{ color: C.green }}>
+                              {
+                                (b.input_overrides || []).filter(
+                                  (x) => x === true,
+                                ).length
+                              }
+                            </strong>
+                            {" · "}
+                            OFF:{" "}
+                            <strong style={{ color: C.blue }}>
+                              {
+                                (b.input_overrides || []).filter(
+                                  (x) => x === false,
+                                ).length
+                              }
+                            </strong>
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 10,
+                              color: C.muted,
+                            }}
+                          >
+                            Real (Modbus) activas:{" "}
+                            <strong>
+                              {(b.inputs_raw || []).filter(Boolean).length}/
+                              {nIn || 0}
+                            </strong>
+                          </div>
+                        </div>
                       </div>
                       <div
                         style={{
