@@ -64,24 +64,48 @@ function deepClone(obj) {
 }
 
 function parseMinutes(hhmm) {
-  const [h, m] = String(hhmm || "00:00")
-    .split(":")
-    .map(Number);
-  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+  const raw = String(hhmm || "00:00").trim();
+  const m = raw.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!m) return 0;
+  const h = Math.min(23, Math.max(0, Number(m[1]) || 0));
+  const min = Math.min(59, Math.max(0, Number(m[2] || 0) || 0));
+  return h * 60 + min;
 }
 
 function formatMinutes(totalMinutes) {
   const day = 24 * 60;
   const mm = ((totalMinutes % day) + day) % day;
   const h = Math.floor(mm / 60);
-  const m = mm % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const min = mm % 60;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+/** Normaliza a HH:MM; si no es válida, devuelve el texto original. */
+function normalizeHhmm(raw) {
+  const text = String(raw || "").trim();
+  const m = text.match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return text;
+  const h = Math.min(23, Math.max(0, Number(m[1])));
+  const min = Math.min(59, Math.max(0, Number(m[2])));
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return text;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
 /** Inicio visual: hora «Desde» de la primera franja del orden (lista / drag). */
 function timelineStartMinutes(slots) {
   if (!Array.isArray(slots) || slots.length === 0) return 0;
   return parseMinutes(slots[0].start);
+}
+
+/** Firma de las franjas: cualquier cambio fuerza remount de la barra. */
+function timelineFingerprint(slots) {
+  if (!Array.isArray(slots) || !slots.length) return "empty";
+  return slots
+    .map(
+      (s, i) =>
+        `${i}:${normalizeHhmm(s.start)}-${normalizeHhmm(s.end)}:${s.rule_key}:${s.active !== false ? 1 : 0}`,
+    )
+    .join("|");
 }
 
 function FeedbackBanner({ feedback }) {
@@ -259,16 +283,20 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
 
   const daySlots = draft.days?.[dayTab] || [];
   const location = draft.location || { ...DEFAULT_LOCATION };
-  const timelineStart = useMemo(
-    () => timelineStartMinutes(daySlots),
+  const slotsFingerprint = useMemo(
+    () => timelineFingerprint(daySlots),
     [daySlots],
   );
+  const timelineStart = useMemo(
+    () => timelineStartMinutes(daySlots),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fingerprint captura cambios de horas/orden
+    [slotsFingerprint],
+  );
   const timelineLabels = useMemo(() => {
-    // Marcas cada 4 h en la ventana de 24 h que empieza en la 1.ª franja.
-    // key por índice (no por texto): al cerrar el ciclo start==start+24h y React
-    // reutilizaba el tick anterior (p. ej. quedaba «08:00» tras cambiar a 07:00).
+    // Marcas cada 4 h en la ventana de 24 h; key = step (posición), no el texto.
     return [0, 1, 2, 3, 4, 5, 6].map((step) => ({
       step,
+      pct: (step / 6) * 100,
       label: formatMinutes(timelineStart + step * 4 * 60),
     }));
   }, [timelineStart]);
@@ -377,6 +405,12 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
       };
       return next;
     });
+  };
+
+  const commitSlotTime = (index, field, value) => {
+    const normalized = normalizeHhmm(value);
+    if (normalized === value) return;
+    updateSlot(index, field, normalized);
   };
 
   const addSlot = () => {
@@ -766,65 +800,81 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
           Línea de tiempo — {WEEKDAYS.find((d) => d.key === dayTab)?.label}
           <span style={{ fontWeight: 500, color: "#6b7280", marginLeft: 8 }}>
-            (desde {timelineLabels[0]?.label || formatMinutes(timelineStart)} ·
-            1.ª franja del orden)
+            (desde {formatMinutes(timelineStart)} · 1.ª franja del orden)
           </span>
         </div>
-        <div
-          style={{
-            position: "relative",
-            height: 56,
-            background: "#f9fafb",
-            border: "1px solid #e5e7eb",
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
-        >
-          {/* Pintar al revés: la 1.ª del orden queda encima en solapes. */}
-          {[...daySlots].reverse().map((slot, revIdx) => {
-            const i = daySlots.length - 1 - revIdx;
-            return (
-              <div
-                key={i}
-                title={`#${i + 1} ${slot.start}–${slot.end} ${ruleKeyToLabel(slot.rule_key)}`}
-                style={{
-                  position: "absolute",
-                  top: 10,
-                  height: 36,
-                  borderRadius: 6,
-                  zIndex: daySlots.length - i,
-                  ...slotStyle(slot, rules, timelineStart),
-                }}
-              />
-            );
-          })}
+        {/* key = fingerprint: al cambiar horas/orden se remonta toda la franja. */}
+        <div key={`${dayTab}-${slotsFingerprint}`}>
           <div
             style={{
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              left: `${nowLinePercent}%`,
-              width: 2,
-              background: "#dc2626",
-              zIndex: 2,
+              position: "relative",
+              height: 56,
+              background: "#f9fafb",
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              overflow: "hidden",
             }}
-          />
-        </div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 10,
-            color: "#9ca3af",
-            marginTop: 4,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {timelineLabels.map((tick) => (
-            <span key={tick.step} title={`+${tick.step * 4} h`}>
-              {tick.label}
-            </span>
-          ))}
+          >
+            {/* Pintar al revés: la 1.ª del orden queda encima en solapes. */}
+            {[...daySlots].reverse().map((slot, revIdx) => {
+              const i = daySlots.length - 1 - revIdx;
+              return (
+                <div
+                  key={`${i}-${slot.start}-${slot.end}-${slot.rule_key}-${slot.active !== false}`}
+                  title={`#${i + 1} ${slot.start}–${slot.end} ${ruleKeyToLabel(slot.rule_key)}`}
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    height: 36,
+                    borderRadius: 6,
+                    zIndex: daySlots.length - i,
+                    ...slotStyle(slot, rules, timelineStart),
+                  }}
+                />
+              );
+            })}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: `${nowLinePercent}%`,
+                width: 2,
+                background: "#dc2626",
+                zIndex: 20,
+              }}
+            />
+          </div>
+          <div
+            style={{
+              position: "relative",
+              height: 18,
+              marginTop: 4,
+              fontSize: 10,
+              color: "#9ca3af",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {timelineLabels.map((tick) => (
+              <span
+                key={tick.step}
+                title={`+${tick.step * 4} h desde ${formatMinutes(timelineStart)}`}
+                style={{
+                  position: "absolute",
+                  left: `${tick.pct}%`,
+                  transform:
+                    tick.step === 0
+                      ? "none"
+                      : tick.step === 6
+                        ? "translateX(-100%)"
+                        : "translateX(-50%)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {tick.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -836,7 +886,7 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
       <div style={{ display: "grid", gap: 10 }}>
         {daySlots.map((slot, index) => (
           <div
-            key={`${dayTab}-${index}-${slot.start}-${slot.rule_key}`}
+            key={`${dayTab}-slot-${index}`}
             draggable
             onDragStart={(e) => {
               if (!dragFromHandle.current) {
@@ -918,6 +968,7 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
                 style={inputStyle()}
                 value={slot.start}
                 onChange={(e) => updateSlot(index, "start", e.target.value)}
+                onBlur={(e) => commitSlotTime(index, "start", e.target.value)}
                 placeholder="08:00"
                 draggable={false}
                 onDragStart={(e) => e.stopPropagation()}
@@ -931,6 +982,7 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
                 style={inputStyle()}
                 value={slot.end}
                 onChange={(e) => updateSlot(index, "end", e.target.value)}
+                onBlur={(e) => commitSlotTime(index, "end", e.target.value)}
                 placeholder="15:00"
                 draggable={false}
                 onDragStart={(e) => e.stopPropagation()}
