@@ -4188,100 +4188,29 @@ export default function ETD8A12Panel() {
                       </span>
                       <div
                         style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(118px, auto) 1fr 1fr",
-                          gap: "10px 16px",
-                          alignItems: "start",
+                          display: "flex",
+                          gap: 16,
+                          flexWrap: "wrap",
+                          alignItems: "flex-start",
                           marginBottom: 4,
                         }}
                       >
-                        {/* Rail izquierdo: acciones de salidas */}
-                        <div
-                          style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 6,
-                            paddingTop: 2,
-                            minWidth: 0,
-                          }}
-                        >
+                        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                           <div
                             style={{
-                              fontSize: 10,
+                              fontSize: 11,
                               fontWeight: 700,
                               color: C.red,
-                              letterSpacing: 0.3,
+                              marginBottom: 6,
                             }}
                           >
-                            SALIDAS
+                            {nOut} RELÉS DE SALIDA (OUT1..OUT{nOut || "—"})
                           </div>
-                          <Btn
-                            small
-                            onClick={() => doAllOn(mid)}
-                            disabled={!b.connected || nOut === 0}
-                          >
-                            Todas ON
-                          </Btn>
-                          <Btn
-                            small
-                            onClick={() => doAllOff(mid)}
-                            disabled={!b.connected || nOut === 0}
-                          >
-                            Todas OFF
-                          </Btn>
-                          {hasInOutAssocReg && (
-                            <label
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "flex-start",
-                                gap: 6,
-                                fontSize: 10,
-                                color: C.textSub,
-                                cursor:
-                                  b.connected && !pending[`ioa${mid}`]
-                                    ? "pointer"
-                                    : "not-allowed",
-                                marginTop: 2,
-                                lineHeight: 1.25,
-                              }}
-                              title={
-                                b.in_out_associated == null && b.connected
-                                  ? "Estado del equipo aún no leído; al marcar/desmarcar se envía 1/0 al registro IN↔OUT"
-                                  : "Acople IN↔OUT (1) / desacople (0) en el holding configurado en la placa"
-                              }
-                            >
-                              <input
-                                type="checkbox"
-                                ref={(el) => {
-                                  if (el) {
-                                    el.indeterminate =
-                                      b.connected &&
-                                      b.in_out_associated == null;
-                                  }
-                                }}
-                                checked={b.in_out_associated === true}
-                                disabled={
-                                  !b.connected || Boolean(pending[`ioa${mid}`])
-                                }
-                                onChange={(e) => {
-                                  setInOutAssociation(mid, e.target.checked);
-                                }}
-                                style={{ marginTop: 1 }}
-                              />
-                              IN↔OUT acoplado
-                            </label>
-                          )}
-                        </div>
-
-                        {/* Chips OUT — misma línea que IN */}
-                        <div style={{ minWidth: 0 }}>
                           <div
                             style={{
                               display: "flex",
                               gap: 6,
                               flexWrap: "wrap",
-                              alignItems: "center",
-                              minHeight: 26,
                             }}
                           >
                             {(b.outputs || []).map((v, i) => (
@@ -4307,17 +4236,63 @@ export default function ETD8A12Panel() {
                               </button>
                             ))}
                           </div>
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 11,
+                              color: C.textSub,
+                            }}
+                          >
+                            Activos:{" "}
+                            <strong style={{ color: C.red }}>
+                              {(b.outputs || []).filter(Boolean).length}/
+                              {nOut || 0}
+                            </strong>
+                          </div>
                         </div>
-
-                        {/* Chips IN — alineados con OUT */}
-                        <div style={{ minWidth: 0 }}>
+                        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: C.amber,
+                              marginBottom: 6,
+                            }}
+                          >
+                            {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL /
+                            OVERRIDE
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-block",
+                              marginBottom: 6,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              color: C.blue,
+                              background: C.blueLight,
+                              border: `1px solid ${C.blue}44`,
+                              borderRadius: 12,
+                              padding: "2px 8px",
+                            }}
+                          >
+                            Simulación / Override
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 10,
+                              color: C.muted,
+                              marginBottom: 6,
+                            }}
+                          >
+                            Click para ciclo: REAL -&gt; FORZADA ON -&gt;
+                            FORZADA OFF -&gt; REAL
+                          </div>
+                          <InputOverrideLegend />
                           <div
                             style={{
                               display: "flex",
                               gap: 6,
                               flexWrap: "wrap",
-                              alignItems: "center",
-                              minHeight: 26,
                             }}
                           >
                             {(b.inputs || []).map((v, i) => {
@@ -4378,70 +4353,13 @@ export default function ETD8A12Panel() {
                               );
                             })}
                           </div>
-                        </div>
-
-                        {/* Literales OUT debajo */}
-                        <div />
-                        <div style={{ minWidth: 0 }}>
                           <div
                             style={{
+                              marginTop: 8,
                               fontSize: 11,
-                              fontWeight: 700,
-                              color: C.red,
-                              marginBottom: 4,
+                              color: C.textSub,
                             }}
                           >
-                            {nOut} RELÉS DE SALIDA (OUT1..OUT{nOut || "—"})
-                          </div>
-                          <div style={{ fontSize: 11, color: C.textSub }}>
-                            Activos:{" "}
-                            <strong style={{ color: C.red }}>
-                              {(b.outputs || []).filter(Boolean).length}/
-                              {nOut || 0}
-                            </strong>
-                          </div>
-                        </div>
-
-                        {/* Literales IN debajo */}
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: C.amber,
-                              marginBottom: 4,
-                            }}
-                          >
-                            {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL /
-                            OVERRIDE
-                          </div>
-                          <div
-                            style={{
-                              display: "inline-block",
-                              marginBottom: 4,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              color: C.blue,
-                              background: C.blueLight,
-                              border: `1px solid ${C.blue}44`,
-                              borderRadius: 12,
-                              padding: "2px 8px",
-                            }}
-                          >
-                            Simulación / Override
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: C.muted,
-                              marginBottom: 4,
-                            }}
-                          >
-                            Click para ciclo: REAL -&gt; FORZADA ON -&gt;
-                            FORZADA OFF -&gt; REAL
-                          </div>
-                          <InputOverrideLegend />
-                          <div style={{ fontSize: 11, color: C.textSub }}>
                             Activas:{" "}
                             <strong style={{ color: C.amber }}>
                               {(b.inputs || []).filter(Boolean).length}/
@@ -4496,6 +4414,69 @@ export default function ETD8A12Panel() {
                             </strong>
                           </div>
                         </div>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          marginTop: 8,
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Btn
+                          small
+                          onClick={() => doAllOn(mid)}
+                          disabled={!b.connected || nOut === 0}
+                        >
+                          Todas ON
+                        </Btn>
+                        <Btn
+                          small
+                          onClick={() => doAllOff(mid)}
+                          disabled={!b.connected || nOut === 0}
+                        >
+                          Todas OFF
+                        </Btn>
+                        {hasInOutAssocReg && (
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              color: C.textSub,
+                              cursor:
+                                b.connected && !pending[`ioa${mid}`]
+                                  ? "pointer"
+                                  : "not-allowed",
+                              marginLeft: 4,
+                            }}
+                            title={
+                              b.in_out_associated == null && b.connected
+                                ? "Estado del equipo aún no leído; al marcar/desmarcar se envía 1/0 al registro IN↔OUT"
+                                : "Acople IN↔OUT (1) / desacople (0) en el holding configurado en la placa"
+                            }
+                          >
+                            <input
+                              type="checkbox"
+                              ref={(el) => {
+                                if (el) {
+                                  el.indeterminate =
+                                    b.connected && b.in_out_associated == null;
+                                }
+                              }}
+                              checked={b.in_out_associated === true}
+                              disabled={
+                                !b.connected || Boolean(pending[`ioa${mid}`])
+                              }
+                              onChange={(e) => {
+                                setInOutAssociation(mid, e.target.checked);
+                              }}
+                            />
+                            IN↔OUT acoplado
+                          </label>
+                        )}
                       </div>
                     </div>
                   );
