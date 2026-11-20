@@ -73,16 +73,17 @@ const INPUT_LEGEND = [
   { label: "Inactiva", bg: C.white, border: C.border, fg: C.textSub },
 ];
 
-function InputOverrideLegend() {
+function InputOverrideLegend({ style } = {}) {
   return (
     <div
       style={{
         display: "flex",
         flexWrap: "wrap",
-        gap: 10,
-        margin: "4px 0 8px",
+        gap: 8,
+        margin: 0,
         fontSize: 10,
         color: C.textSub,
+        ...style,
       }}
     >
       {INPUT_LEGEND.map((item) => (
@@ -4287,41 +4288,37 @@ export default function ETD8A12Panel() {
                         <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                           <div
                             style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: C.amber,
+                              display: "flex",
+                              flexWrap: "wrap",
+                              alignItems: "center",
+                              gap: 8,
                               marginBottom: 6,
                             }}
                           >
-                            {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL /
-                            OVERRIDE
+                            <div
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: C.amber,
+                              }}
+                            >
+                              {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL /
+                              OVERRIDE
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: C.blue,
+                                background: C.blueLight,
+                                border: `1px solid ${C.blue}44`,
+                                borderRadius: 12,
+                                padding: "2px 8px",
+                              }}
+                            >
+                              Simulación / Override
+                            </div>
                           </div>
-                          <div
-                            style={{
-                              display: "inline-block",
-                              marginBottom: 6,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              color: C.blue,
-                              background: C.blueLight,
-                              border: `1px solid ${C.blue}44`,
-                              borderRadius: 12,
-                              padding: "2px 8px",
-                            }}
-                          >
-                            Simulación / Override
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 10,
-                              color: C.muted,
-                              marginBottom: 6,
-                            }}
-                          >
-                            Click para ciclo: REAL -&gt; FORZADA ON -&gt;
-                            FORZADA OFF -&gt; REAL
-                          </div>
-                          <InputOverrideLegend />
                           <div
                             style={{
                               display: "grid",
@@ -4414,63 +4411,78 @@ export default function ETD8A12Panel() {
                           </div>
                           <div
                             style={{
+                              display: "grid",
+                              gridTemplateColumns: "1fr 1fr",
+                              gap: 10,
                               marginTop: 8,
-                              fontSize: 11,
-                              color: C.textSub,
+                              alignItems: "start",
                             }}
                           >
-                            Activas:{" "}
-                            <strong style={{ color: C.amber }}>
-                              {(b.inputs || []).filter(Boolean).length}/
-                              {nIn || 0}
-                            </strong>
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: C.muted,
+                                lineHeight: 1.35,
+                              }}
+                            >
+                              Click: REAL → Forz. ON → Forz. OFF → REAL
+                            </div>
+                            <InputOverrideLegend />
                           </div>
                           <div
                             style={{
-                              marginTop: 4,
+                              display: "grid",
+                              gridTemplateColumns: "1fr 1fr",
+                              gap: 10,
+                              marginTop: 6,
                               fontSize: 10,
                               color: C.muted,
+                              alignItems: "start",
                             }}
                           >
-                            Forzadas:{" "}
-                            <strong>
-                              {
-                                (b.input_overrides || []).filter(
-                                  (x) => x !== null,
-                                ).length
-                              }
-                            </strong>
-                            {" · "}
-                            ON:{" "}
-                            <strong style={{ color: C.green }}>
-                              {
-                                (b.input_overrides || []).filter(
-                                  (x) => x === true,
-                                ).length
-                              }
-                            </strong>
-                            {" · "}
-                            OFF:{" "}
-                            <strong style={{ color: C.blue }}>
-                              {
-                                (b.input_overrides || []).filter(
-                                  (x) => x === false,
-                                ).length
-                              }
-                            </strong>
-                          </div>
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontSize: 10,
-                              color: C.muted,
-                            }}
-                          >
-                            Real (Modbus) activas:{" "}
-                            <strong>
-                              {(b.inputs_raw || []).filter(Boolean).length}/
-                              {nIn || 0}
-                            </strong>
+                            <div style={{ fontSize: 11, color: C.textSub }}>
+                              Activas:{" "}
+                              <strong style={{ color: C.amber }}>
+                                {(b.inputs || []).filter(Boolean).length}/
+                                {nIn || 0}
+                              </strong>
+                              <span style={{ color: C.muted }}>
+                                {" · "}
+                                Forz.:{" "}
+                                <strong>
+                                  {
+                                    (b.input_overrides || []).filter(
+                                      (x) => x !== null,
+                                    ).length
+                                  }
+                                </strong>
+                                {" · "}
+                                ON:{" "}
+                                <strong style={{ color: C.green }}>
+                                  {
+                                    (b.input_overrides || []).filter(
+                                      (x) => x === true,
+                                    ).length
+                                  }
+                                </strong>
+                                {" · "}
+                                OFF:{" "}
+                                <strong style={{ color: C.blue }}>
+                                  {
+                                    (b.input_overrides || []).filter(
+                                      (x) => x === false,
+                                    ).length
+                                  }
+                                </strong>
+                              </span>
+                            </div>
+                            <div>
+                              Real (Modbus):{" "}
+                              <strong>
+                                {(b.inputs_raw || []).filter(Boolean).length}/
+                                {nIn || 0}
+                              </strong>
+                            </div>
                           </div>
                         </div>
                       </div>
