@@ -1,7 +1,7 @@
 /**
  * Configuración por defecto de tablets en el panel web (espejo del backend).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AuthorizedTabletsSection from "./AuthorizedTabletsSection";
 
 const CSIP_API_KEY_DEFAULT = "f3fb37ac959b795507cf3d6794b1f29b91ed2b1b1d1f06c6";
@@ -309,6 +309,9 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
   const [updatedAt, setUpdatedAt] = useState(null);
   const [doorIndex, setDoorIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const feedbackTimer = useRef(null);
   const [tablets, setTablets] = useState([]);
   const [target, setTarget] = useState("common");
   const [inherited, setInherited] = useState(false);
@@ -317,12 +320,26 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
   const selectedTablet = isCommon ? null : tablets.find((t) => t.id === target) || null;
   const configUrl = isCommon ? "/api/config/tablet" : `/api/config/tablets/${target}/config`;
 
+  const notify = (type, msg) => {
+    const level = type === "Error" ? "ERR" : type;
+    setFeedback({ type: level, msg });
+    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    feedbackTimer.current = setTimeout(() => setFeedback(null), 5000);
+    onNotify?.(level, msg);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    };
+  }, []);
+
   const loadTablets = async () => {
     try {
       const data = await apiFetch("/api/config/tablets");
       setTablets(Array.isArray(data?.items) ? data.items : []);
     } catch (e) {
-      onNotify?.("Error", "No se pudo cargar la lista de tablets: " + e.message);
+      notify("ERR", "No se pudo cargar la lista de tablets: " + e.message);
     }
   };
 
@@ -336,7 +353,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
       setUpdatedAt(data?.updated_at || null);
       setInherited(!!data?.inherited);
     } catch (e) {
-      onNotify?.("Error", "No se pudo cargar configuración tablet: " + e.message);
+      notify("ERR", "No se pudo cargar configuración tablet: " + e.message);
     } finally {
       setLoading(false);
     }
@@ -392,6 +409,7 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
   };
 
   const save = async () => {
+    setSaving(true);
     try {
       const res = await apiFetch(configUrl, {
         method: "PUT",
@@ -400,15 +418,17 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
       setRevision(res?.revision || revision);
       setUpdatedAt(res?.updated_at || new Date().toISOString());
       setInherited(!!res?.inherited);
-      onNotify?.(
+      notify(
         "OK",
         isCommon
           ? "Configuración común de la sucursal guardada"
-          : `Configuración de ${selectedTablet?.name || "la tablet"} guardada`
+          : `Configuración de ${selectedTablet?.name || "la tablet"} guardada`,
       );
       if (!isCommon) void loadTablets();
     } catch (e) {
-      onNotify?.("Error", "No se pudo guardar: " + e.message);
+      notify("ERR", "No se pudo guardar: " + e.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -420,16 +440,16 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
     }
     try {
       await apiFetch(configUrl, { method: "DELETE" });
-      onNotify?.("OK", `${name} vuelve a usar la configuración común`);
+      notify("OK", `${name} vuelve a usar la configuración común`);
       await Promise.all([load(), loadTablets()]);
     } catch (e) {
-      onNotify?.("Error", e.message);
+      notify("ERR", e.message);
     }
   };
 
   const resetBuiltin = () => {
     setDraft(deepClone(DEFAULT_TABLET_PANEL_CONFIG));
-    onNotify?.("INFO", "Borrador restaurado a valores de fábrica (guarda para aplicar)");
+    notify("INFO", "Borrador restaurado a valores de fábrica (guarda para aplicar)");
   };
 
   const door = draft.doors?.[doorIndex] || draft.doors[0];
@@ -530,11 +550,57 @@ export default function TabletConfigPanel({ apiFetch, onNotify }) {
           <button type="button" onClick={() => void load()} style={btnSecondary}>
             Recargar
           </button>
-          <button type="button" onClick={() => void save()} style={btnPrimary}>
-            {isCommon ? "Guardar común" : `Guardar ${selectedTablet?.name || "tablet"}`}
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving}
+            style={{
+              ...btnPrimary,
+              opacity: saving ? 0.75 : 1,
+              cursor: saving ? "wait" : "pointer",
+            }}
+          >
+            {saving
+              ? "Guardando…"
+              : isCommon
+                ? "Guardar común"
+                : `Guardar ${selectedTablet?.name || "tablet"}`}
           </button>
         </div>
       </div>
+
+      {feedback?.msg ? (
+        <div
+          role="status"
+          style={{
+            padding: "12px 14px",
+            borderRadius: 10,
+            fontSize: 14,
+            fontWeight: 600,
+            border: `1px solid ${
+              feedback.type === "OK"
+                ? "#86efac"
+                : feedback.type === "ERR"
+                  ? "#fecaca"
+                  : "#93c5fd"
+            }`,
+            background:
+              feedback.type === "OK"
+                ? "#f0fdf4"
+                : feedback.type === "ERR"
+                  ? "#fef2f2"
+                  : "#eff6ff",
+            color:
+              feedback.type === "OK"
+                ? "#166534"
+                : feedback.type === "ERR"
+                  ? "#991b1b"
+                  : "#1e40af",
+          }}
+        >
+          {feedback.msg}
+        </div>
+      ) : null}
 
       {!isCommon && (
         <div

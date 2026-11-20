@@ -51,8 +51,8 @@ def _slot_matches_minute(minute: int, start: int, end: int) -> tuple[bool, int, 
     Devuelve (coincide, recency, duración).
 
     recency = minuto de inicio del tramo en el eje del día actual.
-    En solapes gana la franja con mayor recency (la que empezó más tarde) y,
-    a igualdad, la de menor duración (más específica).
+    En solapes el orden de la lista del panel tiene prioridad; a igualdad,
+    gana mayor recency y, luego, menor duración.
     """
     if start < end:
         if start <= minute < end:
@@ -88,10 +88,11 @@ def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
     prev_key = WEEKDAY_KEYS[(weekday - 1) % 7]
     minute = dt.hour * 60 + dt.minute
 
-    # (recency, -duration, rule_key) — max() elige la más reciente y, si empatan, la más corta.
-    candidates: list[tuple[int, int, str]] = []
+    # (-index, recency, -duration, rule_key) — max() prioriza el orden de lista
+    # (primero en el panel = mayor prioridad), luego recency y duración.
+    candidates: list[tuple[int, int, int, str]] = []
 
-    for slot in days.get(day_key, []) or []:
+    for idx, slot in enumerate(days.get(day_key, []) or []):
         if not slot.get("active"):
             continue
         try:
@@ -103,9 +104,9 @@ def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
         if ok:
             rk = str(slot.get("rule_key") or "").strip()
             if rk:
-                candidates.append((recency, -duration, rk))
+                candidates.append((-idx, recency, -duration, rk))
 
-    for slot in days.get(prev_key, []) or []:
+    for idx, slot in enumerate(days.get(prev_key, []) or []):
         if not slot.get("active"):
             continue
         try:
@@ -117,11 +118,11 @@ def resolve_rule_key_at(dt: datetime, config: dict) -> Optional[str]:
         if ok:
             rk = str(slot.get("rule_key") or "").strip()
             if rk:
-                candidates.append((recency, -duration, rk))
+                candidates.append((-idx, recency, -duration, rk))
 
     if not candidates:
         return None
-    return max(candidates)[2]
+    return max(candidates)[3]
 
 
 def _datetime_at_minute(day: date, minute: int) -> datetime:
