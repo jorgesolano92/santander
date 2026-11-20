@@ -264,7 +264,13 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
     [daySlots],
   );
   const timelineLabels = useMemo(() => {
-    return [0, 6, 12, 18, 24].map((h) => formatMinutes(timelineStart + h * 60));
+    // Marcas cada 4 h en la ventana de 24 h que empieza en la 1.ª franja.
+    // key por índice (no por texto): al cerrar el ciclo start==start+24h y React
+    // reutilizaba el tick anterior (p. ej. quedaba «08:00» tras cambiar a 07:00).
+    return [0, 1, 2, 3, 4, 5, 6].map((step) => ({
+      step,
+      label: formatMinutes(timelineStart + step * 4 * 60),
+    }));
   }, [timelineStart]);
 
   const locationDirty = useMemo(() => {
@@ -760,7 +766,8 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
           Línea de tiempo — {WEEKDAYS.find((d) => d.key === dayTab)?.label}
           <span style={{ fontWeight: 500, color: "#6b7280", marginLeft: 8 }}>
-            (desde {timelineLabels[0]} · 1.ª franja del orden)
+            (desde {timelineLabels[0]?.label || formatMinutes(timelineStart)} ·
+            1.ª franja del orden)
           </span>
         </div>
         <div
@@ -810,10 +817,13 @@ export default function SchedulesPanel({ apiFetch, onNotify }) {
             fontSize: 10,
             color: "#9ca3af",
             marginTop: 4,
+            fontVariantNumeric: "tabular-nums",
           }}
         >
-          {timelineLabels.map((label) => (
-            <span key={label}>{label}</span>
+          {timelineLabels.map((tick) => (
+            <span key={tick.step} title={`+${tick.step * 4} h`}>
+              {tick.label}
+            </span>
           ))}
         </div>
       </div>
