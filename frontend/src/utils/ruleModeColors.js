@@ -24,6 +24,12 @@ export function resolveRuleColor(ruleKey, rules) {
 
 export function ruleKeyToLabel(ruleKey) {
   return String(ruleKey || "")
+    .replace(/_coce_/gi, "_")
+    .replace(/^coce_/i, "")
+    .replace(/_coce$/i, "")
     .replaceAll("_", " ")
+    .replace(/\bcoce\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }

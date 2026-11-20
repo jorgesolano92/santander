@@ -7,6 +7,7 @@ import { HomeZaguanSimulation } from "./components/zaguan/HomeZaguanSimulation";
 import TabletConfigPanel from "./components/tablet/TabletConfigPanel";
 import SchedulesPanel from "./components/schedules/SchedulesPanel";
 import LocutionsPanel from "./components/locutions/LocutionsPanel";
+import CallRoutingPanel from "./components/callRouting/CallRoutingPanel";
 import DevicesAffiliatedPanel from "./components/DevicesAffiliatedPanel";
 import { CoceMessageNotifications } from "./components/CoceMessageNotifications";
 import { SoftwareUpdateBanner } from "./components/SoftwareUpdateBanner";
@@ -137,7 +138,7 @@ const DEFAULT_TEMPLATE_CONFIG_2 = {
 
 const DEFAULT_TEMPLATE_CONFIG = DEFAULT_TEMPLATE_CONFIG_1;
 
-/** Enclavamientos interruptor (verde, cierres, apertura remota COCE…), no horarios ni incendio. */
+/** Enclavamientos interruptor (verde, cierres, apertura remota…), no horarios ni incendio. */
 function isToggleEnclavamiento(ruleKey, rule) {
   if (!rule || rule.type !== "enclavamiento") return false;
   if (ruleKey.startsWith("horario_")) return false;
@@ -230,6 +231,7 @@ const TABS = [
   "Tablets",
   "Horarios",
   "Locuciones",
+  "Enrutado",
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
 
@@ -281,10 +283,20 @@ function formatActorLabel(e) {
   return bySource[src] || "Sistema automático";
 }
 
-function formatBoardLabel(e) {
+function formatEventBoardLabel(e) {
   if (e?.board_label) return e.board_label;
   const board = Number(e?.board || 0);
   return board > 0 ? `Placa ${board}` : "General";
+}
+
+/** Actividad: modos, warnings y fallos — no LED/OUT sueltos. */
+function isPriorityActivity(e) {
+  const t = String(e?.type || e?.severity || "").toUpperCase();
+  if (t === "WARN" || t === "ERR" || t === "ERROR") return true;
+  const msg = String(e?.msg || e?.message || "");
+  return /modo ejecutado|regla ejecutada|modo en cola|cambio de modo|horario_|llamada tablet|bloqueado por|en cola|pulsaci[oó]n .*rechazada|orquestador OK pero|no se pudo cerrar|apertura remota/i.test(
+    msg,
+  );
 }
 
 function mapEventToUiLog(e) {
@@ -299,8 +311,27 @@ function mapEventToUiLog(e) {
     type: e?.type || "INFO",
     msg: e?.msg || "",
     actor_label: formatActorLabel(e),
-    board_label: formatBoardLabel(e),
+    board_label: formatEventBoardLabel(e),
   };
+}
+
+function shortChannelName(channel, max = 15) {
+  const name = String(channel?.channel_name || "").trim();
+  if (!name) return "";
+  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
+}
+
+/** Etiqueta de modo/regla sin la palabra Coce (UI para técnicos). */
+function humanModeLabel(key) {
+  return String(key || "")
+    .replace(/_coce_/gi, "_")
+    .replace(/^coce_/i, "")
+    .replace(/_coce$/i, "")
+    .replaceAll("_", " ")
+    .replace(/\bcoce\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function normalizeHexColor(
@@ -919,12 +950,12 @@ function formatIoSlot(kind, index, { padded = false } = {}) {
   return padded ? `${prefix}${String(n).padStart(2, "0")}` : `${prefix}${n}`;
 }
 
-function formatBoardLabel(mod) {
+function formatModuleBoardLabel(mod) {
   return (mod.name || `Placa ${mod.id}`).replace(/\s*[—–]\s*/g, " - ");
 }
 
 function buildIoOptionLabel(mod, ch, kind, index) {
-  const board = formatBoardLabel(mod);
+  const board = formatModuleBoardLabel(mod);
   const name = (ch.channel_name || "").trim();
   const slot = formatIoSlot(kind, index, { padded: Boolean(name) });
   if (name) return `${board} - ${name} - ${slot}`;
@@ -2650,6 +2681,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
 export default function ETD8A12Panel() {
   const [tab, setTab] = useState(0);
   const [coceMessageWsEvent, setCoceMessageWsEvent] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
   const [templateConfig, setTemplateConfig] = useState(DEFAULT_TEMPLATE_CONFIG);
   const [templateDraft, setTemplateDraft] = useState(DEFAULT_TEMPLATE_CONFIG);
 
@@ -2744,26 +2777,46 @@ export default function ETD8A12Panel() {
     [moduleList, boards],
   );
 
-  const addUI = useCallback((type, msg) => {
+  const showToast = useCallback((type, msg) => {
     const level = type === "Error" ? "ERR" : type;
-    const entry = {
-      ts: new Date().toLocaleTimeString("es-ES", { hour12: false }),
-      type: level,
-      msg,
-      actor_label: "Consola web",
-      board_label: "General",
-    };
-    setUiLog((p) => [...p.slice(-99), entry]);
-    // Persistir en SQLite (últimos N en Actividad / Histórico); no bloquear UI.
-    void apiFetch("/events", {
-      method: "POST",
-      body: JSON.stringify({
-        type: level,
-        msg: String(msg || "").slice(0, 500),
-        event_type: "panel_activity",
-      }),
-    }).catch(() => {});
+    setToast({ type: level, msg: String(msg || "") });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 4200);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  const addUI = useCallback(
+    (type, msg) => {
+      const level = type === "Error" ? "ERR" : type;
+      const entry = {
+        ts: new Date().toLocaleTimeString("es-ES", { hour12: false }),
+        type: level,
+        msg,
+        actor_label: "Consola web",
+        board_label: "General",
+      };
+      // Toast en cualquier OK/ERR/WARN relevante para feedback de guardado.
+      if (level === "OK" || level === "ERR" || level === "WARN") {
+        showToast(level, msg);
+      }
+      if (!isPriorityActivity(entry)) return;
+      setUiLog((p) => [...p.slice(-99), entry]);
+      void apiFetch("/events", {
+        method: "POST",
+        body: JSON.stringify({
+          type: level,
+          msg: String(msg || "").slice(0, 500),
+          event_type: "panel_activity",
+        }),
+      }).catch(() => {});
+    },
+    [showToast],
+  );
 
   const beginGlobalLoading = useCallback(
     () => setGlobalLoadingCount((c) => c + 1),
@@ -3011,6 +3064,7 @@ export default function ETD8A12Panel() {
             setCoceMessageWsEvent({ ...data, _ts: Date.now() });
           }
           if (data.type === "system_event" && data.payload) {
+            if (!isPriorityActivity(data.payload)) return;
             const mapped = mapEventToUiLog(data.payload);
             setUiLog((p) => {
               if (mapped.id && p.some((x) => x.id === mapped.id)) return p;
@@ -3228,8 +3282,12 @@ export default function ETD8A12Panel() {
 
   const loadActividadEvents = useCallback(async () => {
     try {
-      const d = await apiFetch("/events?limit=100");
-      const rows = (d.events || []).slice().reverse();
+      // Pedimos más y filtramos a hitos (modos + WARN/ERR).
+      const d = await apiFetch("/events?limit=300");
+      const rows = (d.events || [])
+        .filter(isPriorityActivity)
+        .slice(0, 100)
+        .reverse();
       setUiLog(rows.map(mapEventToUiLog));
     } catch {
       // silent
@@ -3474,8 +3532,7 @@ export default function ETD8A12Panel() {
       );
     }
   };
-  const toModeLabel = (key) =>
-    key.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const toModeLabel = (key) => humanModeLabel(key);
   const runRuleByKey = async (ruleKey) => {
     await withGlobalLoader(async () => {
       try {
@@ -3742,6 +3799,44 @@ export default function ETD8A12Panel() {
         logoSrc={templateConfig.boardLogo}
         logoFallback={DEFAULT_TEMPLATE_CONFIG.boardLogo}
       />
+      {toast?.msg ? (
+        <div
+          role="status"
+          style={{
+            position: "fixed",
+            top: 72,
+            right: 16,
+            zIndex: 9999,
+            maxWidth: 380,
+            padding: "12px 16px",
+            borderRadius: 10,
+            fontSize: 14,
+            fontWeight: 600,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            border: `1px solid ${
+              toast.type === "OK"
+                ? "#86efac"
+                : toast.type === "WARN"
+                  ? "#fcd34d"
+                  : "#fecaca"
+            }`,
+            background:
+              toast.type === "OK"
+                ? "#f0fdf4"
+                : toast.type === "WARN"
+                  ? "#fffbeb"
+                  : "#fef2f2",
+            color:
+              toast.type === "OK"
+                ? "#166534"
+                : toast.type === "WARN"
+                  ? "#92400e"
+                  : "#991b1b",
+          }}
+        >
+          {toast.msg}
+        </div>
+      ) : null}
       <TopNavbar
         title="Control de Accesos - ETD8A12"
         tabs={TABS}
@@ -4093,29 +4188,100 @@ export default function ETD8A12Panel() {
                       </span>
                       <div
                         style={{
-                          display: "flex",
-                          gap: 16,
-                          flexWrap: "wrap",
-                          alignItems: "flex-start",
+                          display: "grid",
+                          gridTemplateColumns: "minmax(118px, auto) 1fr 1fr",
+                          gap: "10px 16px",
+                          alignItems: "start",
                           marginBottom: 4,
                         }}
                       >
-                        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                        {/* Rail izquierdo: acciones de salidas */}
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 6,
+                            paddingTop: 2,
+                            minWidth: 0,
+                          }}
+                        >
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: 700,
                               color: C.red,
-                              marginBottom: 6,
+                              letterSpacing: 0.3,
                             }}
                           >
-                            {nOut} RELÉS DE SALIDA (OUT1..OUT{nOut || "—"})
+                            SALIDAS
                           </div>
+                          <Btn
+                            small
+                            onClick={() => doAllOn(mid)}
+                            disabled={!b.connected || nOut === 0}
+                          >
+                            Todas ON
+                          </Btn>
+                          <Btn
+                            small
+                            onClick={() => doAllOff(mid)}
+                            disabled={!b.connected || nOut === 0}
+                          >
+                            Todas OFF
+                          </Btn>
+                          {hasInOutAssocReg && (
+                            <label
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "flex-start",
+                                gap: 6,
+                                fontSize: 10,
+                                color: C.textSub,
+                                cursor:
+                                  b.connected && !pending[`ioa${mid}`]
+                                    ? "pointer"
+                                    : "not-allowed",
+                                marginTop: 2,
+                                lineHeight: 1.25,
+                              }}
+                              title={
+                                b.in_out_associated == null && b.connected
+                                  ? "Estado del equipo aún no leído; al marcar/desmarcar se envía 1/0 al registro IN↔OUT"
+                                  : "Acople IN↔OUT (1) / desacople (0) en el holding configurado en la placa"
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                ref={(el) => {
+                                  if (el) {
+                                    el.indeterminate =
+                                      b.connected &&
+                                      b.in_out_associated == null;
+                                  }
+                                }}
+                                checked={b.in_out_associated === true}
+                                disabled={
+                                  !b.connected || Boolean(pending[`ioa${mid}`])
+                                }
+                                onChange={(e) => {
+                                  setInOutAssociation(mid, e.target.checked);
+                                }}
+                                style={{ marginTop: 1 }}
+                              />
+                              IN↔OUT acoplado
+                            </label>
+                          )}
+                        </div>
+
+                        {/* Chips OUT — misma línea que IN */}
+                        <div style={{ minWidth: 0 }}>
                           <div
                             style={{
                               display: "flex",
                               gap: 6,
                               flexWrap: "wrap",
+                              alignItems: "center",
+                              minHeight: 26,
                             }}
                           >
                             {(b.outputs || []).map((v, i) => (
@@ -4141,13 +4307,93 @@ export default function ETD8A12Panel() {
                               </button>
                             ))}
                           </div>
+                        </div>
+
+                        {/* Chips IN — alineados con OUT */}
+                        <div style={{ minWidth: 0 }}>
                           <div
                             style={{
-                              marginTop: 8,
-                              fontSize: 11,
-                              color: C.textSub,
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                              alignItems: "center",
+                              minHeight: 26,
                             }}
                           >
+                            {(b.inputs || []).map((v, i) => {
+                              const forcedState = b.input_overrides?.[i];
+                              const forcedOn = forcedState === true;
+                              const forcedOff = forcedState === false;
+                              return (
+                                <button
+                                  key={i}
+                                  onClick={() =>
+                                    cycleInputOverride(mid, i + 1)
+                                  }
+                                  disabled={!b.connected}
+                                  style={{
+                                    width: 26,
+                                    height: 26,
+                                    borderRadius: 5,
+                                    border: `1px solid ${
+                                      forcedOn
+                                        ? C.greenBorder
+                                        : forcedOff
+                                          ? C.blue
+                                          : v
+                                            ? C.amberBorder
+                                            : C.border
+                                    }`,
+                                    background: forcedOn
+                                      ? C.greenLight
+                                      : forcedOff
+                                        ? C.blueLight
+                                        : v
+                                          ? C.amberLight
+                                          : C.white,
+                                    color: forcedOn
+                                      ? C.green
+                                      : forcedOff
+                                        ? C.blue
+                                        : v
+                                          ? C.amber
+                                          : C.textSub,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    cursor: b.connected
+                                      ? "pointer"
+                                      : "not-allowed",
+                                  }}
+                                  title={
+                                    b.input_overrides?.[i] === null
+                                      ? `IN${i + 1} REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
+                                      : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"} | REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
+                                  }
+                                >
+                                  {i + 1}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Literales OUT debajo */}
+                        <div />
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: C.red,
+                              marginBottom: 4,
+                            }}
+                          >
+                            {nOut} RELÉS DE SALIDA (OUT1..OUT{nOut || "—"})
+                          </div>
+                          <div style={{ fontSize: 11, color: C.textSub }}>
                             Activos:{" "}
                             <strong style={{ color: C.red }}>
                               {(b.outputs || []).filter(Boolean).length}/
@@ -4155,13 +4401,15 @@ export default function ETD8A12Panel() {
                             </strong>
                           </div>
                         </div>
-                        <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+
+                        {/* Literales IN debajo */}
+                        <div style={{ minWidth: 0 }}>
                           <div
                             style={{
                               fontSize: 11,
                               fontWeight: 700,
                               color: C.amber,
-                              marginBottom: 6,
+                              marginBottom: 4,
                             }}
                           >
                             {nIn} ENTRADAS (IN1..IN{nIn || "—"}) - REAL /
@@ -4170,7 +4418,7 @@ export default function ETD8A12Panel() {
                           <div
                             style={{
                               display: "inline-block",
-                              marginBottom: 6,
+                              marginBottom: 4,
                               fontSize: 10,
                               fontWeight: 700,
                               color: C.blue,
@@ -4186,87 +4434,14 @@ export default function ETD8A12Panel() {
                             style={{
                               fontSize: 10,
                               color: C.muted,
-                              marginBottom: 6,
+                              marginBottom: 4,
                             }}
                           >
                             Click para ciclo: REAL -&gt; FORZADA ON -&gt;
                             FORZADA OFF -&gt; REAL
                           </div>
                           <InputOverrideLegend />
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: 6,
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            {(b.inputs || []).map((v, i) =>
-                              (() => {
-                                const forcedState = b.input_overrides?.[i];
-                                const forcedOn = forcedState === true;
-                                const forcedOff = forcedState === false;
-                                return (
-                                  <button
-                                    key={i}
-                                    onClick={() =>
-                                      cycleInputOverride(mid, i + 1)
-                                    }
-                                    disabled={!b.connected}
-                                    style={{
-                                      width: 26,
-                                      height: 26,
-                                      borderRadius: 5,
-                                      border: `1px solid ${
-                                        forcedOn
-                                          ? C.greenBorder
-                                          : forcedOff
-                                            ? C.blue
-                                            : v
-                                              ? C.amberBorder
-                                              : C.border
-                                      }`,
-                                      background: forcedOn
-                                        ? C.greenLight
-                                        : forcedOff
-                                          ? C.blueLight
-                                          : v
-                                            ? C.amberLight
-                                            : C.white,
-                                      color: forcedOn
-                                        ? C.green
-                                        : forcedOff
-                                          ? C.blue
-                                          : v
-                                            ? C.amber
-                                            : C.textSub,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                      fontSize: 11,
-                                      fontWeight: 600,
-                                      cursor: b.connected
-                                        ? "pointer"
-                                        : "not-allowed",
-                                    }}
-                                    title={
-                                      b.input_overrides?.[i] === null
-                                        ? `IN${i + 1} REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
-                                        : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"} | REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
-                                    }
-                                  >
-                                    {i + 1}
-                                  </button>
-                                );
-                              })(),
-                            )}
-                          </div>
-                          <div
-                            style={{
-                              marginTop: 8,
-                              fontSize: 11,
-                              color: C.textSub,
-                            }}
-                          >
+                          <div style={{ fontSize: 11, color: C.textSub }}>
                             Activas:{" "}
                             <strong style={{ color: C.amber }}>
                               {(b.inputs || []).filter(Boolean).length}/
@@ -4321,69 +4496,6 @@ export default function ETD8A12Panel() {
                             </strong>
                           </div>
                         </div>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          marginTop: 8,
-                          flexWrap: "wrap",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Btn
-                          small
-                          onClick={() => doAllOn(mid)}
-                          disabled={!b.connected || nOut === 0}
-                        >
-                          Todas ON
-                        </Btn>
-                        <Btn
-                          small
-                          onClick={() => doAllOff(mid)}
-                          disabled={!b.connected || nOut === 0}
-                        >
-                          Todas OFF
-                        </Btn>
-                        {hasInOutAssocReg && (
-                          <label
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              fontSize: 11,
-                              color: C.textSub,
-                              cursor:
-                                b.connected && !pending[`ioa${mid}`]
-                                  ? "pointer"
-                                  : "not-allowed",
-                              marginLeft: 4,
-                            }}
-                            title={
-                              b.in_out_associated == null && b.connected
-                                ? "Estado del equipo aún no leído; al marcar/desmarcar se envía 1/0 al registro IN↔OUT"
-                                : "Acople IN↔OUT (1) / desacople (0) en el holding configurado en la placa"
-                            }
-                          >
-                            <input
-                              type="checkbox"
-                              ref={(el) => {
-                                if (el) {
-                                  el.indeterminate =
-                                    b.connected && b.in_out_associated == null;
-                                }
-                              }}
-                              checked={b.in_out_associated === true}
-                              disabled={
-                                !b.connected || Boolean(pending[`ioa${mid}`])
-                              }
-                              onChange={(e) => {
-                                setInOutAssociation(mid, e.target.checked);
-                              }}
-                            />
-                            IN↔OUT acoplado
-                          </label>
-                        )}
                       </div>
                     </div>
                   );
@@ -4792,27 +4904,47 @@ export default function ETD8A12Panel() {
                       marginBottom: 10,
                     }}
                   >
-                    {(b.outputs || []).map((v, i) => (
-                      <div
-                        key={i}
-                        title={channelIoTitle(
-                          "output",
-                          i,
-                          modCfg?.outputs?.[i],
-                        )}
-                        style={{
-                          border: `1px solid ${v ? C.redBorder : C.border}`,
-                          background: v ? C.redFaint : C.white,
-                          borderRadius: 6,
-                          padding: "7px 0",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: v ? C.red : C.textSub,
-                          textAlign: "center",
-                          cursor: "default",
-                        }}
-                      >{`OUT${i + 1}`}</div>
-                    ))}
+                    {(b.outputs || []).map((v, i) => {
+                      const chName = shortChannelName(modCfg?.outputs?.[i]);
+                      return (
+                        <div
+                          key={i}
+                          title={channelIoTitle(
+                            "output",
+                            i,
+                            modCfg?.outputs?.[i],
+                          )}
+                          style={{
+                            border: `1px solid ${v ? C.redBorder : C.border}`,
+                            background: v ? C.redFaint : C.white,
+                            borderRadius: 6,
+                            padding: "6px 2px",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: v ? C.red : C.textSub,
+                            textAlign: "center",
+                            cursor: "default",
+                            lineHeight: 1.15,
+                          }}
+                        >
+                          <div>{`OUT${i + 1}`}</div>
+                          {chName ? (
+                            <div
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 600,
+                                opacity: 0.85,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {chName}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div
@@ -4839,6 +4971,7 @@ export default function ETD8A12Panel() {
                   >
                     {Array.from({ length: nInIo }, (_, i) => {
                       const st = inputChannelState(b, i);
+                      const chName = shortChannelName(modCfg?.inputs?.[i]);
                       return (
                         <div
                           key={i}
@@ -4868,7 +5001,7 @@ export default function ETD8A12Panel() {
                                   ? C.amberLight
                                   : C.white,
                             borderRadius: 6,
-                            padding: "7px 0",
+                            padding: "6px 2px",
                             textAlign: "center",
                             fontSize: 11,
                             fontWeight: 700,
@@ -4880,8 +5013,25 @@ export default function ETD8A12Panel() {
                                   ? C.amber
                                   : C.textSub,
                             cursor: "default",
+                            lineHeight: 1.15,
                           }}
-                        >{`IN${i + 1}`}</div>
+                        >
+                          <div>{`IN${i + 1}`}</div>
+                          {chName ? (
+                            <div
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 600,
+                                opacity: 0.85,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {chName}
+                            </div>
+                          ) : null}
+                        </div>
                       );
                     })}
                   </div>
@@ -5159,7 +5309,7 @@ export default function ETD8A12Panel() {
                               color: C.textSub,
                             }}
                           >
-                            {formatBoardLabel(e)}
+                            {formatEventBoardLabel(e)}
                           </span>
                         </div>
                         <div
@@ -5480,6 +5630,9 @@ export default function ETD8A12Panel() {
 
         {tab === 8 && <SchedulesPanel apiFetch={apiFetch} onNotify={addUI} />}
         {tab === 9 && <LocutionsPanel apiFetch={apiFetch} onNotify={addUI} />}
+        {tab === 10 && (
+          <CallRoutingPanel apiFetch={apiFetch} onNotify={addUI} />
+        )}
       </div>
       <style>{`*{box-sizing:border-box} ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:${C.borderMid};border-radius:3px}`}</style>
     </div>

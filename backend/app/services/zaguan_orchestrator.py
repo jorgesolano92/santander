@@ -2383,13 +2383,8 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             log.debug("Locución Panphone pulsación p1: %s", e)
 
     from app.services import tablet_call_hub
+    from app.db import call_routing_store
 
-    force_extendido_tablet_call = (
-        EXTENDIDO_TABLET_CALL_ENABLED
-        and _current_mode == "horario_extendido"
-        and pulsador == "p2"
-    )
-    # Sin zaguán: P1/P3 en extendido llaman a tablet (no abren).
     try:
         from app.core.config import settings as _settings
 
@@ -2398,88 +2393,40 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
         )
     except Exception:  # noqa: BLE001
         _extendido_p1_call_no_zaguan = False
-    force_extendido_p1_tablet_call = (
-        _current_mode == "horario_extendido"
-        and pulsador in ("p1", "p3")
-        and _extendido_p1_call_no_zaguan
-    )
-    force_carga_tablet_call = _current_mode == "horario_carga_cajero" and pulsador in (
-        "p1",
-        "p3",
-    )
-    force_manual_tablet_call = _current_mode == "horario_manual" and pulsador in (
-        "p1",
-        "p2",
-        "p3",
-        "p4",
-    )
-    if (
-        force_extendido_tablet_call
-        or force_extendido_p1_tablet_call
-        or force_carga_tablet_call
-        or force_manual_tablet_call
-    ):
-        door = PULSADOR_TO_DOOR[pulsador]
-        call_result = await tablet_call_hub.start_call(
-            door=door,
-            pulsador=pulsador,
-            mode=panel_mode or _current_mode or "",
-        )
-        if force_extendido_tablet_call:
-            _start_extendido_p2_call()
-        if force_carga_tablet_call:
-            _start_carga_p1_call(pulsador)
-        # Llamada en curso: puerta activa → abriendo (naranja/cometa);
-        # opuesta → ocupado (rojo/parpadeo). Antes se mandaba ocupado a la activa (rojo mal).
-        _apply_led_map(
-            {
-                DOOR_TO_LED_CHANNELS[door][0]: "abriendo",
-                DOOR_TO_LED_CHANNELS[door][1]: "abriendo",
-                DOOR_TO_LED_CHANNELS[OPPOSITE_DOOR[door]][0]: "ocupado",
-                DOOR_TO_LED_CHANNELS[OPPOSITE_DOOR[door]][1]: "ocupado",
-            },
-            priority_door=door,
-        )
-        _record(
-            "zaguan_tablet_call",
-            f"Llamada tablet {pulsador} → {door}",
-            {
-                "pulsador": pulsador,
-                "door": door,
-                "mode": panel_mode or _current_mode,
-                "ts": ts,
-                "extendido_call": force_extendido_tablet_call or force_extendido_p1_tablet_call,
-                "carga_cajero_call": force_carga_tablet_call,
-                "manual_call": force_manual_tablet_call,
-                **call_result,
-            },
-        )
-        return {
-            "ok": True,
-            "pulsador": pulsador,
-            "door": door,
-            "mode": panel_mode or _current_mode,
-            "tablet_call": True,
-            "extendido_call": force_extendido_tablet_call or force_extendido_p1_tablet_call,
-            "carga_cajero_call": force_carga_tablet_call,
-            "manual_call": force_manual_tablet_call,
-            "modbus_ok": False,
-            "call_id": call_result.get("call_id"),
-        }
 
-    # Extendido con zaguán: P1/P3 abren (ocupación + interlock). No usar tabletCall genérico.
-    skip_generic_tablet_call = (
-        _current_mode == "horario_extendido" and pulsador in ("p1", "p3")
+    # Default histórico + overrides de sucursal (panel → call_routing).
+    pulse_action = call_routing_store.resolve_action(
+        _current_mode,
+        pulsador,
+        extendido_p1_call_without_zaguan=_extendido_p1_call_no_zaguan,
     )
-    if (not skip_generic_tablet_call) and tablet_call_hub.should_start_tablet_call(
-        pulsador, panel_mode
-    ):
+    if pulse_action == "ignore":
+        reason = f"Pulsador {pulsador} ignorado en {_current_mode} (call_routing)"
+        log.info("Pulsación %s rechazada: %s", pulsador, reason)
+        _record(
+            "zaguan_pulsacion_rejected",
+            f"Pulsación {pulsador} rechazada",
+            {
+                "pulsador": pulsador,
+                "mode": _current_mode,
+                "reason": reason,
+                "ts": ts,
+                "action": "ignore",
+            },
+        )
+        return {"ok": False, "reason": reason}
+
+    if pulse_action == "call":
         door = PULSADOR_TO_DOOR[pulsador]
         call_result = await tablet_call_hub.start_call(
             door=door,
             pulsador=pulsador,
             mode=panel_mode or _current_mode or "",
         )
+        if _current_mode == "horario_extendido" and pulsador == "p2":
+            _start_extendido_p2_call()
+        if _current_mode == "horario_carga_cajero" and pulsador in ("p1", "p3"):
+            _start_carga_p1_call(pulsador)
         _apply_led_map(
             {
                 DOOR_TO_LED_CHANNELS[door][0]: "abriendo",
@@ -2497,6 +2444,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
                 "door": door,
                 "mode": panel_mode or _current_mode,
                 "ts": ts,
+                "action": "call",
                 **call_result,
             },
         )
