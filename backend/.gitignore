@@ -8,7 +8,7 @@ __pycache__/
 # Claves TLS (el certificado de servidor vive en data/tls/)
 *.key
 
-# Runtime local (SQLite, TLS, etc.) — las reglas de modos sí se versionan
+# Runtime local (SQLite, TLS, config de sucursal). Solo se versionan plantillas *.example.json
 data/*
-!data/panel_rules.json
+!data/*.example.json
 *.db

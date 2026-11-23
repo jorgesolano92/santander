@@ -23,6 +23,15 @@ if not exist "%VENV_PY%" (
   exit /b 1
 )
 
+REM Preservar config de sucursal (reglas, zaguán, .env, SQLite) ante git pull.
+set "DATA=%BACKEND%\data"
+set "BACKUP=%DATA%\_update_backup"
+if exist "%DATA%" (
+  if not exist "%BACKUP%" mkdir "%BACKUP%"
+  if exist "%DATA%\panel_rules.json" copy /y "%DATA%\panel_rules.json" "%BACKUP%\panel_rules.json" >nul
+  if exist "%DATA%\zaguan_device_target.json" copy /y "%DATA%\zaguan_device_target.json" "%BACKUP%\zaguan_device_target.json" >nul
+)
+
 where git >nul 2>&1
 if not errorlevel 1 (
   if exist "%REPO%\.git" (
@@ -36,6 +45,16 @@ if not errorlevel 1 (
   )
 ) else (
   echo AVISO: Git no esta en PATH — actualiza el codigo a mano y vuelve a ejecutar.
+)
+
+REM Restaurar config local si el pull trajo plantillas o pisa archivos de data/
+if exist "%BACKUP%\panel_rules.json" (
+  copy /y "%BACKUP%\panel_rules.json" "%DATA%\panel_rules.json" >nul
+  echo == Conservada panel_rules.json de esta sucursal
+)
+if exist "%BACKUP%\zaguan_device_target.json" (
+  copy /y "%BACKUP%\zaguan_device_target.json" "%DATA%\zaguan_device_target.json" >nul
+  echo == Conservada zaguan_device_target.json de esta sucursal
 )
 
 echo.

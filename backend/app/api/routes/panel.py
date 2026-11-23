@@ -630,10 +630,18 @@ active_toggle_rules: set[str] = set()
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 RULES_FILE = BACKEND_DIR / "data" / "panel_rules.json"
+RULES_EXAMPLE_FILE = BACKEND_DIR / "data" / "panel_rules.example.json"
 
 
 def _load_rules_from_disk() -> Dict[str, dict]:
+    """Carga reglas de sucursal. Si no hay fichero local, siembra desde el ejemplo (sin pisar data/)."""
     try:
+        if not RULES_FILE.exists() and RULES_EXAMPLE_FILE.exists():
+            RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            RULES_FILE.write_text(
+                RULES_EXAMPLE_FILE.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
         if RULES_FILE.exists():
             raw = json.loads(RULES_FILE.read_text(encoding="utf-8"))
             if isinstance(raw, dict):

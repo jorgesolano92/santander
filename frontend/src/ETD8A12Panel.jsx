@@ -1154,6 +1154,12 @@ function RulesFormAssistant({
       );
       return;
     }
+    if (parsed[key]) {
+      const ok = window.confirm(
+        `Ya existe el modo «${key}» en el JSON.\n¿Sobrescribirlo con el del formulario?`,
+      );
+      if (!ok) return;
+    }
     parsed[key] = rule;
     setRulesMap(parsed);
     setRulesJson(JSON.stringify(parsed, null, 2));
@@ -3671,9 +3677,33 @@ export default function ETD8A12Panel() {
     });
   };
   const saveRulesJson = async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(rulesJson || "{}");
+    } catch (e) {
+      addUI("ERR", `Error guardando reglas JSON: ${e.message}`);
+      return;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      addUI("ERR", "El JSON de reglas debe ser un objeto { modo: … }");
+      return;
+    }
+    const nextKeys = Object.keys(parsed);
+    const prevKeys = Object.keys(rulesMap || {});
+    const removed = prevKeys.filter((k) => !nextKeys.includes(k));
+    if (nextKeys.length === 0 && prevKeys.length > 0) {
+      const ok = window.confirm(
+        "El JSON está vacío: se borrarán todos los modos guardados en el servidor.\n¿Seguro que quieres continuar?",
+      );
+      if (!ok) return;
+    } else if (removed.length > 0) {
+      const ok = window.confirm(
+        `Se eliminarán ${removed.length} modo(s) al guardar:\n${removed.slice(0, 8).join(", ")}${removed.length > 8 ? "…" : ""}\n¿Continuar?`,
+      );
+      if (!ok) return;
+    }
     await withGlobalLoader(async () => {
       try {
-        const parsed = JSON.parse(rulesJson || "{}");
         await apiFetch("/rules", {
           method: "PUT",
           body: JSON.stringify({ rules: parsed }),
@@ -5525,6 +5555,23 @@ export default function ETD8A12Panel() {
                     <textarea
                       value={rulesJson}
                       onChange={(e) => setRulesJson(e.target.value)}
+                      onPaste={(e) => {
+                        const current = String(rulesJson || "").trim();
+                        let currentKeys = 0;
+                        try {
+                          const obj = JSON.parse(current || "{}");
+                          if (obj && typeof obj === "object") {
+                            currentKeys = Object.keys(obj).length;
+                          }
+                        } catch {
+                          currentKeys = current.length > 40 ? 1 : 0;
+                        }
+                        if (currentKeys === 0) return;
+                        const ok = window.confirm(
+                          "Vas a pegar JSON encima del editor actual.\nLos modos visibles pueden vaciarse hasta que guardes.\n¿Continuar?",
+                        );
+                        if (!ok) e.preventDefault();
+                      }}
                       style={{
                         width: "100%",
                         minHeight: 260,
