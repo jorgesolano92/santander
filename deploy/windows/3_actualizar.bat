@@ -23,7 +23,8 @@ if not exist "%VENV_PY%" (
   exit /b 1
 )
 
-REM Preservar config de sucursal (reglas, zaguán, .env, SQLite) ante git pull.
+REM Preservar config de sucursal (reglas / zaguán) ante git pull.
+REM Esos JSON ya no se versionan; en PCs viejos aun estan tracked y bloquean el pull.
 set "DATA=%BACKEND%\data"
 set "BACKUP=%DATA%\_update_backup"
 if exist "%DATA%" (
@@ -35,10 +36,24 @@ if exist "%DATA%" (
 where git >nul 2>&1
 if not errorlevel 1 (
   if exist "%REPO%\.git" (
+    echo == Liberando reglas locales para permitir git pull
+    git checkout -- "backend/data/panel_rules.json" 2>nul
+    git checkout -- "backend/data/zaguan_device_target.json" 2>nul
+    git restore -- "backend/data/panel_rules.json" 2>nul
+    git restore -- "backend/data/zaguan_device_target.json" 2>nul
     echo == git pull
     git pull
     if errorlevel 1 (
-      echo AVISO: git pull fallo. Continuo con el codigo actual.
+      echo.
+      echo ERROR: git pull fallo. Si sigue por panel_rules.json / zaguan_device_target.json:
+      echo   1^) Ya hay copia en backend\data\_update_backup\
+      echo   2^) Ejecuta:
+      echo      git checkout -- backend/data/panel_rules.json backend/data/zaguan_device_target.json
+      echo      git pull
+      echo   3^) Restaura desde _update_backup y vuelve a lanzar este script.
+      echo.
+      pause
+      exit /b 1
     )
   ) else (
     echo AVISO: No hay carpeta .git — actualiza el codigo a mano y vuelve a ejecutar.
@@ -47,7 +62,7 @@ if not errorlevel 1 (
   echo AVISO: Git no esta en PATH — actualiza el codigo a mano y vuelve a ejecutar.
 )
 
-REM Restaurar config local si el pull trajo plantillas o pisa archivos de data/
+REM Restaurar SIEMPRE la config de esta sucursal (no la plantilla del repo)
 if exist "%BACKUP%\panel_rules.json" (
   copy /y "%BACKUP%\panel_rules.json" "%DATA%\panel_rules.json" >nul
   echo == Conservada panel_rules.json de esta sucursal
